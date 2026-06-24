@@ -1,0 +1,444 @@
+Let me do a more thorough analysis — re-reading the algorithm spec and checking every component for architectural gaps.
+
+Now let me read the experiment plan and hook files for completeness.
+
+Now I have a complete picture. Here is the thorough analysis.
+
+---
+
+# Well_Control_System 前端缺陷剖析与优化方案
+
+## 第一部分：缺陷诊断
+
+### 一、数据模型层面——根本性的结构错误
+
+**缺陷 1：`MonitoringData` 数据结构与算法完全不匹配**
+
+当前只有 7 个字段：
+
+```typescript
+// 当前 Context —— 只有7个参数
+interface MonitoringData {
+  pitGain: number; flowIn: number; flowOut: number;
+  casingPressure: number; drillPipePressure: number;
+  mudWeight: number; rop: number;
+}
+```
+
+算法需要但前端完全缺失的关键参数：
+
+| 缺失参数 | 算法中的角色 | 所属层级 |
+|---|---|---|
+| `SPP`（立压）| 第1层水力模型残差的核心输入，第2层 CUSUM 权重 40% | L1/L2 |
+| `SPM`（泵冲）| SPP 预测模型的关键协变量，停泵锚点投票 | L1 |
+| `hookLoad`（钩载）| 恢复钻进确认锚点 | 周期检测 |
+| `totalGas`（全烃）| 第0层迟到窗口气侵检测 | L0 |
+| `torque`（扭矩）| 第2层 CUSUM 辅助参数 | L2 |
+| `bitDepth`（井深）| 周期检测锚点 | 周期检测 |
+| `connectionState` | 当前处于 State 0/1/2/3/4/5 | 全架构 |
+
+同时，当前数据中的 `drillPipePressure` 和算法中的 `SPP` 是同一概念但命名不专业——应该叫立管压力（Standpipe Pressure），`mudWeight` 和 `rop` 在算法中属于辅助参数，不应和核心参数同级展示。
+
+**缺陷 2：没有周期状态机**
+
+算法的最小分析单元是接单根周期，包含 6 个状态（State 0 提钻 → State 5 恢复钻进）。当前前端对"此刻处于什么操作阶段"完全没有概念。这意味着所有的报警判定都脱离了工况上下文——比如停泵期间流量差自然归零，此时不应该触发流量差报警，但当前系统一无所知。
+
+**缺陷 3：报警模型是扁平的，没有层级结构**
+
+```typescript
+// 当前 —— 扁平的三级，没有层级来源
+interface Alert {
+  level: 'info' | 'warning' | 'critical';  // 谁产生的？哪一层？
+}
+```
+
+算法明确要求：
+- 报警必须携带层级来源（L0/L1/L2/L3）
+- L0 不可被任何其他层旁路或取消
+- L3 最高黄色，永远不能升红色
+- L2 橙色需要 L0 或 L1 物理确认才能升红
+
+当前 Alert 完全不携带这些信息，层级间的权限规则无法在前端展示和约束。
+
+**缺陷 4：`ThresholdSettings` 只是静态阈值，没有算法需要的模型参数**
+
+```typescript
+// 当前 —— 6个静态阈值
+interface ThresholdSettings {
+  flowDiffWarning: number; flowDiffCritical: number;
+  pitGainWarning: number; pitGainCritical: number;
+  casingPressureWarning: number; mudWeightWarning: number;
+}
+```
+
+算法还需要但未建模的参数：CUSUM 决策区间 h、SPP 水力模型系数、RLS 遗忘因子、MAD 容忍倍数、迟到时间窗口、基线污染标记、冷启动标志等等。
+
+**缺陷 5：完全没有"井"的概念**
+
+算法在整个实验计划中始终围绕具体井号工作（`rt_000075`、`rt_000053` 等），每口井有独立的历史基线和模板。前端没有任何井选择器、井信息展示或基线管理界面。
+
+---
+
+### 二、逻辑层面——模拟数据与真实系统脱节
+
+**缺陷 6：Context 中的模拟逻辑应该被剥离**
+
+`WellControlContext.tsx` 中硬编码了约 120 行模拟数据生成逻辑（第 95-236 行）。这在原型阶段可以接受，但作为面向真实数据的产品，`useEffect` 模拟循环应该被替换为一个可插拔的数据源抽象层（支持 MySQL 直连、WebSocket 推送、文件回放三种模式）。
+
+**缺陷 7：报警冷却机制过于简陋**
+
+```typescript
+const cooldownMs = level === 'critical' ? 12000 : 18000; // 硬编码12s/18s
+```
+
+冷却时间应该是可配置的，且应该区分层级——L0 硬锁报警不应有冷却（触发即报），L3 统计偏离可以有更长冷却。
+
+**缺陷 8：没有基线管理逻辑**
+
+算法要求：合格周期增量更新基线，报警周期冻结不进入基线，冷启动期前 20 个周期并行运行物理规则兜底，换钻头/泥浆变更/堵漏等强制重置基线。前端对这些全部没有体现。
+
+---
+
+### 三、UI 布局层面——信息架构的偏差
+
+**缺陷 9：仪表盘（Dashboard）的三个 CoreOverviewCard 是错误的抽象层次**
+
+当前仪表盘展示 Flow Diff / Pit Gain / Casing Pressure 三个参数。这是"参数视角"而非"检测视角"。正确的仪表盘应该是**四层递进检测架构的总览**——每层一个状态块，逐级展示是否触发、触发原因、当前权限。
+
+**缺陷 10：实时监测页（Monitoring）缺少层级时间线**
+
+当前 Monitoring 页由一个竖曲线泳道 + 井筒图 + 报警队列组成。完全看不出四层检测的递进关系。正确的布局应该有一条**显式的层级管线**：L0 永远在最上方（类似生命线），L1/L2/L3 依次排列，每层展示：
+- 是否激活
+- 当前输出（残差/CUSUM值/模板偏离度）
+- 距报警阈值还有多远
+- 权限状态
+
+**缺陷 11：竖曲线泳道（VerticalCurveDeck）参数不全**
+
+当前只有 5 条泳道：入口/出口、流量差、池液面、套压、钻压。缺少关键的：SPP 立压、SPM 泵冲、全烃、钩载。而其中的"钻压"泳道在算法中是次要的，却占据了同等空间。
+
+**缺陷 12：侧边栏状态指示是一维的**
+
+```
+当前：● normal / ● warning / ● critical  ← 一个灯代表全部
+正确：L0 ●| L1 ●| L2 ●| L3 ●  ← 四个灯，每层独立
+```
+
+**缺陷 13：报警管理页缺少层级筛选项**
+
+当前筛选只有"全部/严重/预警/信息"和"全部/未确认/已确认"。缺少按层级筛选（L0/L1/L2/L3）。
+
+**缺陷 14：井筒示意图（WellSchematic）美观但不准确**
+
+当前的 SVG 井筒图更接近一个艺术化的概念图，而非工程技术级别的井身结构展示。缺少环空、钻柱内、返出流道等真实的流动路径标注。KICK 标识位置与真实气侵物理过程也不符。
+
+**缺陷 15：导航结构缺少关键入口**
+
+5 个导航项无法覆盖算法系统的完整操作面。缺少：
+- **基线管理**（历史模板、合格周期列表、基线重置、污染标记）
+- **回放控制**（时间选择器、回放速度、跳转到事件）
+
+**缺陷 16：全局缺少应急关井的硬按钮**
+
+关井按钮只在 critical 状态下出现在 banner 中，这是对的。但现场操作需要**始终可见的物理级关井按钮**——类似核电站的 SCRAM 按钮，不管软件处于什么状态都能一键触发，不会被任何弹窗遮盖。
+
+---
+
+### 四、代码质量层面
+
+**缺陷 17：大量冗余组件未被使用**
+
+`AlertPanel.tsx`、`ControlPanel.tsx`、`MonitoringPanel.tsx`、`FlowChart.tsx`、`PressureChart.tsx` 这些组件定义了但似乎没有被任何页面引用（页面直接内联了相同的逻辑）。这是典型的死代码，会导致维护混乱。
+
+**缺陷 18：inline style 与 CSS 类混用**
+
+`VerticalCurveDeck` 使用 Canvas 绑制（这是正确的，性能考虑），但 `WellSchematic` 使用了内联 SVG + Tailwind 混用，且 SVG 内 text 的 fill 颜色通过 JS 变量控制，导致深浅主题切换逻辑分散在多处。
+
+---
+
+## 第二部分：完整优化方案
+
+### 方案总览
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  重构范围                                                │
+│                                                         │
+│  数据层 ──→ WellControlContext 完全重写                   │
+│  模型层 ──→ 新增 LayerState / CycleState / WellInfo       │
+│  页面层 ──→ Dashboard/Monitoring 重构，新增 Baseline      │
+│  组件层 ──→ 新增 FourLayerPipeline, CycleStateMachine     │
+│  样式层 ──→ 增量补充层级颜色体系                           │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 一、数据模型重构（Context 完全重写）
+
+```typescript
+// ============ 井与数据源 ============
+interface WellInfo {
+  wellId: string;           // "rt_000075"
+  wellName: string;         // "足201H6-1"
+  dataSource: 'realtime' | 'replay' | 'simulation';
+}
+
+// ============ 18个录井参数（对齐算法和数据库） ============
+interface RealTimeRecord {
+  timestamp: string;
+  // 核心 （L0/L1/L2 直接使用）
+  spp: number;              // 立管压力 psi
+  spm: number;              // 泵冲 次/min
+  flowIn: number;           // 入口流量 bbl/min → 算法用"入口流量"
+  flowOut: number;          // 出口流量 bbl/min
+  pitVolume: number;        // 池体积 bbl
+  totalGas: number;         // 全烃 %
+  // 辅助 （L2 CUSUM 使用）
+  rop: number;              // 钻时/机械钻速 min/m 或 m/h
+  hookLoad: number;         // 钩载 klb
+  torque: number;           // 扭矩
+  casingPressure: number;   // 套压 psi
+  mudWeight: number;        // 钻井液密度 g/cm³
+  mudTemp: number;          // 泥浆温度 °C
+  // 状态锚点
+  bitDepth: number;         // 井深 m
+  rpm: number;              // 转盘转速
+}
+
+// ============ 六状态周期机 ============
+type CycleState = 0 | 1 | 2 | 3 | 4 | 5;
+// 0-提钻/抽汲 1-钻进尾段(稳态基线) 2-停钻循环
+// 3-停泵接单根 4-开泵恢复 5-恢复钻进(阶段2检测主战场)
+
+interface CycleInfo {
+  state: CycleState;
+  stateLabel: string;          // "恢复钻进 · 开泵后 6.2 min"
+  cycleIndex: number;          // 当前第几个接单根周期
+  tStopPump: string | null;
+  tStartPump: string | null;
+  tStable: string | null;
+  elapsedInState: number;      // 在当前状态已持续时间（秒）
+}
+
+// ============ 四层检测结果（核心数据结构） ============
+type LayerId = 0 | 1 | 2 | 3;
+
+interface LayerResult {
+  layerId: LayerId;
+  layerName: string;           // "物理硬锁" | "水力残差" | "CUSUM" | "模板偏离"
+  maxAlarmLevel: 'red' | 'orange' | 'yellow';  // 该层允许的最高报警等级
+  isActive: boolean;           // 当前周期/状态是否启用该层
+  isTriggered: boolean;        // 是否已触发
+  triggeredAt: string | null;
+  alarmLevel: 'normal' | 'yellow' | 'orange' | 'red' | null;
+  detail: LayerDetail;
+}
+
+// 各层专有详情
+type LayerDetail =
+  | L0Detail | L1Detail | L2Detail | L3Detail;
+
+interface L0Detail {
+  pumpStopFlowOk: boolean;     // 停泵流量正常衰减
+  pitVolumeOk: boolean;        // 池体积在物理允许范围
+  gasLagWindowOk: boolean;     // 全烃迟到窗口未超限
+  hardLockReasons: string[];   // 触发原因列表
+}
+
+interface L1Detail {
+  sppMeasured: number;         // 当前SPP实测值
+  sppPredicted: number;        // 水力模型预测值
+  sppResidual: number;         // SPP残差
+  theilSenSlope: number;       // Theil-Sen 斜率
+  rlsConverged: boolean;       // RLS是否已收敛
+  physicalCheckPassed: boolean;// 物理合理性检查
+}
+
+interface L2Detail {
+  cusumScore: number;          // 累积和得分
+  cusumThreshold: number;      // 决策区间 h
+  contributions: {             // 各参数贡献
+    sppResidual: number;       // 权重 0.40
+    flowDiff: number;          // 权重 0.25
+    ropAnomaly: number;        // 权重 0.20
+    tempAux: number;           // 权重 0.15
+  };
+  covariancePenalty: number;   // 协方差惩罚
+}
+
+interface L3Detail {
+  madDeviation: number;        // MAD 偏离倍数
+  envelopeCoverage: number;    // 包络覆盖率
+  quantileBand: [number, number]; // 当前分位数带
+  similarCycles: number;       // 相似历史周期数
+}
+
+// ============ 报警（携带层级信息） ============
+interface Alarm {
+  id: number;
+  timestamp: string;
+  layerId: LayerId;            // 来源层级
+  level: 'yellow' | 'orange' | 'red';
+  message: string;
+  acknowledged: boolean;
+  canUpgrade: boolean;         // 是否可以被更高层升级
+  canOverride: boolean;        // 是否可以被其他层取消
+}
+
+// ============ 基线管理 ============
+interface BaselineInfo {
+  totalCycles: number;         // 基线周期总数
+  qualifiedCycles: number;     // 合格周期数
+  frozenCycles: number;        // 冻结周期数（触发报警的）
+  isColdStart: boolean;        // 是否处于冷启动期
+  coldStartRemaining: number;  // 剩余冷启动周期数
+  lastResetReason: string | null;
+  lastResetTime: string | null;
+}
+```
+
+---
+
+### 二、功能改动清单
+
+#### P0 —— 必须立即改动
+
+**1. `WellControlContext` 完全重写**
+
+   - 用上面的新模型替换现有模型
+   - 数据源抽象为 `DataSource` 接口（支持 simulation / mysql / websocket 三种实现）
+   - 新增周期状态机逻辑：根据 SPM/flowIn/bitDepth/hookLoad 推断当前 State
+   - 四层检测结果管理（每层独立的状态、触发条件、冷却策略）
+   - 报警管理：每个报警必须携带 `layerId`，层级间权限规则硬编码
+   - 基线管理：合格周期入基线，报警周期冻结
+
+**2. 井选择器组件**
+
+   - 位置：Layout header 或 sidebar 顶部
+   - 下拉选择井号（从数据库读取 well_master）
+   - 切换时重置所有状态并加载该井历史基线
+
+**3. 四层检测管线组件 `FourLayerPipeline`**
+
+   - 核心可视化组件，用于 Dashboard 和 Monitoring 页
+   - 四层水平排列，每层显示状态灯 + 当前值 + 阈值 + 触发状态
+   - L0 始终在最上方，红色边框强调"不可旁路"
+
+#### P1 —— 核心页面重构
+
+**4. Dashboard 重构**
+
+   - 移除 3 个 CoreOverviewCard
+   - 顶部放置 `FourLayerPipeline`（四层总览，水平排列）
+   - 左侧：当前周期状态机可视化
+   - 右侧：井筒示意图 + 关键参数实时数字
+   - 底部：最近报警列表（携带层级标签）
+
+**5. Monitoring 重构**
+
+   - 顶部：周期状态条（State 0→5 水平流向图，当前状态高亮）
+   - 四层管线（垂直排列，每层可展开/折叠）
+     - L0 物理硬锁行：三盏灯（停泵流量/池体积/全烃窗口），永远展开
+     - L1 水力残差行：SPP实测 vs 预测 迷你曲线 + 残差趋势
+     - L2 CUSUM 行：累积和进度条 + 各参数贡献分解
+     - L3 模板偏离行：包络覆盖图 + MAD 偏离棒
+   - 保留竖曲线泳道（增加 SPP、全烃泳道，移除钻压泳道到辅助面板）
+   - 侧边：井筒图 + 报警队列
+
+**6. 报警管理增强**
+
+   - 筛选栏增加层级维度（L0/L1/L2/L3）
+   - 每条报警显示层级标签 + 最大升级色
+   - L3 报警标注"不可升级为红色"
+   - 报警确认区分层级（L0 需要强制确认流程）
+
+#### P2 —— 新增页面
+
+**7. 基线管理页（新）**
+
+   - 历史周期列表（标记合格/冻结/报警）
+   - 模板可视化（中位数曲线 + 分位数包络 + MAD 带）
+   - 基线重置按钮（带确认 + 原因选择）
+   - 冷启动进度条
+   - SPP 相关性热力图
+
+**8. 增强竖曲线泳道**
+
+   - 新增泳道：SPP 立压、SPM 泵冲、全烃、钩载
+   - 移除或降级：钻压（非核心参数）
+   - 泳道数量可配置（用户可隐藏/显示）
+   - 阈值线关联到具体层级
+
+#### P3 —— 全局优化
+
+**9. 全局应急关井按钮**
+
+   - 固定在右下角（或 header 固定位置）
+   - 永远可见，不可被弹窗或模态遮盖
+   - 点击后需要二次确认
+
+**10. 导航结构调整**
+
+```
+Control Tower
+├── 态势总览 (L0-L3 四层总览)
+├── 实时监测 (周期泳道 + 层管线)
+├── 基线管理 (历史模板管理)
+├── 报警管理 (层级筛选 + 闭环)
+├── 历史复盘 (按周期回放)
+└── 系统配置 (阈值 + 层参数)
+```
+
+**11. 侧边栏四层状态灯**
+
+   - 侧边栏顶部状态区改为四个独立指示灯
+   - 分别显示 L0/L1/L2/L3 当前状态（绿/黄/橙/红）
+   - 折叠状态下仅显示四个圆点
+
+---
+
+### 三、文件改动范围
+
+| 文件 | 动作 | 说明 |
+|---|---|---|
+| `context/WellControlContext.tsx` | **重写** | 新数据模型，四层架构，周期状态机 |
+| `pages/Dashboard.tsx` | **重写** | 改为四层总览 |
+| `pages/Monitoring.tsx` | **重写** | 增加层管线，扩展泳道 |
+| `pages/Alerts.tsx` | **修改** | 增加层级筛选和标签 |
+| `pages/Settings.tsx` | **修改** | 增加层参数配置 |
+| `pages/History.tsx` | **修改** | 增加按周期回放 |
+| `pages/Baseline.tsx` | **新建** | 基线管理页 |
+| `components/Layout.tsx` | **修改** | 井选择器，四层状态灯，导航调整 |
+| `components/FourLayerPipeline.tsx` | **新建** | 四层总览组件 |
+| `components/CycleStateMachine.tsx` | **新建** | 周期状态机可视化 |
+| `components/LayerStatusBar.tsx` | **新建** | 单层检测状态条 |
+| `components/VerticalCurveDeck.tsx` | **修改** | 增加泳道，泳道可配置 |
+| `components/WellSchematic.tsx` | **修改** | 优化为工程级精度 |
+| `components/EmergencyButton.tsx` | **新建** | 全局应急关井按钮 |
+| `routes.ts` | **修改** | 新增 baseline 路由 |
+| `components/AlertPanel.tsx` | **删除** | 死代码 |
+| `components/ControlPanel.tsx` | **删除** | 死代码 |
+| `components/MonitoringPanel.tsx` | **删除** | 死代码 |
+| `components/FlowChart.tsx` | **删除** | 死代码（由 VerticalCurveDeck 覆盖） |
+| `components/PressureChart.tsx` | **删除** | 死代码（由 VerticalCurveDeck 覆盖） |
+
+---
+
+### 四、推荐的实施顺序
+
+```
+第1步：Context 重写           ← 所有页面依赖，必须先做
+第2步：FourLayerPipeline 组件  ← Dashboard 和 Monitoring 共用
+第3步：井选择器 + 真实数据接入  ← 验证链路的基础
+第4步：Sidebar 四层状态灯      ← 配合 Context 改动
+第5步：Dashboard 重构          ← 面向用户的核心页
+第6步：Monitoring 重构         ← 最复杂的页面
+第7步：Alerts 增强             ← 依赖新 Alarm 模型
+第8步：Baseline 新建           ← 新功能
+第9步：Settings 扩展           ← 层参数配置
+第10步：History 改进           ← 按周期回放
+第11步：全局关井按钮           ← 独立组件，风险低
+```
+
+---

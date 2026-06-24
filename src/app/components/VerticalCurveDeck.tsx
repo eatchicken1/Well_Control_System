@@ -1,0 +1,646 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { BackendLevel, FlowDataPoint, PressureDataPoint, ThresholdSettings } from '../context/WellControlContext';
+import { useIsDarkMode } from '../hooks/useChartTheme';
+
+interface VerticalCurveDeckProps {
+  flowData: FlowDataPoint[];
+  pressureData: PressureDataPoint[];
+  thresholds: ThresholdSettings;
+  wellDepth?: number;
+  currentDepth?: number;
+  pitGain?: number;
+  compact?: boolean;
+  fillViewport?: boolean;
+}
+
+interface CurvePoint {
+  time: string;
+  depth: number;
+  bitDepth: number;
+  level: BackendLevel;
+  values: Record<string, number>;
+}
+
+interface TrackCurve {
+  key: string;
+  label: string;
+  unit: string;
+  color: string;
+  range: [number, number];
+  baseline?: number;
+  warning?: number;
+  critical?: number;
+}
+
+interface TrackConfig {
+  title: string;
+  subtitle?: string;
+  width?: string;
+  curves: TrackCurve[];
+}
+
+const AXIS_WIDTH = 108;
+const MOBILE_AXIS_WIDTH = 94;
+const PAD = { top: 10, right: 10, bottom: 12, left: 10 };
+const COMPACT_PAD = { top: 8, right: 8, bottom: 8, left: 8 };
+const MOBILE_PAD = { top: 7, right: 6, bottom: 7, left: 6 };
+
+const CANVAS_PALETTE = {
+  light: {
+    bg: '#f6fafc',
+    plot: '#fbfdff',
+    header: '#eef4f7',
+    divider: '#b9c8d4',
+    title: '#1f2f46',
+    empty: '#64748b',
+    grid: 'rgba(148, 163, 184, 0.22)',
+    gridMajor: 'rgba(100, 116, 139, 0.24)',
+    ruler: '#cbd7e1',
+    rulerMajor: '#64748b',
+    rulerMinor: '#cbd7e1',
+    axisText: '#475569',
+    depth: '#0f766e',
+    cursor: 'rgba(15, 23, 42, 0.36)',
+    pointStroke: '#ffffff',
+    underlay: 'transparent',
+  },
+  dark: {
+    bg: '#081120',
+    plot: '#081120',
+    header: '#111827',
+    divider: '#334155',
+    title: '#e2e8f0',
+    empty: '#64748b',
+    grid: 'rgba(148, 163, 184, 0.12)',
+    gridMajor: 'rgba(148, 163, 184, 0.18)',
+    ruler: '#475569',
+    rulerMajor: '#64748b',
+    rulerMinor: '#334155',
+    axisText: '#94a3b8',
+    depth: '#5eead4',
+    cursor: 'rgba(226, 232, 240, 0.24)',
+    pointStroke: '#020617',
+    underlay: 'transparent',
+  },
+};
+
+function finite(value: unknown, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function fmt(value: number, digits = 1) {
+  if (!Number.isFinite(value)) return '-';
+  if (Math.abs(value) >= 100) return value.toFixed(0);
+  return value.toFixed(digits).replace(/\.?0+$/, '');
+}
+
+function timeLabel(value: string) {
+  const parts = value.split(':');
+  return parts.length >= 3 ? `${parts[0]}:${parts[1]}:${parts[2]}` : value;
+}
+
+function rangeTicks(range?: [number, number]) {
+  if (!range) return [];
+  const [min, max] = range;
+  return [min, (min + max) / 2, max];
+}
+
+function TrackHeader({ config, isAxis }: { config: TrackConfig; isAxis?: boolean }) {
+  const primaryCurve = config.curves[0];
+  const accentColor = isAxis ? '#0f766e' : primaryCurve?.color || '#64748b';
+  const ticks = rangeTicks(primaryCurve?.range);
+
+  return (
+    <div className={`vertical-lane-header ${isAxis ? 'vertical-lane-header-axis' : ''}`} style={{ borderTopColor: accentColor }}>
+      <div className="flex min-w-0 items-start justify-between gap-1.5">
+        <div className="min-w-0">
+          <div className="vertical-lane-title" title={config.title}>{config.title}</div>
+          {config.subtitle ? <div className="vertical-lane-subtitle">{config.subtitle}</div> : null}
+        </div>
+        {!isAxis ? <div className="vertical-lane-unit">{primaryCurve?.unit || ' '}</div> : null}
+      </div>
+      {!isAxis && ticks.length > 0 ? (
+        <div className="vertical-lane-scale" aria-hidden="true">
+          {ticks.map((tick, index) => <span key={index}>{fmt(tick)}</span>)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function niceRange(values: number[], fallback: [number, number], paddingRatio = 0.18): [number, number] {
+  const finiteValues = values.filter(Number.isFinite);
+  if (finiteValues.length === 0) return fallback;
+  let min = Math.min(...finiteValues, fallback[0]);
+  let max = Math.max(...finiteValues, fallback[1]);
+  if (Math.abs(max - min) < 0.001) {
+    min -= 1;
+    max += 1;
+  }
+  const pad = (max - min) * paddingRatio;
+  return [min - pad, max + pad];
+}
+
+function useNarrowViewport() {
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  useEffect(() => {
+    const update = () => setIsNarrow(window.innerWidth < 640);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  return isNarrow;
+}
+
+function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoint[], wellDepth = 3200, currentDepth = 3200, currentPitGain = 0): CurvePoint[] {
+  const maxLength = Math.max(flowData.length, pressureData.length);
+  if (maxLength === 0) return [];
+  const startDepth = Math.max(0, wellDepth - maxLength * 0.6);
+  const currentBitDepth = Number.isFinite(currentDepth) ? currentDepth : wellDepth;
+
+  return Array.from({ length: maxLength }).map((_, index) => {
+    const flow = flowData[Math.max(0, index - (maxLength - flowData.length))];
+    const pressure = pressureData[Math.max(0, index - (maxLength - pressureData.length))];
+    const flowIn = finite(flow?.flowIn, 150);
+    const flowOut = finite(flow?.flowOut, flowIn);
+    const returnResponse = finite(flow?.returnResponse, flowIn > 0 ? Math.max(0, ((flowOut - flowIn) / flowIn) * 100) : 0);
+    const pitVolume = finite(flow?.pitVolume, Number.NaN);
+    const pitGain = Number.isFinite(flow?.pitGain)
+      ? finite(flow?.pitGain, currentPitGain)
+      : Math.max(0, currentPitGain - (maxLength - index - 1) * Math.max(returnResponse, 0) * 0.01);
+    const casingPressure = finite(pressure?.casingPressure, 0);
+    const drillPipePressure = finite(pressure?.drillPipePressure, 0);
+    const spp = finite(pressure?.spp, drillPipePressure);
+    const sppPredicted = finite(pressure?.sppPredicted, spp + 0.05);
+    const spm = finite(flow?.spm, flowIn > 20 ? 88 : 0);
+    const totalGas = finite(flow?.totalGas, 0.65);
+    const hookLoad = finite(flow?.hookLoad, 314);
+    const bitDepth = finite(flow?.bitDepth, Math.max(0, currentBitDepth - (maxLength - index - 1) * 0.6));
+    const level = (flow?.backendLevel ?? pressure?.backendLevel ?? 0) as BackendLevel;
+
+    return {
+      time: flow?.time || pressure?.time || '',
+      depth: startDepth + index * 0.6,
+      bitDepth,
+      level,
+      values: {
+        flowIn,
+        flowOut,
+        returnResponse,
+        pitGain,
+        pitVolume: Number.isFinite(pitVolume) ? pitVolume : 121 + pitGain,
+        casingPressure,
+        drillPipePressure,
+        spp,
+        sppPredicted,
+        spm,
+        totalGas,
+        hookLoad,
+      },
+    };
+  });
+}
+
+function VerticalTrack({
+  config,
+  points,
+  showAxis,
+  isDark,
+  compact = false,
+  mobileDense = false,
+  fillViewport = false,
+}: {
+  config: TrackConfig;
+  points: CurvePoint[];
+  showAxis?: boolean;
+  isDark: boolean;
+  compact?: boolean;
+  mobileDense?: boolean;
+  fillViewport?: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [sizeTick, setSizeTick] = useState(0);
+  const [hover, setHover] = useState<{ x: number; y: number; index: number } | null>(null);
+  const isAxis = config.curves.length === 0;
+  const palette = isDark ? CANVAS_PALETTE.dark : CANVAS_PALETTE.light;
+  const pad = mobileDense ? MOBILE_PAD : compact ? COMPACT_PAD : PAD;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const parent = canvas?.parentElement;
+    if (!parent || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setSizeTick((tick) => tick + 1));
+    });
+    observer.observe(parent);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, rect.width);
+    const h = Math.max(1, rect.height);
+    const scaledW = Math.max(1, Math.round(w * dpr));
+    const scaledH = Math.max(1, Math.round(h * dpr));
+    canvas.width = scaledW;
+    canvas.height = scaledH;
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(scaledW / w, scaledH / h);
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.fillStyle = palette.plot;
+    ctx.fillRect(0, 0, w, h);
+
+    if (points.length < 2) {
+      ctx.fillStyle = palette.empty;
+      ctx.font = `${mobileDense ? '800 10px' : '800 12px'} 'Microsoft YaHei', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('等待数据', w / 2, h / 2);
+      return;
+    }
+
+    const plotX = pad.left;
+    const plotY = pad.top;
+    const plotW = w - pad.left - pad.right;
+    const plotH = h - pad.top - pad.bottom;
+    const yForIndex = (index: number) => plotY + (index / (points.length - 1)) * plotH;
+    const latest = points[points.length - 1];
+
+    for (let i = 0; i < points.length - 1; i += 1) {
+      if (points[i].level >= 2) {
+        const y1 = yForIndex(i);
+        const y2 = yForIndex(i + 1);
+        ctx.fillStyle = points[i].level >= 4 ? 'rgba(239, 68, 68, 0.08)' : 'rgba(245, 158, 11, 0.08)';
+        ctx.fillRect(plotX, y1, plotW, Math.max(1, y2 - y1));
+        ctx.fillStyle = points[i].level >= 4 ? '#ef4444' : points[i].level === 3 ? '#f97316' : '#f59e0b';
+        ctx.fillRect(plotX, y1, 2, Math.max(1, y2 - y1));
+      }
+    }
+
+    ctx.lineWidth = 0.7;
+    for (let i = 0; i <= 6; i += 1) {
+      const y = plotY + (plotH * i) / 6;
+      ctx.strokeStyle = i % 3 === 0 ? palette.gridMajor : palette.grid;
+      ctx.beginPath();
+      ctx.moveTo(plotX, y);
+      ctx.lineTo(plotX + plotW, y);
+      ctx.stroke();
+    }
+    for (let i = 0; i <= 4; i += 1) {
+      const x = plotX + (plotW * i) / 4;
+      ctx.strokeStyle = i % 2 === 0 ? palette.gridMajor : palette.grid;
+      ctx.beginPath();
+      ctx.moveTo(x, plotY);
+      ctx.lineTo(x, plotY + plotH);
+      ctx.stroke();
+    }
+
+    config.curves.forEach((curve, curveIndex) => {
+      const [min, max] = curve.range;
+      const xForValue = (value: number) => {
+        const clamped = Math.max(min, Math.min(max, value));
+        return plotX + ((clamped - min) / (max - min)) * plotW;
+      };
+
+      if (Number.isFinite(curve.baseline)) {
+        const baseX = xForValue(curve.baseline as number);
+        ctx.strokeStyle = curve.color;
+        ctx.globalAlpha = 0.3;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(baseX, plotY);
+        ctx.lineTo(baseX, plotY + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+
+      if (Number.isFinite(curve.warning)) {
+        const warnX = xForValue(curve.warning as number);
+        ctx.strokeStyle = '#f59e0b';
+        ctx.globalAlpha = 0.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(warnX, plotY);
+        ctx.lineTo(warnX, plotY + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+
+      if (Number.isFinite(curve.critical)) {
+        const critX = xForValue(curve.critical as number);
+        ctx.strokeStyle = '#dc2626';
+        ctx.globalAlpha = 0.56;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(critX, plotY);
+        ctx.lineTo(critX, plotY + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        const x = xForValue(finite(point.values[curve.key], 0));
+        const y = yForIndex(index);
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = curve.color;
+      ctx.lineWidth = curveIndex === 0 ? 2.15 : 1.8;
+      ctx.stroke();
+
+      const latestX = xForValue(finite(latest.values[curve.key], 0));
+      const latestY = yForIndex(points.length - 1);
+      ctx.fillStyle = curve.color;
+      ctx.beginPath();
+      ctx.arc(latestX, latestY, curveIndex === 0 ? 3.5 : 2.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = palette.pointStroke;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    });
+
+    const cursorY = yForIndex(points.length - 1);
+    ctx.strokeStyle = palette.cursor;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(0, cursorY);
+    ctx.lineTo(w, cursorY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (showAxis) {
+      const labelHeight = mobileDense ? 38 : 44;
+      const minGap = mobileDense ? 52 : 58;
+      const rulerX = w - 10;
+      const labelW = Math.max(72, w - 24);
+      const tickIndices = [0, 0.25, 0.5, 0.75, 1].map((ratio) =>
+        Math.min(points.length - 1, Math.round((points.length - 1) * ratio)),
+      );
+      const placed: number[] = [];
+
+      ctx.strokeStyle = palette.ruler;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(rulerX, plotY);
+      ctx.lineTo(rulerX, plotY + plotH);
+      ctx.stroke();
+
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+
+      tickIndices.forEach((index) => {
+        const point = points[index];
+        const tickY = yForIndex(index);
+        const y = Math.min(plotY + plotH - labelHeight - 4, Math.max(plotY + 4, tickY - labelHeight / 2));
+        if (placed.some((previousY) => Math.abs(previousY - y) < minGap)) return;
+        placed.push(y);
+
+        ctx.strokeStyle = palette.rulerMinor;
+        ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(rulerX - 8, tickY);
+        ctx.lineTo(rulerX, tickY);
+        ctx.stroke();
+
+        ctx.fillStyle = palette.axisText;
+        ctx.font = `${mobileDense ? '8.5px' : '9.5px'} 'JetBrains Mono', monospace`;
+        ctx.fillText(timeLabel(point.time), 14, y + 5);
+        ctx.fillStyle = palette.depth;
+        ctx.font = `700 ${mobileDense ? '8.5px' : '9.5px'} 'JetBrains Mono', monospace`;
+        ctx.fillText(`井深 ${point.depth.toFixed(0)}m`, 14, y + (mobileDense ? 17 : 19));
+        ctx.fillStyle = palette.axisText;
+        ctx.font = `700 ${mobileDense ? '8px' : '9px'} 'JetBrains Mono', monospace`;
+        ctx.fillText(`钻头 ${point.bitDepth.toFixed(0)}m`, 14, y + (mobileDense ? 27 : 31));
+      });
+    }
+  }, [config, points, showAxis, palette, compact, mobileDense, pad, sizeTick]);
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || points.length < 1) return;
+    const rect = canvas.getBoundingClientRect();
+    const y = event.clientY - rect.top;
+    const plotH = Math.max(1, rect.height - pad.top - pad.bottom);
+    const ratio = Math.max(0, Math.min(1, (y - pad.top) / plotH));
+    const index = Math.round(ratio * Math.max(0, points.length - 1));
+    setHover({ x: event.clientX - rect.left, y: event.clientY - rect.top, index });
+  };
+
+  const hoverPoint = hover ? points[hover.index] : null;
+  const tooltipX = hover ? Math.min(Math.max(8, hover.x + 10), 140) : 0;
+  const tooltipY = hover ? Math.min(Math.max(8, hover.y + 10), 220) : 0;
+
+  const latest = points.at(-1);
+  const flexValue = fillViewport
+    ? isAxis
+      ? `0 0 ${mobileDense ? 76 : 92}px`
+      : '1 1 0px'
+    : config.width || '1 1 122px';
+  const basisMatch = /(\d+(?:\.\d+)?)px$/.exec(flexValue);
+  const basisWidth = basisMatch ? Number(basisMatch[1]) : 122;
+  const laneMinWidth = fillViewport
+    ? isAxis
+      ? mobileDense ? 76 : 92
+      : mobileDense ? 60 : 88
+    : isAxis
+      ? mobileDense ? MOBILE_AXIS_WIDTH : AXIS_WIDTH
+      : mobileDense ? Math.max(104, basisWidth) : Math.max(118, basisWidth);
+
+  return (
+    <div
+      className="vertical-lane h-full overflow-hidden"
+      data-axis={isAxis ? 'true' : undefined}
+      style={{ flex: flexValue, minWidth: `${laneMinWidth}px` }}
+    >
+      <TrackHeader config={config} isAxis={isAxis} />
+      <div className="vertical-lane-canvas relative">
+        <canvas
+          ref={canvasRef}
+          className="block h-full w-full"
+          onPointerMove={handlePointerMove}
+          onPointerLeave={() => setHover(null)}
+        />
+        {hoverPoint ? (
+          <div className="vertical-lane-tooltip" style={{ left: tooltipX, top: tooltipY }}>
+            <div className="font-semibold">{timeLabel(hoverPoint.time)}</div>
+            {isAxis ? (
+              <>
+                <div>井深 {hoverPoint.depth.toFixed(0)} m</div>
+                <div>钻头 {hoverPoint.bitDepth.toFixed(0)} m</div>
+              </>
+            ) : config.curves.map((curve) => (
+              <div key={curve.key} className="flex items-center justify-between gap-3">
+                <span>{curve.label}</span>
+                <span className="tabular-nums">{fmt(hoverPoint.values[curve.key])} {curve.unit}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AxisLane({ points, compact, mobileDense }: { points: CurvePoint[]; compact?: boolean; mobileDense?: boolean }) {
+  const isDark = useIsDarkMode();
+  return (
+    <VerticalTrack
+      config={{
+        title: '时间/井深',
+        subtitle: '钻头位置 · 秒',
+        width: mobileDense ? `0 0 ${MOBILE_AXIS_WIDTH}px` : `0 0 ${AXIS_WIDTH}px`,
+        curves: [],
+      }}
+      points={points}
+      isDark={isDark}
+      showAxis
+      compact={compact}
+      mobileDense={mobileDense}
+      fillViewport
+    />
+  );
+}
+
+export function VerticalCurveDeck({
+  flowData,
+  pressureData,
+  thresholds,
+  wellDepth,
+  currentDepth,
+  pitGain = 0,
+  compact = false,
+  fillViewport = false,
+}: VerticalCurveDeckProps) {
+  const isDark = useIsDarkMode();
+  const mobileDense = useNarrowViewport() && compact;
+  const fillTracks = fillViewport && !mobileDense;
+  const points = useMemo(() => buildTrackData(flowData, pressureData, wellDepth ?? currentDepth ?? 3200, currentDepth, pitGain), [flowData, pressureData, wellDepth, currentDepth, pitGain]);
+  const warningCount = points.filter((point) => point.level === 2 || point.level === 3).length;
+  const criticalCount = points.filter((point) => point.level >= 4).length;
+  const pitGainValues = points.map((point) => point.values.pitGain);
+  const pitVolumeValues = points.map((point) => point.values.pitVolume);
+  const flowValues = points.flatMap((point) => [point.values.flowIn, point.values.flowOut]);
+  const returnValues = points.map((point) => point.values.returnResponse || 0);
+  const casingValues = points.map((point) => point.values.casingPressure);
+  const sppValues = points.flatMap((point) => [point.values.spp, point.values.sppPredicted]);
+  const spmValues = points.map((point) => point.values.spm);
+  const gasValues = points.map((point) => point.values.totalGas);
+  const hookValues = points.map((point) => point.values.hookLoad);
+
+  const tracks: TrackConfig[] = [
+    {
+      title: '出口/入口流量',
+      subtitle: '出口流量响应辅助判别',
+      width: '1.15 1 150px',
+      curves: [
+        { key: 'flowOut', label: '出口', unit: 'L/s', color: '#2563eb', range: niceRange(flowValues, [0, 100]) },
+        { key: 'flowIn', label: '入口', unit: 'L/s', color: '#64748b', range: niceRange(flowValues, [0, 100]) },
+        { key: 'returnResponse', label: '出口流量响应', unit: '%', color: '#ef4444', range: niceRange(returnValues, [0, thresholds.returnResponseCritical + 10]), warning: thresholds.returnResponseWarning, critical: thresholds.returnResponseCritical },
+      ],
+    },
+    {
+      title: '总池体积',
+      width: '1 1 136px',
+      curves: [
+        { key: 'pitVolume', label: '总池体积', unit: 'm3', color: '#0891b2', range: niceRange(pitVolumeValues, [118, 124], 0.08) },
+        { key: 'pitGain', label: '总池体积变化', unit: 'm3', color: '#f59e0b', range: niceRange(pitGainValues, [-1, thresholds.pitGainCritical + 1], 0.12), baseline: 0, warning: thresholds.pitGainWarning, critical: thresholds.pitGainCritical },
+      ],
+    },
+    {
+      title: '立压',
+      width: '1 1 134px',
+      curves: [
+        { key: 'spp', label: '立压', unit: 'MPa', color: '#0f766e', range: niceRange(sppValues, [19, 23]) },
+        { key: 'sppPredicted', label: '模型', unit: 'MPa', color: '#94a3b8', range: niceRange(sppValues, [19, 23]) },
+      ],
+    },
+    {
+      title: '套压',
+      width: '0.86 1 112px',
+      curves: [
+        { key: 'casingPressure', label: '套压', unit: 'MPa', color: '#ea580c', range: niceRange(casingValues, [0, thresholds.casingPressureWarning + 0.8]), warning: thresholds.casingPressureWarning },
+      ],
+    },
+    {
+      title: '泵冲 / 钩载',
+      width: '1 1 132px',
+      curves: [
+        { key: 'spm', label: '泵冲', unit: 'spm', color: '#7c3aed', range: niceRange(spmValues, [0, 96]) },
+        { key: 'hookLoad', label: '钩载', unit: 'kN', color: '#475569', range: niceRange(hookValues, [180, 340]) },
+      ],
+    },
+    {
+      title: '全烃',
+      width: '0.84 1 108px',
+      curves: [
+        { key: 'totalGas', label: '全烃', unit: '%', color: '#16a34a', range: niceRange(gasValues, [0, 3.6]), warning: 1.5, critical: 2.8 },
+      ],
+    },
+  ];
+
+  const displayTracks = mobileDense
+    ? tracks
+      .filter((track) => ['出口/入口流量', '总池体积', '立压', '套压', '泵冲 / 钩载', '全烃'].includes(track.title))
+      .map((track) => ({ ...track, width: '0 0 128px' }))
+    : tracks.map((track) => (fillViewport ? { ...track, width: '1 1 0px' } : track));
+
+  return (
+    <div
+      className="vertical-curve-deck relative flex h-full min-h-[360px] flex-col overflow-hidden rounded-md border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950"
+      data-fill-viewport={fillTracks ? 'true' : undefined}
+    >
+      <div className="border-b border-slate-200 px-3 py-1.5 dark:border-slate-700">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+            <span>样本 {points.length}</span>
+            <span>后端预警点 {warningCount}</span>
+            <span>后端确认点 {criticalCount}</span>
+          </div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">时间向下 · 自动铺满</div>
+        </div>
+      </div>
+      <div className={`vertical-curve-body flex min-h-0 flex-1 overflow-y-hidden ${fillTracks ? 'overflow-x-hidden' : 'overflow-x-auto'}`}>
+        <AxisLane points={points} compact={compact} mobileDense={mobileDense} />
+        {displayTracks.map((track) => (
+          <VerticalTrack
+            key={track.title}
+            config={track}
+            points={points}
+            isDark={isDark}
+            compact={compact}
+            mobileDense={mobileDense}
+            fillViewport={fillTracks}
+          />
+        ))}
+      </div>
+      {points.length < 2 && (
+        <div className="pointer-events-none absolute inset-x-4 bottom-4 rounded-md border border-slate-300 bg-white/96 p-3 text-slate-700 shadow-lg shadow-slate-900/10 backdrop-blur dark:border-slate-700 dark:bg-slate-950/90 dark:text-slate-200">
+          <div className="text-sm">等待采样</div>
+        </div>
+      )}
+    </div>
+  );
+}
