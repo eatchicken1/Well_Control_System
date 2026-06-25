@@ -72,7 +72,7 @@ function FlowPath({
           attributeName="stroke-dashoffset"
           from={reverse ? '0' : '26'}
           to={reverse ? '26' : '0'}
-          dur="1.15s"
+          dur={reverse ? '0.95s' : '1.15s'}
           repeatCount="indefinite"
         />
       )}
@@ -131,7 +131,7 @@ export function WellSchematic({
           preserveAspectRatio="xMidYMid meet"
           className="h-full w-full"
           role="img"
-          aria-label={`井筒溢流机理示意图，后端判级 L${backendLevel}`}
+          aria-label={`井筒溢流机理示意图，报警等级 L${backendLevel}`}
         >
           <defs>
             <pattern id="formationDots" width="13" height="13" patternUnits="userSpaceOnUse">
@@ -185,32 +185,30 @@ export function WellSchematic({
           <path d="M164 382 L172 394 L180 385 L188 394 L196 382" fill="none" stroke={line} strokeWidth="2.2" />
 
           <FlowPath d="M180 103 V360" color="#2563eb" active={circulationActive} />
-          <FlowPath d="M157 350 C151 302 155 246 156 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} reverse />
-          <FlowPath d="M203 350 C209 302 205 246 204 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} reverse />
+          <FlowPath d="M157 350 C151 302 155 246 156 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
+          <FlowPath d="M203 350 C209 302 205 246 204 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
 
-          <g opacity={influxActive ? 1 : 0.24} filter={influxActive ? 'url(#influxGlow)' : undefined}>
-            <path d="M78 374 C101 372 112 362 139 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
-            <path d="M282 374 C259 372 248 362 221 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
-            <path d="M92 398 C112 393 123 382 143 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
-            <path d="M268 398 C248 393 237 382 217 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
-            {influxActive && (
-              <>
-                <circle r="3.5" fill={visual.accent}><animateMotion dur="1.4s" repeatCount="indefinite" path="M78 374 C101 372 112 362 139 358" /></circle>
-                <circle r="3.5" fill={visual.accent}><animateMotion dur="1.55s" repeatCount="indefinite" path="M282 374 C259 372 248 362 221 358" /></circle>
-              </>
-            )}
-          </g>
+          {influxActive && (
+            <g opacity={1} filter="url(#influxGlow)">
+              <path d="M78 374 C101 372 112 362 139 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
+              <path d="M282 374 C259 372 248 362 221 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
+              <path d="M92 398 C112 393 123 382 143 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
+              <path d="M268 398 C248 393 237 382 217 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
+              <circle r="3.5" fill={visual.accent}><animateMotion dur="1.4s" repeatCount="indefinite" path="M78 374 C101 372 112 362 139 358" /></circle>
+              <circle r="3.5" fill={visual.accent}><animateMotion dur="1.55s" repeatCount="indefinite" path="M282 374 C259 372 248 362 221 358" /></circle>
+            </g>
+          )}
 
           <path d="M100 118 H143" stroke="#2563eb" strokeWidth="3" strokeLinecap="round" />
           <path d="M217 118 H266" stroke={backendLevel >= 4 ? '#dc2626' : influxActive ? visual.accent : '#0d9488'} strokeWidth="3" strokeLinecap="round" />
           <circle cx="94" cy="118" r="7" fill={panel} stroke="#2563eb" strokeWidth="2" />
           <circle cx="272" cy="118" r="7" fill={panel} stroke={backendLevel >= 4 ? '#dc2626' : influxActive ? visual.accent : '#0d9488'} strokeWidth="2" />
 
-          <g fontFamily="sans-serif" fontSize={compact ? 8.5 : 9} fill={muted}>
+          <g fontFamily="sans-serif" fontSize={compact ? 9.5 : 10.5} fill={muted}>
             <text x="12" y="82">地表</text>
             <path d="M35 79 H90 L100 88" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="12" y="121" fill="#2563eb">入口 {flowIn.toFixed(1)}</text>
-            <text x="281" y="121" fill={influxActive ? visual.accent : '#0d9488'}>出口 {flowOut.toFixed(1)}</text>
+            <text x="9" y="121" fill="#2563eb" fontSize={compact ? 11 : 12} fontWeight="700">入口 {flowIn.toFixed(1)}</text>
+            <text x="276" y="121" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 11 : 12} fontWeight="700">出口 {flowOut.toFixed(1)}</text>
             <text x="251" y="43">防喷器组</text>
             <path d="M247 46 H218" fill="none" stroke={muted} strokeWidth="1" />
             <text x="254" y="179">套管</text>
@@ -223,13 +221,17 @@ export function WellSchematic({
             <path d="M238 275 H207" fill="none" stroke={influxActive ? visual.accent : muted} strokeWidth="1" />
             <text x="251" y="350">高压地层</text>
             <path d="M246 347 H225" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="12" y="414" fill={influxActive ? visual.accent : muted}>地层流体侵入</text>
-            <path d="M92 411 H126" fill="none" stroke={influxActive ? visual.accent : muted} strokeWidth="1" />
+            {influxActive && (
+              <>
+                <text x="12" y="414" fill={visual.accent}>地层流体侵入</text>
+                <path d="M92 411 H126" fill="none" stroke={visual.accent} strokeWidth="1" />
+              </>
+            )}
             {!compact && (
               <>
                 <text x="12" y="145" fill={muted}>立压 {drillPipePressure.toFixed(2)} MPa</text>
                 <text x="235" y="145" fill={muted}>套压 {casingPressure.toFixed(2)} MPa</text>
-                <text x="12" y="165" fill={activeSignals.includes('standpipe_pressure') ? visual.accent : muted}>后端信号 {activeSignals.length}</text>
+                <text x="12" y="165" fill={activeSignals.includes('standpipe_pressure') ? visual.accent : muted}>活动信号 {activeSignals.length}</text>
               </>
             )}
           </g>

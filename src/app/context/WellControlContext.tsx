@@ -114,6 +114,7 @@ export interface FlowDataPoint {
   time: string;
   timestampMs?: number;
   backendLevel?: BackendLevel;
+  eventId?: string | null;
   flowIn: number;
   flowOut: number;
   returnResponse?: number;
@@ -129,6 +130,7 @@ export interface PressureDataPoint {
   time: string;
   timestampMs?: number;
   backendLevel?: BackendLevel;
+  eventId?: string | null;
   casingPressure: number;
   drillPipePressure: number;
   spp?: number;
@@ -240,9 +242,11 @@ interface WellControlContextType {
   startOptions: RealtimeStartOption[];
   selectedStartFrame: number;
   selectedStartTime: string;
+  currentSampleTime: string;
   timeBounds: RealtimeTimeBounds;
   shutInActive: boolean;
   shutInStartedAt: string | null;
+  buildRealtimeApiUrl: (path: string) => string;
   setIsRunning: (v: boolean) => void;
   handleReset: () => void;
   acknowledgeAlert: (id: number) => void;
@@ -404,7 +408,7 @@ const ALGORITHM_INTERFACE: AlgorithmInterfaceInfo = {
       status: 'ready',
     },
     {
-      name: '后端事件日志',
+      name: '事件日志',
       command: 'frame.log_entries',
       status: 'ready',
     },
@@ -419,39 +423,39 @@ const ALGORITHM_INTERFACE: AlgorithmInterfaceInfo = {
 const CYCLE_STATES: Array<Omit<CycleInfo, 'cycleIndex' | 'elapsedInState' | 'totalStateSeconds' | 'progress' | 'tStopPump' | 'tStartPump' | 'tStable'>> = [
   {
     state: 0,
-    stateLabel: '提钻 / 抽汲',
-    shortLabel: '提钻',
+    stateLabel: '井筒扰动观察',
+    shortLabel: '观察',
     description: '关注抽汲诱发的井筒体积扰动',
   },
   {
     state: 1,
-    stateLabel: '钻进尾段',
+    stateLabel: '钻进稳定',
     shortLabel: '稳态',
     description: '稳定段进入基线候选池',
   },
   {
     state: 2,
-    stateLabel: '停钻循环',
+    stateLabel: '循环稳定',
     shortLabel: '循环',
     description: '泵仍运行，建立停泵前压力参照',
   },
   {
     state: 3,
-    stateLabel: '停泵接单根',
+    stateLabel: '停泵监测',
     shortLabel: '停泵',
-    description: '后端持续跟踪停泵出口流量与总池体积变化',
+    description: '持续跟踪停泵出口流量与总池体积变化',
   },
   {
     state: 4,
     stateLabel: '开泵恢复',
     shortLabel: '开泵',
-    description: '后端重新建立开泵后的水力参照',
+    description: '重新建立开泵后的水力参照',
   },
   {
     state: 5,
-    stateLabel: '恢复钻进',
+    stateLabel: '实时监测',
     shortLabel: '检测',
-    description: '后端实时判级进入稳定监测窗口',
+    description: '实时判级进入稳定监测窗口',
   },
 ];
 
@@ -516,8 +520,8 @@ function parseFrameMillis(value?: string) {
 
 function toDatetimeLocalValue(value?: string) {
   if (!value) return '';
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
-  return match ? `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}` : '';
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6] || '00'}` : '';
 }
 
 function fromDatetimeLocalValue(value: string) {
@@ -745,6 +749,9 @@ interface BackendLogEntry {
   eventState: string;
   pumpState: string;
   timestamp: string;
+  startTime?: string;
+  endTime?: string;
+  sampleCount?: number;
 }
 
 function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
@@ -760,19 +767,20 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
       eventId,
       publicLevel,
       formalEvalLevel: normalizeBackendLevel(row.formal_eval_level ?? publicLevel),
-      reason: displayAlarmText(row.reason || `后端实时判级 L${publicLevel}`),
+      reason: displayAlarmText(row.reason || `实时判级 L${publicLevel}`),
       activeSignals: parseActiveSignals(row.active_signals),
       eventState: String(row.event_state || (publicLevel >= 4 ? 'confirmed' : 'tracking')),
       pumpState: String(row.pump_state || record.pump_state || 'Unknown'),
       timestamp,
+      startTime: String(row.start_time || ''),
+      endTime: String(row.end_time || ''),
+      sampleCount: Number(row.sample_count) || undefined,
     }];
   });
 }
 
 function backendEventKey(entry: BackendLogEntry) {
-  const signals = entry.activeSignals.slice().sort().join(',');
-  const reason = entry.reason.replace(/\d+(?:\.\d+)?/g, '#');
-  return [entry.publicLevel, entry.eventState, entry.pumpState, signals, reason].join('|');
+  return entry.eventId;
 }
 
 function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionState {
@@ -784,6 +792,9 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
   const formalEvalLevel = normalizeBackendLevel(record.formal_eval_level ?? latestLog?.formalEvalLevel ?? publicLevel);
   const timestamp = String(record.timestamp || record.sampleTime || record.sample_time || latestLog?.timestamp || '');
   const activeSignals = parseActiveSignals(record.active_signals);
+  const frameEventId = record.event_id === undefined || record.event_id === null || String(record.event_id).trim() === ''
+    ? null
+    : String(record.event_id);
   return {
     publicLevel,
     formalEvalLevel,
@@ -792,8 +803,18 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
     eventState: String(record.event_state || latestLog?.eventState || (publicLevel >= 4 ? 'confirmed' : publicLevel >= 2 ? 'tracking' : publicLevel === 1 ? 'observing' : 'normal')),
     pumpState: String(record.pump_state || record.pumpState || latestLog?.pumpState || 'Unknown'),
     timestamp,
-    eventId: latestLog?.eventId || null,
+    eventId: latestLog?.eventId || (publicLevel >= 2 ? frameEventId : null),
   };
+}
+
+function isMonitorableEventRecord(record: RealTimeRecord, data: MonitoringData) {
+  if (record.monitoring_ready === false || record.monitoringReady === false) return false;
+  if (record.baseline_warmup === true || record.baselineWarmup === true) return false;
+  const condition = String(record.condition || data.condition || '').trim();
+  const pumpState = String(record.pump_state || record.pumpState || data.pumpState || '');
+  if (pumpState === 'Stopped') return false;
+  if (/提离井底|停泵|起下钻|接单根|划眼|关井/.test(condition)) return false;
+  return condition === 'DrillingCirculating' || /钻进|钻井/.test(condition);
 }
 
 function normalizeRealtimeWell(item: unknown): WellInfo | null {
@@ -835,7 +856,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     if (typeof EventSource === 'undefined') {
       this.emitStatus({
         mode: 'realtime',
-        adapterName: 'V7 后端检测流',
+        adapterName: 'V7 实时检测流',
         status: 'error',
         endpoint: this.endpoint,
         message: '当前浏览器不支持 SSE 流式接口',
@@ -848,10 +869,10 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     const url = buildRealtimeStreamUrl(this.endpoint, well.wellId, this.startTime || well.discoveryTime || well.startTime || '', this.rateMs);
     this.emitStatus({
       mode: 'realtime',
-      adapterName: 'V7 后端检测流',
+      adapterName: 'V7 实时检测流',
       status: 'connecting',
       endpoint: url,
-      message: `正在建立 ${well.wellName} 后端检测流`,
+      message: `正在建立 ${well.wellName} 实时检测流`,
       lastRecordAt: null,
       recordCount: 0,
     });
@@ -861,7 +882,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     } catch {
       this.emitStatus({
         mode: 'realtime',
-        adapterName: 'V7 后端检测流',
+        adapterName: 'V7 实时检测流',
         status: 'error',
         endpoint: url,
         message: '检测流地址无效',
@@ -874,10 +895,10 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     this.stream.addEventListener('start', () => {
       this.emitStatus({
         mode: 'realtime',
-        adapterName: 'V7 后端检测流',
+        adapterName: 'V7 实时检测流',
         status: 'connecting',
         endpoint: url,
-        message: '后端正在按起始时间计算检测窗口',
+        message: '正在按起始时间计算检测窗口',
         lastRecordAt: null,
         recordCount: this.recordCount,
       });
@@ -887,7 +908,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
       const data = JSON.parse((event as MessageEvent).data || '{}');
       this.emitStatus({
         mode: 'realtime',
-        adapterName: 'V7 后端检测流',
+        adapterName: 'V7 实时检测流',
         status: 'connected',
         endpoint: url,
         message: `检测流已接入 · 起始 ${data.start_time || this.startTime || '--'}`,
@@ -904,7 +925,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
       this.recordCallback(frame);
       this.emitStatus({
         mode: 'realtime',
-        adapterName: 'V7 后端检测流',
+        adapterName: 'V7 实时检测流',
         status: 'connected',
         endpoint: url,
         message: `检测流推送中 · ${well.wellName} · ${this.recordCount} 帧`,
@@ -916,7 +937,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     this.stream.addEventListener('done', () => {
       this.emitStatus({
         mode: 'realtime',
-        adapterName: 'V7 后端检测流',
+        adapterName: 'V7 实时检测流',
         status: 'paused',
         endpoint: url,
         message: `检测窗口推送完成 · ${this.recordCount} 帧`,
@@ -936,10 +957,10 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
       })() as { error?: string };
       this.emitStatus({
         mode: 'realtime',
-        adapterName: 'V7 后端检测流',
+        adapterName: 'V7 实时检测流',
         status: 'error',
         endpoint: url,
-        message: data.error || '检测流连接中断，请检查后端和 MySQL',
+        message: data.error || '检测流连接中断，请检查接口和 MySQL',
         lastRecordAt: this.lastSampleTime ? formatRecordTime(this.lastSampleTime).timeStr : null,
         recordCount: this.recordCount,
       });
@@ -1038,6 +1059,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const [startOptions, setStartOptions] = useState<RealtimeStartOption[]>([]);
   const [selectedStartFrame, setSelectedStartFrame] = useState(0);
   const [selectedStartTime, setSelectedStartTime] = useState('');
+  const [currentSampleTime, setCurrentSampleTime] = useState('');
   const [timeBounds, setTimeBounds] = useState<RealtimeTimeBounds>({
     firstTime: '',
     lastTime: '',
@@ -1063,6 +1085,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const adapterRef = useRef<DataSourceAdapter | null>(null);
   const backendEventIdsRef = useRef<Set<string>>(new Set());
   const backendEventKeysRef = useRef<Set<string>>(new Set());
+  const activeEventIdRef = useRef<string | null>(null);
   const [cycleInfo, setCycleInfo] = useState<CycleInfo>(() => getCycleInfo(0));
 
   const alertStatus = backendLevelToStatus(backendDetection.publicLevel);
@@ -1089,7 +1112,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     setDataSourceState((prev) => ({
       ...prev,
       status: 'connecting',
-      message: '正在读取后端实时井列表',
+      message: '正在读取实时井列表',
     }));
     fetch(buildRealtimeApiUrl(realtimeEndpoint, '/wells'), { cache: 'no-store' })
       .then((response) => {
@@ -1210,7 +1233,16 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const nextData = normalizeRealTimeRecord(record, currentDataRef.current);
       currentDataRef.current = nextData;
       setCurrentData(nextData);
+      const sampleTimeText = String(record.sampleTime || record.sample_time || record.timestamp || '');
+      if (sampleTimeText) setCurrentSampleTime(sampleTimeText.replace('T', ' '));
       const nextDetection = normalizeBackendDetection(record);
+      const canPaintEvent = isMonitorableEventRecord(record, nextData);
+      if (nextDetection.eventId && canPaintEvent) {
+        activeEventIdRef.current = nextDetection.eventId;
+      } else if (nextDetection.publicLevel < 2 || !canPaintEvent) {
+        activeEventIdRef.current = null;
+      }
+      const activeEventId = nextDetection.publicLevel >= 2 && canPaintEvent ? activeEventIdRef.current : null;
       setBackendDetection(nextDetection);
       const backendLogs = normalizeBackendLogEntries(record);
       if (backendLogs.length > 0) {
@@ -1224,13 +1256,15 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
             if (existingIndex >= 0) {
               nextAlerts = nextAlerts.map((alert, index) => index === existingIndex ? {
                 ...alert,
+                level: Math.max(alert.backendLevel, entry.publicLevel) >= 4 ? 'critical' as const : 'warning' as const,
+                message: entry.reason || alert.message,
                 time: eventTime.timeStr,
                 date: eventTime.dateStr,
                 lastTime: eventTime.timeStr,
                 lastDate: eventTime.dateStr,
-                count: (alert.count || 1) + 1,
-                backendLevel: entry.publicLevel,
-                formalEvalLevel: entry.formalEvalLevel,
+                count: entry.sampleCount || (alert.count || 1) + 1,
+                backendLevel: Math.max(alert.backendLevel, entry.publicLevel) as BackendLevel,
+                formalEvalLevel: Math.max(alert.formalEvalLevel, entry.formalEvalLevel) as BackendLevel,
                 activeSignals: entry.activeSignals,
                 eventState: entry.eventState,
                 pumpState: entry.pumpState,
@@ -1256,7 +1290,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
               activeSignals: entry.activeSignals,
               eventState: entry.eventState,
               pumpState: entry.pumpState,
-              count: 1,
+              count: entry.sampleCount || 1,
             });
           });
           return additions.length > 0 ? [...additions.reverse(), ...nextAlerts].slice(0, 60) : nextAlerts;
@@ -1268,6 +1302,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           time: recordTime.timeStr,
           timestampMs,
           backendLevel: nextDetection.publicLevel,
+          eventId: activeEventId,
           flowIn: nextData.flowIn,
           flowOut: nextData.flowOut,
           bitDepth: nextData.bitDepth,
@@ -1285,6 +1320,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           time: recordTime.timeStr,
           timestampMs,
           backendLevel: nextDetection.publicLevel,
+          eventId: activeEventId,
           casingPressure: nextData.casingPressure,
           drillPipePressure: nextData.drillPipePressure,
           spp: nextData.spp,
@@ -1332,6 +1368,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     setFlowHistory([]);
     setPressureHistory([]);
     setAlerts([]);
+    setCurrentSampleTime('');
     setBackendDetection(INITIAL_BACKEND_DETECTION);
     setHistoryRecords([]);
     setShutInActive(false);
@@ -1342,6 +1379,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     historyIdCounter.current = 1;
     backendEventIdsRef.current.clear();
     backendEventKeysRef.current.clear();
+    activeEventIdRef.current = null;
     setIsRunning(false);
     setDataSourceState(createInitialDataSourceState(realtimeEndpoint, startTime));
   };
@@ -1426,9 +1464,11 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         startOptions,
         selectedStartFrame,
         selectedStartTime,
+        currentSampleTime,
         timeBounds,
         shutInActive,
         shutInStartedAt,
+        buildRealtimeApiUrl: (path) => buildRealtimeApiUrl(realtimeEndpoint, path),
         setIsRunning,
         handleReset,
         acknowledgeAlert,

@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router';
 import { useLocation } from 'react-router';
-import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, ShieldAlert, X, PanelLeftClose, PanelLeftOpen, Moon, Sun, Gauge, Clock3, RadioTower, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, Gauge, Clock3, RadioTower, BarChart3, Play, Pause, RotateCcw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
@@ -13,18 +13,6 @@ const navItems = [
   { to: '/alerts', label: '报警管理', icon: Bell },
   { to: '/settings', label: '系统设置', icon: Settings },
 ];
-
-function CompactTelemetry({ returnResponse, pitGain, casingPressure }: { returnResponse: number; pitGain: number; casingPressure: number }) {
-  return (
-    <div className="hidden items-center gap-2 rounded-md border border-slate-200 bg-white/90 px-2 py-1.5 text-[11px] text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300 lg:flex xl:hidden">
-      <span className="tabular-nums">出口流量响应 {returnResponse.toFixed(1)}%</span>
-      <span className="text-slate-300 dark:text-slate-700">|</span>
-      <span className="tabular-nums">总池体积变化 {pitGain.toFixed(1)}</span>
-      <span className="text-slate-300 dark:text-slate-700">|</span>
-      <span className="tabular-nums">套压 {casingPressure.toFixed(2)}</span>
-    </div>
-  );
-}
 
 function MobileTelemetry({
   returnResponse,
@@ -92,8 +80,8 @@ function HeaderBackendLevelChip({ detection }: { detection: ReturnType<typeof us
   const visual = backendLevelTone(detection.publicLevel);
   const meta = BACKEND_LEVEL_META[detection.publicLevel];
   return (
-    <div className="hidden items-center gap-2 rounded-md border border-slate-200 bg-white/90 px-2.5 py-1.5 text-xs text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-200 xl:flex" title={detection.reason || meta.description}>
-      <span className="text-[10px] ops-muted">后端判级</span>
+    <div className="top-status-chip" title={detection.reason || meta.description}>
+      <span className="text-[10px] ops-muted">报警等级</span>
       <span className={`ops-led h-2 w-2 rounded-full ${visual.dot}`} data-state={visual.state} />
       <strong className={visual.text}>L{detection.publicLevel}</strong>
       <span>{meta.shortLabel}</span>
@@ -103,17 +91,8 @@ function HeaderBackendLevelChip({ detection }: { detection: ReturnType<typeof us
 
 function BackendLevelDots({ level, collapsed }: { level: BackendLevel; collapsed?: boolean }) {
   return (
-    <div className={`control-tower-layer-dots ${collapsed ? 'control-tower-layer-dots-collapsed mt-2' : 'mt-2 grid grid-cols-5 gap-1'}`}>
-      {([0, 1, 2, 3, 4] as BackendLevel[]).map((item) => {
-        const active = item === level;
-        const visual = backendLevelTone(item);
-        return (
-          <div key={item} title={`后端 L${item} ${BACKEND_LEVEL_META[item].label}`} className={`${collapsed ? 'control-tower-layer-dot flex justify-center' : 'rounded-md border border-slate-200 bg-white px-1.5 py-1 text-center dark:border-slate-700 dark:bg-slate-900'} ${active ? 'ring-1 ring-current' : 'opacity-35'}`}>
-            <span className={`ops-led inline-block h-2 w-2 rounded-full ${visual.dot}`} data-state={active ? visual.state : 'normal'} />
-            {!collapsed && <span className="ml-1 text-[10px] text-slate-500">L{item}</span>}
-          </div>
-        );
-      })}
+    <div className={`control-tower-level-mini ${collapsed ? '' : 'control-tower-level-inline'}`} title={`L${level} ${BACKEND_LEVEL_META[level].label}`}>
+      L{level}
     </div>
   );
 }
@@ -129,7 +108,7 @@ function DataSourcePill({
       ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200'
       : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300';
   return (
-    <div className={`hidden max-w-[230px] items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs md:flex ${tone}`} title={state.endpoint || state.message}>
+    <div className={`top-data-source hidden max-w-[230px] items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs md:flex ${tone}`} title={state.endpoint || state.message}>
       <RadioTower className="h-3.5 w-3.5 shrink-0" />
       <div className="min-w-0">
         <div className="truncate">{state.status === 'connected' ? '真实数据' : '数据源'}</div>
@@ -143,8 +122,6 @@ function OperationsStrip({
   alertStatus,
   isRunning,
   unacknowledgedCount,
-  shutInActive,
-  shutInStartedAt,
   latestSampleTime,
   flowPointCount,
   historyCount,
@@ -154,8 +131,6 @@ function OperationsStrip({
   alertStatus: 'normal' | 'warning' | 'critical';
   isRunning: boolean;
   unacknowledgedCount: number;
-  shutInActive: boolean;
-  shutInStartedAt: string | null;
   latestSampleTime: string | null;
   flowPointCount: number;
   historyCount: number;
@@ -163,7 +138,6 @@ function OperationsStrip({
   baselineQuality: number;
 }) {
   const riskText = alertStatus === 'critical' ? '红色风险' : alertStatus === 'warning' ? '预警复核' : '监测稳定';
-  const responseText = shutInActive ? `关井 ${shutInStartedAt || '--:--:--'}` : alertStatus === 'critical' ? '等待关井' : '关井待命';
   const sampleText = latestSampleTime ? `${latestSampleTime} · ${flowPointCount} 点` : '建立中 · 0 点';
   const collectorText = isRunning ? `采集中 · ${sampleText}` : `已暂停 · ${sampleText}`;
   const riskTone = alertStatus === 'critical'
@@ -177,7 +151,7 @@ function OperationsStrip({
     { label: '采集', value: collectorText, icon: RadioTower, tone: isRunning ? 'text-emerald-700 dark:text-emerald-200' : 'text-amber-700 dark:text-amber-200', width: 'min-w-[176px] flex-[1.35]' },
     { label: '基线', value: `${baselineQuality.toFixed(0)}% · ${historyCount} 条`, icon: Database, tone: historyCount > 0 ? '' : 'text-slate-500 dark:text-slate-400', width: 'min-w-[116px] flex-[0.72]' },
     { label: '未确认', value: `${unacknowledgedCount} 条`, icon: Bell, tone: unacknowledgedCount > 0 ? 'text-red-700 dark:text-red-200' : '', width: 'min-w-[96px] flex-[0.62]' },
-    { label: '响应', value: responseText, icon: Clock3, tone: alertStatus === 'critical' && !shutInActive ? 'text-red-700 dark:text-red-200' : '', width: 'min-w-[112px] flex-[0.76]' },
+    { label: '报警等级', value: riskText, icon: Clock3, tone: alertStatus === 'critical' ? 'text-red-700 dark:text-red-200' : '', width: 'min-w-[112px] flex-[0.76]' },
   ];
 
   return (
@@ -208,32 +182,28 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('wcs-sidebar-collapsed') === 'true');
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const saved = localStorage.getItem('wcs-theme');
-    if (saved === 'light' || saved === 'dark') return saved;
-    return 'dark';
-  });
   const {
     alertStatus,
     alerts,
     isRunning,
+    setIsRunning,
+    handleReset,
     currentData,
     backendDetection,
     shutInActive,
     shutInStartedAt,
-    startShutInProcedure,
     flowHistory,
     historyRecords,
     wells,
     selectedWellId,
     selectWell,
     wellInfo,
-    cycleInfo,
     baselineInfo,
     dataSourceState,
     startOptions,
     selectedStartFrame,
     selectedStartTime,
+    currentSampleTime,
     timeBounds,
     selectStartFrame,
     updateSelectedStartTime,
@@ -247,16 +217,15 @@ export function Layout() {
     critical: 'bg-red-500',
   };
   const backendMeta = BACKEND_LEVEL_META[backendDetection.publicLevel];
-  const isDark = theme === 'dark';
   const sidebarWidth = sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[232px]';
   const isMonitoringRoute = location.pathname === '/monitoring';
   const startSelectValue = startOptions.some((item) => item.frame === selectedStartFrame) ? String(selectedStartFrame) : '';
   const selectedStartOption = startOptions.find((item) => item.frame === selectedStartFrame);
   const mobileStartLabel = selectedStartOption?.label || (selectedStartTime ? selectedStartTime.replace('T', ' ') : '选择起点');
-
-  useEffect(() => {
-    localStorage.setItem('wcs-theme', theme);
-  }, [theme]);
+  const canStartMonitoring = Boolean(selectedStartTime);
+  const startDisabled = !isRunning && !canStartMonitoring;
+  const actionLabel = isRunning ? '暂停监测' : canStartMonitoring ? '开始监测' : '先选时间';
+  const actionTone = isRunning ? 'ops-button-secondary' : startDisabled ? 'ops-button-disabled' : 'ops-button-primary';
 
   useEffect(() => {
     localStorage.setItem('wcs-sidebar-collapsed', String(sidebarCollapsed));
@@ -267,8 +236,8 @@ export function Layout() {
   }, [location.pathname]);
 
   return (
-    <div className={`${isDark ? 'dark' : ''} ops-shell`}>
-    <div className="ops-stage flex h-screen overflow-hidden text-slate-900 transition-colors dark:text-slate-100">
+    <div className="ops-shell">
+    <div className="ops-stage flex h-screen overflow-hidden text-slate-900 transition-colors">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-20 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />
@@ -286,7 +255,7 @@ export function Layout() {
           </div>
           <div className={`min-w-0 ${sidebarCollapsed ? 'hidden' : ''}`}>
             <div className="truncate text-sm font-semibold tracking-[0.02em]">井控溢流监测</div>
-            <div className="text-[11px] text-cyan-100/72">后端实时判级</div>
+            <div className="text-[11px] text-cyan-100/72">实时报警判级</div>
           </div>
           <button className="ml-auto lg:hidden" onClick={() => setSidebarOpen(false)}>
             <X className="w-5 h-5" />
@@ -305,7 +274,7 @@ export function Layout() {
           </div>
           {shutInActive && !sidebarCollapsed && (
             <div className="mt-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
-              关井程序 {shutInStartedAt || '--:--:--'}
+              处置记录 {shutInStartedAt || '--:--:--'}
             </div>
           )}
         </div>
@@ -365,29 +334,7 @@ export function Layout() {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top bar */}
-        {alertStatus === 'critical' && (
-          <div className={`warning-sweep relative flex flex-shrink-0 items-center gap-3 overflow-hidden border-b px-4 py-2 text-white backdrop-blur ${
-            shutInActive ? 'border-emerald-400/20 bg-emerald-950/82' : 'border-red-400/20 bg-red-950/84'
-          }`}>
-            <ShieldAlert className="relative z-10 h-5 w-5" />
-            <div className="relative z-10 min-w-0 flex-1">
-              <div className="text-sm">{shutInActive ? '关井程序已启动，应急处置进行中' : '严重溢流告警：立即执行关井程序'}</div>
-              <div className="text-xs opacity-85">
-                出口流量响应 {currentData.returnResponse.toFixed(1)}% · 总池体积变化 {currentData.pitGain.toFixed(2)} m3 · 套压 {currentData.casingPressure.toFixed(2)} MPa
-              </div>
-            </div>
-            {!shutInActive && (
-              <button
-                onClick={startShutInProcedure}
-                className="ops-button-emergency relative z-10 px-3 py-1.5 text-sm"
-              >
-                启动关井程序
-              </button>
-            )}
-          </div>
-        )}
-
-        <header className={`ops-panel rounded-none border-x-0 border-t-0 flex items-center gap-3 flex-shrink-0 ${isMonitoringRoute ? 'px-3 py-1.5' : 'px-4 py-3'}`}>
+        <header className="app-topbar flex flex-shrink-0 items-center gap-3">
           <button className="lg:hidden p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => setSidebarOpen(true)} title="打开导航">
             <Menu className="w-5 h-5" />
           </button>
@@ -406,7 +353,7 @@ export function Layout() {
           >
             {sidebarCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
           </button>
-          <div className="hidden min-w-0 items-center gap-2 sm:flex">
+          <div className="topbar-controls hidden min-w-0 items-center gap-2 sm:flex">
             <select
               value={selectedWellId}
               onChange={(event) => selectWell(event.target.value)}
@@ -433,6 +380,7 @@ export function Layout() {
             </select>
             <input
               type="datetime-local"
+              step="1"
               value={selectedStartTime}
               onChange={(event) => updateSelectedStartTime(event.target.value)}
               className="ops-field max-w-[196px] px-2.5 py-1.5 text-xs"
@@ -440,33 +388,31 @@ export function Layout() {
             />
           </div>
           <div className="flex-1" />
-          <div className={`hidden items-center gap-2 xl:flex ${isMonitoringRoute ? 'xl:hidden' : ''}`}>
+          <div className="hidden items-center gap-2 xl:flex">
             <HeaderBackendLevelChip detection={backendDetection} />
           </div>
-          {!isMonitoringRoute && <DataSourcePill state={dataSourceState} />}
-          {!isMonitoringRoute && (
-            <CompactTelemetry
-              returnResponse={currentData.returnResponse}
-              pitGain={currentData.pitGain}
-              casingPressure={currentData.casingPressure}
-            />
-          )}
+          <DataSourcePill state={dataSourceState} />
           <button
-            onClick={() => setTheme((v) => v === 'dark' ? 'light' : 'dark')}
-            className={`ops-button-secondary text-xs ${isMonitoringRoute ? 'px-2 py-1' : 'px-3 py-1.5'}`}
-            title="切换明暗风格"
+            onClick={() => setIsRunning(isRunning ? false : true)}
+            disabled={startDisabled}
+            className={`${actionTone} topbar-action`}
+            title={selectedStartTime ? `开始时间 ${selectedStartTime.replace('T', ' ')}` : '请先选择开始检测时间'}
           >
-            {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-            <span className={isMonitoringRoute ? 'hidden sm:inline' : ''}>{isDark ? '白色' : '深色'}</span>
+            {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {actionLabel}
           </button>
-          {!isMonitoringRoute && <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
+          <button onClick={handleReset} className="ops-button-secondary topbar-action">
+            <RotateCcw className="h-4 w-4" />
+            复位
+          </button>
+          <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
             alertStatus === 'critical' ? 'border-red-200 bg-red-100 text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200' :
             alertStatus === 'warning' ? 'border-amber-200 bg-amber-100 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200' :
             'border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-200'
           }`}>
-            <div className={`ops-led w-1.5 h-1.5 rounded-full ${statusColors[alertStatus]} animate-pulse`} data-state={alertStatus} />
+            <div className={`ops-led w-1.5 h-1.5 rounded-full ${statusColors[alertStatus]}`} data-state={alertStatus} />
             L{backendDetection.publicLevel} {backendMeta.label}
-          </div>}
+          </div>
         </header>
 
         {mobileControlsOpen && (
@@ -502,6 +448,7 @@ export function Layout() {
               </select>
               <input
                 type="datetime-local"
+                step="1"
                 value={selectedStartTime}
                 onChange={(event) => updateSelectedStartTime(event.target.value)}
                 className="ops-field w-full px-2.5 py-2 text-xs"
@@ -528,8 +475,6 @@ export function Layout() {
             alertStatus={alertStatus}
             isRunning={isRunning}
             unacknowledgedCount={unacknowledgedCount}
-            shutInActive={shutInActive}
-            shutInStartedAt={shutInStartedAt}
             latestSampleTime={latestSampleTime}
             flowPointCount={flowHistory.length}
             historyCount={historyRecords.length}
@@ -549,7 +494,7 @@ export function Layout() {
         )}
 
         {/* Page content */}
-        <main className={`ops-scroll flex-1 p-3 lg:p-4 ${isMonitoringRoute ? 'overflow-auto lg:overflow-hidden' : 'overflow-auto'}`}>
+        <main className={`ops-scroll flex-1 p-3 lg:p-4 ${isMonitoringRoute ? 'overflow-auto lg:overflow-hidden' : 'overflow-auto'}`} data-current-sample-time={currentSampleTime}>
           <Outlet />
         </main>
       </div>

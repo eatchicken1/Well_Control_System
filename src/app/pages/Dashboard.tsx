@@ -8,7 +8,6 @@ import {
   DatabaseZap,
   Gauge,
   RadioTower,
-  ShieldAlert,
   Waves,
 } from 'lucide-react';
 import {
@@ -34,8 +33,7 @@ function metricStateClass(state: MetricState) {
   return 'dashboard-metric-normal';
 }
 
-function statusText(level: BackendLevel, shutInActive: boolean) {
-  if (level >= 4 && shutInActive) return '关井处置进行中';
+function statusText(level: BackendLevel) {
   return `L${level} ${BACKEND_LEVEL_META[level].label}`;
 }
 
@@ -105,7 +103,7 @@ function BackendLevelRail({ detection }: { detection: ReturnType<typeof useWellC
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <div className="ops-eyebrow">Backend decision</div>
-          <h2 className="dashboard-section-title">后端实时判级</h2>
+          <h2 className="dashboard-section-title">实时报警等级</h2>
         </div>
         <span className={`dashboard-chip ${detection.publicLevel >= 4 ? 'dashboard-chip-danger' : detection.publicLevel >= 2 ? 'dashboard-chip-warn' : 'dashboard-chip-ok'}`}>
           L{detection.publicLevel} {BACKEND_LEVEL_META[detection.publicLevel].shortLabel}
@@ -122,7 +120,7 @@ function BackendLevelRail({ detection }: { detection: ReturnType<typeof useWellC
       <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-900">
         <div className="text-slate-800 dark:text-slate-100">{detection.reason || BACKEND_LEVEL_META[detection.publicLevel].description}</div>
         <div className="mt-1 ops-muted">
-          {detection.activeSignals.length > 0 ? detection.activeSignals.map(backendSignalLabel).join(' · ') : '当前无后端活动异常信号'}
+          {detection.activeSignals.length > 0 ? detection.activeSignals.map(backendSignalLabel).join(' · ') : '当前无活动异常信号'}
         </div>
       </div>
     </div>
@@ -192,9 +190,6 @@ export default function Dashboard() {
     backendDetection,
     baselineInfo,
     wellInfo,
-    shutInActive,
-    shutInStartedAt,
-    startShutInProcedure,
     dataSourceState,
     historyRecords,
   } = useWellControl();
@@ -216,11 +211,13 @@ export default function Dashboard() {
   const returnState = signalMetricState('return_response', backendDetection.publicLevel, backendDetection.activeSignals);
   const pitState = signalMetricState('pit_volume', backendDetection.publicLevel, backendDetection.activeSignals);
   const gasState = signalMetricState('total_gas', backendDetection.publicLevel, backendDetection.activeSignals);
-  const sppResidual = currentData.spp - currentData.sppPredicted;
+  const firstPressurePoint = pressureHistory.find((point) => Number.isFinite(point.spp ?? point.drillPipePressure));
+  const sppReference = firstPressurePoint ? (firstPressurePoint.spp ?? firstPressurePoint.drillPipePressure) : currentData.spp;
+  const sppChange = currentData.spp - sppReference;
   const sppState = signalMetricState('standpipe_pressure', backendDetection.publicLevel, backendDetection.activeSignals);
   const returnSpark = flowHistory.slice(-28).map((point) => ({ time: point.time, value: point.returnResponse ?? currentData.returnResponse }));
   const pitGainSpark = flowHistory.slice(-28).map((point) => ({ time: point.time, value: point.pitGain ?? currentData.pitGain }));
-  const sppResidualSpark = pressureHistory.slice(-28).map((point) => ({ time: point.time, value: (point.spp ?? point.drillPipePressure) - (point.sppPredicted ?? point.drillPipePressure) }));
+  const sppChangeSpark = pressureHistory.slice(-28).map((point) => ({ time: point.time, value: (point.spp ?? point.drillPipePressure) - sppReference }));
   const gasSpark = flowHistory.slice(-28).map((point) => ({ time: point.time, value: point.totalGas ?? currentData.totalGas }));
 
   return (
@@ -236,14 +233,8 @@ export default function Dashboard() {
         <div className="dashboard-command-actions">
           <div className={`dashboard-status-pill dashboard-status-${alertStatus}`}>
             <span className={`ops-led h-2.5 w-2.5 rounded-full ${alertStatus === 'critical' ? 'bg-red-500' : alertStatus === 'warning' ? 'bg-amber-500' : 'bg-emerald-500'}`} data-state={alertStatus} />
-            {statusText(backendDetection.publicLevel, shutInActive)}
+            {statusText(backendDetection.publicLevel)}
           </div>
-          {alertStatus === 'critical' && !shutInActive && (
-            <button onClick={startShutInProcedure} className="ops-button-danger">
-              <ShieldAlert className="h-4 w-4" />
-              启动关井程序
-            </button>
-          )}
           <button onClick={() => navigate('/monitoring')} className="ops-button-primary">
             进入实时监测
             <ArrowRight className="h-4 w-4" />
@@ -252,10 +243,10 @@ export default function Dashboard() {
       </div>
 
       <div className="dashboard-kpi-strip">
-        <MetricPanel label="出口流量响应" value={returnResponse.toFixed(1)} unit="%" icon={Activity} state={returnState} sparkData={returnSpark} color="#c2410c" helper={backendDetection.activeSignals.includes('return_response') ? '后端活动信号' : '实时遥测'} />
-        <MetricPanel label="总池体积变化" value={currentData.pitGain.toFixed(2)} unit="m3" icon={Waves} state={pitState} sparkData={pitGainSpark} color="#0f766e" helper={backendDetection.activeSignals.includes('pit_volume') ? '后端活动信号' : '实时遥测'} />
-        <MetricPanel label="立压残差" value={sppResidual.toFixed(2)} unit="MPa" icon={Gauge} state={sppState} sparkData={sppResidualSpark} color="#475569" helper={`实测 ${currentData.spp.toFixed(2)} / 模型 ${currentData.sppPredicted.toFixed(2)}`} />
-        <MetricPanel label="全烃" value={currentData.totalGas.toFixed(2)} unit="%" icon={RadioTower} state={gasState} sparkData={gasSpark} color="#15803d" helper={backendDetection.activeSignals.includes('total_gas') ? '后端活动信号' : '实时遥测'} />
+        <MetricPanel label="出口流量响应" value={returnResponse.toFixed(1)} unit="%" icon={Activity} state={returnState} sparkData={returnSpark} color="#c2410c" helper={backendDetection.activeSignals.includes('return_response') ? '活动信号' : '实时遥测'} />
+        <MetricPanel label="总池体积变化" value={currentData.pitGain.toFixed(2)} unit="m3" icon={Waves} state={pitState} sparkData={pitGainSpark} color="#0f766e" helper={backendDetection.activeSignals.includes('pit_volume') ? '活动信号' : '实时遥测'} />
+        <MetricPanel label="立压变化量" value={sppChange.toFixed(2)} unit="MPa" icon={Gauge} state={sppState} sparkData={sppChangeSpark} color="#475569" helper={`当前 ${currentData.spp.toFixed(2)} / 起点 ${sppReference.toFixed(2)}`} />
+        <MetricPanel label="全烃" value={currentData.totalGas.toFixed(2)} unit="%" icon={RadioTower} state={gasState} sparkData={gasSpark} color="#15803d" helper={backendDetection.activeSignals.includes('total_gas') ? '活动信号' : '实时遥测'} />
       </div>
 
       <div className="dashboard-grid">

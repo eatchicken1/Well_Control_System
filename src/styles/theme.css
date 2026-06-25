@@ -1490,12 +1490,7 @@
 }
 
 .warning-sweep::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transform: translateX(-120%);
-  animation: sweep 1.8s linear infinite;
+  display: none;
 }
 
 .gas-bubble {
@@ -1848,7 +1843,7 @@
 .vertical-lane-tooltip {
   pointer-events: none;
   position: absolute;
-  z-index: 20;
+  z-index: 2000;
   min-width: 118px;
   max-width: 176px;
   border: 1px solid rgba(148, 163, 184, 0.32);
@@ -1860,6 +1855,10 @@
   line-height: 1.35;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
   backdrop-filter: blur(8px);
+}
+
+.vertical-lane-tooltip-fixed {
+  position: fixed;
 }
 
 .dark .vertical-lane-tooltip {
@@ -1903,6 +1902,143 @@
 .control-tower-layer-dot .ops-led {
   height: 7px;
   width: 7px;
+}
+
+/* White-mode operations shell */
+.app-topbar {
+  min-height: 58px;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.9);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 8px 14px;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.topbar-controls .ops-field {
+  height: 36px;
+  border-color: rgba(203, 213, 225, 0.96);
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+}
+
+.topbar-controls {
+  flex: 1 1 auto;
+  max-width: 680px;
+}
+
+.topbar-controls .ops-field {
+  min-width: 0;
+}
+
+.top-status-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(203, 213, 225, 0.88);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+  color: #334155;
+  font-size: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.topbar-action {
+  height: 36px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .topbar-controls {
+    max-width: 560px;
+  }
+
+  .topbar-controls .ops-field:nth-child(1) {
+    max-width: 185px;
+  }
+
+  .topbar-controls .ops-field:nth-child(2) {
+    max-width: 165px;
+  }
+
+  .topbar-controls .ops-field:nth-child(3) {
+    max-width: 180px;
+  }
+
+  .top-data-source {
+    display: none !important;
+  }
+}
+
+.ops-button-disabled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(203, 213, 225, 0.96);
+  background: #e2e8f0;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.ops-shell,
+.ops-stage,
+body {
+  background: #eef5f9 !important;
+  color: #0f172a;
+}
+
+.ops-panel,
+.dashboard-panel,
+.monitoring-command-panel,
+.dashboard-command,
+.ops-panel-soft {
+  border-color: rgba(203, 213, 225, 0.95);
+  background: rgba(255, 255, 255, 0.99);
+}
+
+.control-tower-level-mini {
+  margin-top: 8px;
+  display: flex;
+  height: 30px;
+  width: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(203, 213, 225, 0.96);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.control-tower-sidebar[data-collapsed='true'] .control-tower-status-card {
+  min-height: 70px;
+}
+
+.control-tower-nav-badge-collapsed {
+  right: -7px !important;
+  top: -7px !important;
+  z-index: 30;
+  min-width: 18px;
+  height: 18px;
+  border: 2px solid #fff;
+  font-size: 10px;
+  box-shadow: 0 3px 8px rgba(220, 38, 38, 0.25);
+}
+
+.monitoring-workspace {
+  padding-top: 0;
+}
+
+.monitoring-lane-panel {
+  border-top: 2px solid rgba(15, 118, 110, 0.9);
+}
+
+.ops-table th {
+  white-space: nowrap;
 }
 
 .control-tower-status-card-collapsed {

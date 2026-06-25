@@ -2,12 +2,12 @@ import { CircleDot, TimerReset } from 'lucide-react';
 import type { CycleInfo, CycleState } from '../context/WellControlContext';
 
 const STATES: Array<{ state: CycleState; label: string; short: string }> = [
-  { state: 0, label: '提钻 / 抽汲', short: 'S0' },
-  { state: 1, label: '钻进尾段', short: 'S1' },
-  { state: 2, label: '停钻循环', short: 'S2' },
-  { state: 3, label: '停泵接单根', short: 'S3' },
+  { state: 0, label: '井筒扰动观察', short: 'S0' },
+  { state: 1, label: '钻进稳定', short: 'S1' },
+  { state: 2, label: '循环稳定', short: 'S2' },
+  { state: 3, label: '停泵监测', short: 'S3' },
   { state: 4, label: '开泵恢复', short: 'S4' },
-  { state: 5, label: '恢复钻进', short: 'S5' },
+  { state: 5, label: '实时监测', short: 'S5' },
 ];
 
 function stateTone(isActive: boolean, isPast: boolean) {
@@ -27,8 +27,8 @@ export function CycleStateMachine({ cycleInfo, compact = false }: { cycleInfo: C
     <section className="ops-panel cycle-machine-shell overflow-hidden p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="ops-eyebrow">接单根周期状态</div>
-          <h2 className="text-base text-slate-800 dark:text-slate-100">接单根周期 #{cycleInfo.cycleIndex}</h2>
+          <div className="ops-eyebrow">实时工况状态</div>
+          <h2 className="text-base text-slate-800 dark:text-slate-100">监测阶段 #{cycleInfo.cycleIndex}</h2>
         </div>
         <div className="flex items-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-2 py-1 text-xs text-cyan-800 dark:border-cyan-900/60 dark:bg-cyan-950/25 dark:text-cyan-100">
           <TimerReset className="h-3.5 w-3.5" />

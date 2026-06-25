@@ -1,5 +1,5 @@
 import { useState, type ElementType } from 'react';
-import { AlertTriangle, Check, CheckCheck, Filter, ShieldAlert, Siren } from 'lucide-react';
+import { AlertTriangle, Check, CheckCheck, Clock3, Filter, ShieldAlert, Siren, X } from 'lucide-react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
@@ -64,7 +64,12 @@ function eventStateLabel(value: string) {
   if (value === 'confirmed') return '已确认风险';
   if (value === 'tracking') return '持续跟踪';
   if (value === 'observing') return '异常观察';
-  return value || '后端事件';
+  return value || '报警事件';
+}
+
+function evidenceTitle(alert: ReturnType<typeof useWellControl>['alerts'][number]) {
+  const signals = alert.activeSignals.map(backendSignalLabel).filter(Boolean);
+  return signals.length ? signals.join('、') : '事件证据';
 }
 
 export default function Alerts() {
@@ -72,13 +77,11 @@ export default function Alerts() {
     alerts,
     acknowledgeAlert,
     acknowledgeAll,
-    alertStatus,
     backendDetection,
-    shutInActive,
-    startShutInProcedure,
   } = useWellControl();
   const [levelFilter, setLevelFilter] = useState<BackendLevelFilter>('all');
   const [ackFilter, setAckFilter] = useState<AckFilter>('all');
+  const [selectedAlertId, setSelectedAlertId] = useState<number | null>(null);
 
   const filtered = alerts
     .filter((alert) => {
@@ -95,23 +98,24 @@ export default function Alerts() {
   const l4Count = countFor(4);
   const unacknowledgedCount = alerts.filter((alert) => !alert.acknowledged).length;
   const acknowledgedCount = alerts.length - unacknowledgedCount;
+  const selectedAlert = selectedAlertId == null ? null : alerts.find((alert) => alert.id === selectedAlertId) ?? null;
   const queueSteps = [
     {
-      code: '后端L2',
+      code: 'L2',
       label: '预警复核',
       value: l2Count > 0 ? `${l2Count} 条待复核` : '无待复核项',
       state: l2Count > 0 ? 'warning' as const : 'done' as const,
       icon: AlertTriangle,
     },
     {
-      code: '后端L3',
+      code: 'L3',
       label: '处置准备',
       value: l3Count > 0 ? `${l3Count} 条待处置` : '无高度预警',
       state: l3Count > 0 ? 'active' as const : 'done' as const,
       icon: Siren,
     },
     {
-      code: '后端L4',
+      code: 'L4',
       label: '确认处置',
       value: l4Count > 0 ? `${l4Count} 条严重事件` : '无确认事件',
       state: l4Count > 0 ? 'critical' as const : 'done' as const,
@@ -130,19 +134,13 @@ export default function Alerts() {
     <div className="ops-page space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="ops-eyebrow !text-slate-500">Backend event queue</div>
-          <h1 className="ops-title !text-slate-900">后端报警事件</h1>
+          <div className="ops-eyebrow !text-slate-500">Event review</div>
+          <h1 className="ops-title !text-slate-900">报警事件复核</h1>
           <p className="text-sm !text-slate-600">
-            当前后端公开等级 L{backendDetection.publicLevel} {BACKEND_LEVEL_META[backendDetection.publicLevel].label} · 共 {alerts.length} 条事件
+            当前报警等级 L{backendDetection.publicLevel} {BACKEND_LEVEL_META[backendDetection.publicLevel].label} · 事件 {alerts.length} 条
           </p>
         </div>
         <div className="flex gap-2">
-          {alertStatus === 'critical' && !shutInActive && (
-            <button onClick={startShutInProcedure} className="ops-button-danger">
-              <ShieldAlert className="h-4 w-4" />
-              启动关井程序
-            </button>
-          )}
           {unacknowledgedCount > 0 && (
             <button onClick={acknowledgeAll} className="ops-button-primary">
               <CheckCheck className="h-4 w-4" />
@@ -194,7 +192,7 @@ export default function Alerts() {
             <div className="ops-empty-state m-3 min-h-[180px]">
               <div>
                 <Check className="mx-auto mb-2 h-5 w-5 text-emerald-500" />
-                <div className="text-sm text-slate-700 dark:text-slate-200">当前没有后端报警事件</div>
+                <div className="text-sm text-slate-700 dark:text-slate-200">当前没有报警事件</div>
               </div>
             </div>
           ) : (
@@ -203,7 +201,16 @@ export default function Alerts() {
               const visual = LEVEL_VISUAL[backendLevel];
               const Icon = visual.icon;
               return (
-                <div key={alert.id} className={`relative flex items-start gap-3 border-l-4 px-4 py-3 ${alert.acknowledged ? 'border-l-slate-300 opacity-55 dark:border-l-slate-700' : `${visual.tone} ${backendLevel === 4 ? 'border-l-red-600' : backendLevel === 3 ? 'border-l-orange-500' : 'border-l-amber-500'}`}`}>
+                <div
+                  key={alert.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedAlertId(alert.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') setSelectedAlertId(alert.id);
+                  }}
+                  className={`relative flex cursor-pointer items-start gap-3 border-l-4 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-900 ${alert.acknowledged ? 'border-l-slate-300 opacity-55 dark:border-l-slate-700' : `${visual.tone} ${backendLevel === 4 ? 'border-l-red-600' : backendLevel === 3 ? 'border-l-orange-500' : 'border-l-amber-500'}`}`}
+                >
                   <Icon className="mt-0.5 h-5 w-5 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -223,11 +230,17 @@ export default function Alerts() {
                           {backendSignalLabel(signal)}
                         </span>
                       ))}
-                      {alert.count && alert.count > 1 ? <span className="px-1 py-1 text-[10px] ops-muted">同一事件已合并</span> : null}
+                      {alert.count && alert.count > 1 ? <span className="px-1 py-1 text-[10px] ops-muted">持续 {alert.count} 帧</span> : null}
                     </div>
                   </div>
                   {!alert.acknowledged && (
-                    <button onClick={() => acknowledgeAlert(alert.id)} className="ops-button-secondary shrink-0 px-2.5 py-1 text-xs">
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        acknowledgeAlert(alert.id);
+                      }}
+                      className="ops-button-secondary shrink-0 px-2.5 py-1 text-xs"
+                    >
                       <Check className="h-3.5 w-3.5" />
                       确认
                     </button>
@@ -238,6 +251,68 @@ export default function Alerts() {
           )}
         </div>
       </div>
+
+      {selectedAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={() => setSelectedAlertId(null)}>
+          <div className="ops-panel w-full max-w-xl overflow-hidden" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+              <div>
+                <div className="ops-eyebrow">Event detail</div>
+                <h2 className="text-base text-slate-900 dark:text-slate-100">事件详情</h2>
+              </div>
+              <button className="ops-button-secondary px-2 py-1" onClick={() => setSelectedAlertId(null)} title="关闭">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3 p-4 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${LEVEL_VISUAL[Math.max(2, selectedAlert.backendLevel) as 2 | 3 | 4].badge}`}>
+                  L{selectedAlert.backendLevel} {BACKEND_LEVEL_META[selectedAlert.backendLevel].label}
+                </span>
+                <span className="ops-inline-tile px-2 py-1 text-xs">{eventStateLabel(selectedAlert.eventState)}</span>
+                <span className="ops-inline-tile px-2 py-1 text-xs">{selectedAlert.pumpState}</span>
+              </div>
+              <div className="rounded-md bg-slate-50 p-3 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
+                <div className="mb-1 flex items-center gap-2 text-xs ops-muted">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  {selectedAlert.date} {selectedAlert.time} 至 {selectedAlert.lastDate || selectedAlert.date} {selectedAlert.lastTime || selectedAlert.time}
+                </div>
+                {selectedAlert.message}
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="ops-inline-tile px-3 py-2">
+                  <div className="text-[11px] ops-muted">首次时间</div>
+                  <div className="mt-1 tabular-nums">{selectedAlert.date} {selectedAlert.time}</div>
+                </div>
+                <div className="ops-inline-tile px-3 py-2">
+                  <div className="text-[11px] ops-muted">最近时间</div>
+                  <div className="mt-1 tabular-nums">{selectedAlert.lastDate || selectedAlert.date} {selectedAlert.lastTime || selectedAlert.time}</div>
+                </div>
+                <div className="ops-inline-tile px-3 py-2">
+                  <div className="text-[11px] ops-muted">持续帧数</div>
+                  <div className="mt-1 tabular-nums">{selectedAlert.count || 1}</div>
+                </div>
+                <div className="ops-inline-tile px-3 py-2">
+                  <div className="text-[11px] ops-muted">正式评估等级</div>
+                  <div className="mt-1 tabular-nums">L{selectedAlert.formalEvalLevel}</div>
+                </div>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <div className="text-[11px] ops-muted">证据摘要</div>
+                <div className="mt-1 text-sm text-slate-900">{evidenceTitle(selectedAlert)}</div>
+              </div>
+              <div>
+                <div className="mb-2 text-[11px] ops-muted">活动信号</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedAlert.activeSignals.length > 0 ? selectedAlert.activeSignals.map((signal) => (
+                    <span key={signal} className="ops-inline-tile px-2 py-1 text-xs">{backendSignalLabel(signal)}</span>
+                  )) : <span className="ops-muted">无</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

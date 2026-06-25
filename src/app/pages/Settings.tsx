@@ -207,7 +207,7 @@ function ConfigRiskBanner({
   const copy = invalid
     ? '存在参考线顺序反转，保存动作已被锁定。'
     : saved
-      ? '显示参数已同步到实时监测页曲线。后端判级未受影响。'
+      ? '显示参数已同步到实时监测页曲线，报警等级不受显示参数影响。'
       : changedCount > 0
         ? `${changedCount} 项显示参数处于草稿状态。`
         : '当前草稿与生效显示参数一致。';
@@ -289,7 +289,7 @@ export default function Settings() {
         <div>
           <div className="ops-eyebrow">Display reference</div>
           <h1 className="ops-title">系统设置</h1>
-          <p className="text-sm ops-muted">配置曲线参考线与基线显示参数；报警等级由后端独立返回</p>
+          <p className="text-sm ops-muted">配置曲线参考线与基线显示参数；报警等级由实时检测接口返回</p>
         </div>
         <div className="grid w-full grid-cols-2 gap-2 sm:w-auto">
           <button onClick={handleReset} className="ops-button-secondary">
@@ -360,13 +360,13 @@ export default function Settings() {
           </section>
 
           <ThresholdGroup title="出口流量响应曲线参考">
-            <ThresholdInput label="参考线 1" value={draft.returnResponseWarning} activeValue={thresholds.returnResponseWarning} unit="%" onChange={set('returnResponseWarning')} min={0} max={60} step={0.1} description="仅用于曲线标尺，不参与后端判级" level="warning" />
-            <ThresholdInput label="参考线 2" value={draft.returnResponseCritical} activeValue={thresholds.returnResponseCritical} unit="%" onChange={set('returnResponseCritical')} min={0} max={100} step={0.1} description="仅用于曲线标尺，不参与后端判级" level="critical" />
+            <ThresholdInput label="参考线 1" value={draft.returnResponseWarning} activeValue={thresholds.returnResponseWarning} unit="%" onChange={set('returnResponseWarning')} min={0} max={60} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="warning" />
+            <ThresholdInput label="参考线 2" value={draft.returnResponseCritical} activeValue={thresholds.returnResponseCritical} unit="%" onChange={set('returnResponseCritical')} min={0} max={100} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="critical" />
           </ThresholdGroup>
 
           <ThresholdGroup title="总池体积曲线参考">
-            <ThresholdInput label="参考线 1" value={draft.pitGainWarning} activeValue={thresholds.pitGainWarning} unit="m3" onChange={set('pitGainWarning')} min={0} max={10} step={0.1} description="仅用于曲线标尺，不参与后端判级" level="warning" />
-            <ThresholdInput label="参考线 2" value={draft.pitGainCritical} activeValue={thresholds.pitGainCritical} unit="m3" onChange={set('pitGainCritical')} min={0} max={20} step={0.1} description="仅用于曲线标尺，不参与后端判级" level="critical" />
+            <ThresholdInput label="参考线 1" value={draft.pitGainWarning} activeValue={thresholds.pitGainWarning} unit="m3" onChange={set('pitGainWarning')} min={0} max={10} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="warning" />
+            <ThresholdInput label="参考线 2" value={draft.pitGainCritical} activeValue={thresholds.pitGainCritical} unit="m3" onChange={set('pitGainCritical')} min={0} max={20} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="critical" />
           </ThresholdGroup>
 
           <ThresholdGroup title="压力与钻井液曲线参考">
@@ -375,14 +375,14 @@ export default function Settings() {
           </ThresholdGroup>
 
           <ThresholdGroup title="曲线与基线参考参数">
-            <ThresholdInput label="立压残差参考线 1" value={draft.sppResidualWarning} activeValue={thresholds.sppResidualWarning} unit="MPa" onChange={set('sppResidualWarning')} min={0.1} max={2} step={0.01} description="仅用于前端参考显示" level="warning" />
-            <ThresholdInput label="立压残差参考线 2" value={draft.sppResidualCritical} activeValue={thresholds.sppResidualCritical} unit="MPa" onChange={set('sppResidualCritical')} min={0.2} max={3} step={0.01} description="仅用于前端参考显示" level="critical" />
-            <PlainConfigInput label="CUSUM 参考区间" value={draft.cusumDecisionInterval} unit="score" onChange={set('cusumDecisionInterval')} min={2} max={9} step={0.1} description="历史曲线显示参数" />
+            <ThresholdInput label="立压变化量参考线 1" value={draft.sppResidualWarning} activeValue={thresholds.sppResidualWarning} unit="MPa" onChange={set('sppResidualWarning')} min={0.1} max={2} step={0.01} description="仅用于曲线参考显示" level="warning" />
+            <ThresholdInput label="立压变化量参考线 2" value={draft.sppResidualCritical} activeValue={thresholds.sppResidualCritical} unit="MPa" onChange={set('sppResidualCritical')} min={0.2} max={3} step={0.01} description="仅用于曲线参考显示" level="critical" />
+            <PlainConfigInput label="趋势参考线间隔" value={draft.cusumDecisionInterval} unit="score" onChange={set('cusumDecisionInterval')} min={2} max={9} step={0.1} description="历史曲线显示参数" />
             <PlainConfigInput label="RLS 遗忘因子" value={draft.rlsForgettingFactor} unit="lambda" onChange={set('rlsForgettingFactor')} min={0.9} max={0.999} step={0.001} description="基线质量显示参数" />
-            <PlainConfigInput label="MAD 容忍倍数" value={draft.madTolerance} unit="x" onChange={set('madTolerance')} min={1} max={6} step={0.1} description="历史偏离显示参数" />
+            <PlainConfigInput label="偏离容忍倍数" value={draft.madTolerance} unit="x" onChange={set('madTolerance')} min={1} max={6} step={0.1} description="历史偏离显示参数" />
             <PlainConfigInput label="全烃迟到窗口" value={draft.gasLagWindowMinutes} unit="min" onChange={set('gasLagWindowMinutes')} min={10} max={180} step={5} description="气测窗口显示参数" />
             <PlainConfigInput label="停泵出口流量衰减率" value={draft.stopFlowDecayThreshold} unit="%" onChange={set('stopFlowDecayThreshold')} min={40} max={98} step={1} description="停泵分析参考参数" />
-            <PlainConfigInput label="冷启动周期数" value={draft.coldStartCycleCount} unit="cycles" onChange={set('coldStartCycleCount')} min={5} max={40} step={1} description="基线进入正式评估前的周期要求" />
+            <PlainConfigInput label="基线样本目标" value={draft.coldStartCycleCount} unit="组" onChange={set('coldStartCycleCount')} min={5} max={40} step={1} description="基线质量展示所需样本量" />
             <PlainConfigInput label="协方差惩罚参考值" value={draft.covariancePenaltyThreshold} unit="rho" onChange={set('covariancePenaltyThreshold')} min={0.1} max={0.9} step={0.01} description="历史多参数分析参考值" />
           </ThresholdGroup>
         </div>
@@ -402,7 +402,7 @@ export default function Settings() {
                 ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100'
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200'
           }`}>
-            {configInvalid ? '参考线校验失败：参考线 1 必须低于参考线 2。' : changedCount > 0 ? '存在未保存草稿，保存后仅同步到前端曲线显示。' : '所有显示参数与当前生效值一致。'}
+            {configInvalid ? '参考线校验失败：参考线 1 必须低于参考线 2。' : changedCount > 0 ? '存在未保存草稿，保存后仅同步到曲线显示。' : '所有显示参数与当前生效值一致。'}
           </div>
           <div className="mb-4 grid grid-cols-2 gap-2">
             <button onClick={handleReset} className="ops-button-secondary justify-center px-2">
@@ -423,9 +423,9 @@ export default function Settings() {
               ['总池体积变化严重', `${thresholds.pitGainCritical} m3`],
               ['套压预警', `${thresholds.casingPressureWarning} MPa`],
               ['密度下限', `${thresholds.mudWeightWarning} g/cm3`],
-              ['立压残差', `${thresholds.sppResidualWarning}/${thresholds.sppResidualCritical} MPa`],
-              ['CUSUM曲线参考', `${thresholds.cusumDecisionInterval} 分`],
-              ['MAD曲线参考', `${thresholds.madTolerance}x`],
+              ['立压变化量', `${thresholds.sppResidualWarning}/${thresholds.sppResidualCritical} MPa`],
+              ['趋势曲线参考', `${thresholds.cusumDecisionInterval} 分`],
+              ['偏离曲线参考', `${thresholds.madTolerance}x`],
             ].map(([label, value]) => (
               <div key={label} className="ops-inline-tile flex items-center justify-between px-3 py-2">
                 <span className="ops-muted">{label}</span>

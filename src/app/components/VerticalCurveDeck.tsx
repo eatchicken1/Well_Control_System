@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BackendLevel, FlowDataPoint, PressureDataPoint, ThresholdSettings } from '../context/WellControlContext';
 import { useIsDarkMode } from '../hooks/useChartTheme';
@@ -18,6 +19,7 @@ interface CurvePoint {
   depth: number;
   bitDepth: number;
   level: BackendLevel;
+  eventId?: string | null;
   values: Record<string, number>;
 }
 
@@ -37,6 +39,14 @@ interface TrackConfig {
   subtitle?: string;
   width?: string;
   curves: TrackCurve[];
+}
+
+interface TrackHover {
+  x: number;
+  y: number;
+  index: number;
+  clientX: number;
+  clientY: number;
 }
 
 const AXIS_WIDTH = 108;
@@ -116,13 +126,23 @@ function TrackHeader({ config, isAxis }: { config: TrackConfig; isAxis?: boolean
       <div className="flex min-w-0 items-start justify-between gap-1.5">
         <div className="min-w-0">
           <div className="vertical-lane-title" title={config.title}>{config.title}</div>
-          {config.subtitle ? <div className="vertical-lane-subtitle">{config.subtitle}</div> : null}
         </div>
-        {!isAxis ? <div className="vertical-lane-unit">{primaryCurve?.unit || ' '}</div> : null}
+        {!isAxis ? (
+          <div
+            className="vertical-lane-unit"
+            style={{ color: accentColor, borderColor: `${accentColor}33`, backgroundColor: `${accentColor}10` }}
+          >
+            {primaryCurve?.unit || ' '}
+          </div>
+        ) : null}
       </div>
       {!isAxis && ticks.length > 0 ? (
         <div className="vertical-lane-scale" aria-hidden="true">
-          {ticks.map((tick, index) => <span key={index}>{fmt(tick)}</span>)}
+          {ticks.map((tick, index) => (
+            <span key={index} style={{ color: accentColor, opacity: index === 1 ? 0.72 : 0.9 }}>
+              {fmt(tick)}
+            </span>
+          ))}
         </div>
       ) : null}
     </div>
@@ -160,6 +180,8 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
   if (maxLength === 0) return [];
   const startDepth = Math.max(0, wellDepth - maxLength * 0.6);
   const currentBitDepth = Number.isFinite(currentDepth) ? currentDepth : wellDepth;
+  const firstPressure = pressureData.find((point) => Number.isFinite(point.spp ?? point.drillPipePressure));
+  const sppBase = finite(firstPressure?.spp ?? firstPressure?.drillPipePressure, 0);
 
   return Array.from({ length: maxLength }).map((_, index) => {
     const flow = flowData[Math.max(0, index - (maxLength - flowData.length))];
@@ -175,6 +197,7 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
     const drillPipePressure = finite(pressure?.drillPipePressure, 0);
     const spp = finite(pressure?.spp, drillPipePressure);
     const sppPredicted = finite(pressure?.sppPredicted, spp + 0.05);
+    const sppChange = spp - sppBase;
     const spm = finite(flow?.spm, flowIn > 20 ? 88 : 0);
     const totalGas = finite(flow?.totalGas, 0.65);
     const hookLoad = finite(flow?.hookLoad, 314);
@@ -186,6 +209,7 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
       depth: startDepth + index * 0.6,
       bitDepth,
       level,
+      eventId: flow?.eventId ?? pressure?.eventId ?? null,
       values: {
         flowIn,
         flowOut,
@@ -196,6 +220,7 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
         drillPipePressure,
         spp,
         sppPredicted,
+        sppChange,
         spm,
         totalGas,
         hookLoad,
@@ -223,7 +248,7 @@ function VerticalTrack({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [sizeTick, setSizeTick] = useState(0);
-  const [hover, setHover] = useState<{ x: number; y: number; index: number } | null>(null);
+  const [hover, setHover] = useState<TrackHover | null>(null);
   const isAxis = config.curves.length === 0;
   const palette = isDark ? CANVAS_PALETTE.dark : CANVAS_PALETTE.light;
   const pad = mobileDense ? MOBILE_PAD : compact ? COMPACT_PAD : PAD;
@@ -283,16 +308,30 @@ function VerticalTrack({
     const yForIndex = (index: number) => plotY + (index / (points.length - 1)) * plotH;
     const latest = points[points.length - 1];
 
-    for (let i = 0; i < points.length - 1; i += 1) {
-      if (points[i].level >= 2) {
-        const y1 = yForIndex(i);
-        const y2 = yForIndex(i + 1);
-        ctx.fillStyle = points[i].level >= 4 ? 'rgba(239, 68, 68, 0.08)' : 'rgba(245, 158, 11, 0.08)';
-        ctx.fillRect(plotX, y1, plotW, Math.max(1, y2 - y1));
-        ctx.fillStyle = points[i].level >= 4 ? '#ef4444' : points[i].level === 3 ? '#f97316' : '#f59e0b';
-        ctx.fillRect(plotX, y1, 2, Math.max(1, y2 - y1));
+    const eventBandMap = new Map<string, { start: number; end: number; level: BackendLevel; eventId: string }>();
+    points.forEach((point, index) => {
+      if (!point.eventId || point.level < 2) return;
+      const existing = eventBandMap.get(point.eventId);
+      if (existing) {
+        existing.start = Math.min(existing.start, index);
+        existing.end = Math.max(existing.end, index);
+        existing.level = Math.max(existing.level, point.level) as BackendLevel;
+        return;
       }
-    }
+      eventBandMap.set(point.eventId, { start: index, end: index, level: point.level, eventId: point.eventId });
+    });
+    const eventBands = [...eventBandMap.values()].sort((a, b) => a.start - b.start);
+    eventBands.forEach((band) => {
+      const y1 = yForIndex(band.start);
+      const y2 = yForIndex(Math.min(points.length - 1, band.end + 1));
+      const height = Math.max(2, y2 - y1);
+      ctx.fillStyle = band.level >= 4
+        ? 'rgba(239, 68, 68, 0.075)'
+        : band.level >= 3
+          ? 'rgba(249, 115, 22, 0.045)'
+          : 'rgba(245, 158, 11, 0.032)';
+      ctx.fillRect(plotX, y1, plotW, height);
+    });
 
     ctx.lineWidth = 0.7;
     for (let i = 0; i <= 6; i += 1) {
@@ -446,12 +485,12 @@ function VerticalTrack({
     const plotH = Math.max(1, rect.height - pad.top - pad.bottom);
     const ratio = Math.max(0, Math.min(1, (y - pad.top) / plotH));
     const index = Math.round(ratio * Math.max(0, points.length - 1));
-    setHover({ x: event.clientX - rect.left, y: event.clientY - rect.top, index });
+    setHover({ x: event.clientX - rect.left, y: event.clientY - rect.top, clientX: event.clientX, clientY: event.clientY, index });
   };
 
   const hoverPoint = hover ? points[hover.index] : null;
-  const tooltipX = hover ? Math.min(Math.max(8, hover.x + 10), 140) : 0;
-  const tooltipY = hover ? Math.min(Math.max(8, hover.y + 10), 220) : 0;
+  const tooltipX = hover ? Math.min(hover.clientX + 12, window.innerWidth - 190) : 0;
+  const tooltipY = hover ? Math.min(hover.clientY + 12, window.innerHeight - 150) : 0;
 
   const latest = points.at(-1);
   const flexValue = fillViewport
@@ -483,8 +522,8 @@ function VerticalTrack({
           onPointerMove={handlePointerMove}
           onPointerLeave={() => setHover(null)}
         />
-        {hoverPoint ? (
-          <div className="vertical-lane-tooltip" style={{ left: tooltipX, top: tooltipY }}>
+        {hoverPoint ? createPortal(
+          <div className="vertical-lane-tooltip vertical-lane-tooltip-fixed" style={{ left: tooltipX, top: tooltipY }}>
             <div className="font-semibold">{timeLabel(hoverPoint.time)}</div>
             {isAxis ? (
               <>
@@ -497,7 +536,8 @@ function VerticalTrack({
                 <span className="tabular-nums">{fmt(hoverPoint.values[curve.key])} {curve.unit}</span>
               </div>
             ))}
-          </div>
+          </div>,
+          document.body,
         ) : null}
       </div>
     </div>
@@ -510,7 +550,6 @@ function AxisLane({ points, compact, mobileDense }: { points: CurvePoint[]; comp
     <VerticalTrack
       config={{
         title: '时间/井深',
-        subtitle: '钻头位置 · 秒',
         width: mobileDense ? `0 0 ${MOBILE_AXIS_WIDTH}px` : `0 0 ${AXIS_WIDTH}px`,
         curves: [],
       }}
@@ -538,14 +577,24 @@ export function VerticalCurveDeck({
   const mobileDense = useNarrowViewport() && compact;
   const fillTracks = fillViewport && !mobileDense;
   const points = useMemo(() => buildTrackData(flowData, pressureData, wellDepth ?? currentDepth ?? 3200, currentDepth, pitGain), [flowData, pressureData, wellDepth, currentDepth, pitGain]);
-  const warningCount = points.filter((point) => point.level === 2 || point.level === 3).length;
-  const criticalCount = points.filter((point) => point.level >= 4).length;
+  const eventStats = useMemo(() => {
+    const byId = new Map<string, BackendLevel>();
+    points.forEach((point) => {
+      if (!point.eventId || point.level < 2) return;
+      byId.set(point.eventId, Math.max(byId.get(point.eventId) || 0, point.level) as BackendLevel);
+    });
+    const levels = [...byId.values()];
+    return {
+      warningCount: levels.filter((level) => level === 2 || level === 3).length,
+      criticalCount: levels.filter((level) => level >= 4).length,
+    };
+  }, [points]);
   const pitGainValues = points.map((point) => point.values.pitGain);
   const pitVolumeValues = points.map((point) => point.values.pitVolume);
   const flowValues = points.flatMap((point) => [point.values.flowIn, point.values.flowOut]);
   const returnValues = points.map((point) => point.values.returnResponse || 0);
   const casingValues = points.map((point) => point.values.casingPressure);
-  const sppValues = points.flatMap((point) => [point.values.spp, point.values.sppPredicted]);
+  const sppChangeValues = points.map((point) => point.values.sppChange);
   const spmValues = points.map((point) => point.values.spm);
   const gasValues = points.map((point) => point.values.totalGas);
   const hookValues = points.map((point) => point.values.hookLoad);
@@ -553,7 +602,6 @@ export function VerticalCurveDeck({
   const tracks: TrackConfig[] = [
     {
       title: '出口/入口流量',
-      subtitle: '出口流量响应辅助判别',
       width: '1.15 1 150px',
       curves: [
         { key: 'flowOut', label: '出口', unit: 'L/s', color: '#2563eb', range: niceRange(flowValues, [0, 100]) },
@@ -570,11 +618,10 @@ export function VerticalCurveDeck({
       ],
     },
     {
-      title: '立压',
+      title: '立压变化量',
       width: '1 1 134px',
       curves: [
-        { key: 'spp', label: '立压', unit: 'MPa', color: '#0f766e', range: niceRange(sppValues, [19, 23]) },
-        { key: 'sppPredicted', label: '模型', unit: 'MPa', color: '#94a3b8', range: niceRange(sppValues, [19, 23]) },
+        { key: 'sppChange', label: '变化量', unit: 'MPa', color: '#0f766e', range: niceRange(sppChangeValues, [-1, 1], 0.18), baseline: 0 },
       ],
     },
     {
@@ -616,8 +663,8 @@ export function VerticalCurveDeck({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
             <span>样本 {points.length}</span>
-            <span>后端预警点 {warningCount}</span>
-            <span>后端确认点 {criticalCount}</span>
+            <span>预警事件 {eventStats.warningCount}</span>
+            <span>确认事件 {eventStats.criticalCount}</span>
           </div>
           <div className="text-[11px] text-slate-500 dark:text-slate-400">时间向下 · 自动铺满</div>
         </div>
