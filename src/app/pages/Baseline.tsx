@@ -1,5 +1,6 @@
 import { Activity, DatabaseZap, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useWellControl } from '../context/WellControlContext';
+import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 
 function BaselineMetric({ label, value, note }: { label: string; value: string; note: string }) {
   return (
@@ -12,21 +13,31 @@ function BaselineMetric({ label, value, note }: { label: string; value: string; 
 }
 
 export default function Baseline() {
-  const { baselineInfo, historyRecords, handleReset, thresholds } = useWellControl();
+  const { baselineInfo, historyRecords, handleReset, thresholds, monitoredWellIds, realtimeTabWellIds, selectedWellId, wells } = useWellControl();
+  const activeWellIds = [...new Set([
+    ...monitoredWellIds,
+    ...realtimeTabWellIds,
+    ...(selectedWellId ? [selectedWellId] : []),
+  ])];
+  const activeWellLabel = wells.find((well) => well.wellId === selectedWellId)?.wellName || wells.find((well) => well.wellId === activeWellIds[0])?.wellName || '未选择井';
   const latestSamples = historyRecords.slice(-12).reverse();
 
   return (
     <div className="ops-page space-y-4">
+      <MonitoringWellTabs />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="ops-eyebrow">Baseline</div>
+          <div className="ops-eyebrow">基线</div>
           <h1 className="ops-title">基线管理</h1>
-          <p className="text-sm ops-muted">展示当前井的有效样本、基线质量和异常样本处理情况</p>
+          <p className="text-sm ops-muted">展示已选择监测井的有效样本、基线质量和异常样本处理情况</p>
         </div>
         <button onClick={handleReset} className="ops-button-secondary">
           <RotateCcw className="h-4 w-4" />
           重置当前井基线
         </button>
+      </div>
+      <div className="ops-inline-tile px-3 py-2 text-sm">
+        当前井组：{activeWellIds.length > 0 ? `${activeWellLabel} 等 ${activeWellIds.length} 口` : '未选择井'}
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">

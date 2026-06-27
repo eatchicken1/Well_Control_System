@@ -1,9 +1,10 @@
 import { NavLink, Outlet } from 'react-router';
 import { useLocation } from 'react-router';
-import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, Gauge, Clock3, RadioTower, BarChart3, Play, Pause, RotateCcw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, Gauge, Clock3, RadioTower, BarChart3, Play, Pause, RotateCcw, LogOut, UserCircle, MapPinned, ChevronRight, SignalHigh, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
+import { useAuth } from '../context/AuthContext';
 
 const navItems = [
   { to: '/', label: '总览', icon: LayoutDashboard, end: true },
@@ -91,7 +92,7 @@ function HeaderBackendLevelChip({ detection }: { detection: ReturnType<typeof us
 
 function BackendLevelDots({ level, collapsed }: { level: BackendLevel; collapsed?: boolean }) {
   return (
-    <div className={`control-tower-level-mini ${collapsed ? '' : 'control-tower-level-inline'}`} title={`L${level} ${BACKEND_LEVEL_META[level].label}`}>
+    <div className={`control-tower-level-mini ${collapsed ? 'control-tower-level-mini-collapsed' : 'control-tower-level-inline'}`} title={`L${level} ${BACKEND_LEVEL_META[level].label}`}>
       L{level}
     </div>
   );
@@ -113,6 +114,86 @@ function DataSourcePill({
       <div className="min-w-0">
         <div className="truncate">{state.status === 'connected' ? '真实数据' : '数据源'}</div>
         <div className="truncate text-[10px] opacity-70">{state.status === 'connected' ? '已连接' : state.status === 'connecting' ? '接入中' : state.status === 'paused' ? '待启动' : '离线'} · {state.recordCount}</div>
+      </div>
+    </div>
+  );
+}
+
+function qualityTone(grade?: string) {
+  const normalized = String(grade || '').toUpperCase();
+  if (normalized === 'A') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200';
+  if (normalized === 'B') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200';
+  if (normalized === 'C') return 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900/70 dark:bg-orange-950/20 dark:text-orange-200';
+  return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300';
+}
+
+function statusLabel(status: string) {
+  if (status === 'connected') return '在线';
+  if (status === 'connecting') return '接入中';
+  if (status === 'paused') return '待启动';
+  if (status === 'error') return '离线';
+  return '未知';
+}
+
+function WellFleetStrip() {
+  const { wells, wellRuntimeStates, selectedWellId, selectWell } = useWellControl();
+  const fleetStats = useMemo(() => {
+    const total = wells.length;
+    const running = Object.values(wellRuntimeStates).filter((item) => item.isRunning).length;
+    const connected = Object.values(wellRuntimeStates).filter((item) => item.status === 'connected').length;
+    const warnings = Object.values(wellRuntimeStates).filter((item) => Number(item.backendLevel) >= 2).length;
+    return { total, running, connected, warnings };
+  }, [wellRuntimeStates, wells.length]);
+
+  return (
+    <div className="hidden border-b border-slate-200 bg-white/90 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950/90 lg:block">
+      <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+          <MapPinned className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-300" />
+          井群
+          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">{fleetStats.total}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
+          <SignalHigh className="h-3.5 w-3.5" />
+          在线 {fleetStats.connected}
+        </div>
+        <div className="flex shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+          运行 {fleetStats.running}
+        </div>
+        <div className="flex shrink-0 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          预警 {fleetStats.warnings}
+        </div>
+        <div className="ops-scroll flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+          {wells.map((well) => {
+            const runtime = wellRuntimeStates[well.wellId];
+            const selected = selectedWellId === well.wellId;
+            const backendLevel = runtime?.backendLevel ?? 0;
+            const dotTone = backendLevel >= 4 ? 'bg-red-500' : backendLevel >= 2 ? 'bg-amber-500' : runtime?.status === 'connected' ? 'bg-emerald-500' : 'bg-slate-400';
+            const gradeTone = qualityTone(well.qualityGrade);
+            return (
+              <button
+                key={well.wellId}
+                type="button"
+                onClick={() => selectWell(well.wellId)}
+                className={`flex min-w-[210px] items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${selected ? 'border-cyan-300 bg-cyan-50/80 text-slate-900 dark:border-cyan-700/70 dark:bg-cyan-950/25 dark:text-slate-100' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900'}`}
+                title={`${well.wellName} · ${well.block || '实时监测井'} · ${statusLabel(runtime?.status || 'paused')}`}
+              >
+                <span className={`ops-led h-2.5 w-2.5 shrink-0 rounded-full ${dotTone}`} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{well.wellName}</span>
+                  <span className="block truncate text-[10px] ops-muted">{well.block || '实时监测井'} · {well.recordCount?.toLocaleString('zh-CN') || runtime?.recordCount?.toLocaleString('zh-CN') || 0} 条</span>
+                </span>
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <span className={`rounded px-1.5 py-0.5 text-[10px] ${gradeTone}`}>Q{well.qualityGrade || 'UNK'}</span>
+                  <span className="text-[10px] ops-muted">{statusLabel(runtime?.status || 'paused')}</span>
+                </span>
+                {selected && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-300" />}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -179,6 +260,7 @@ function OperationsStrip({
 
 export function Layout() {
   const location = useLocation();
+  const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('wcs-sidebar-collapsed') === 'true');
@@ -208,7 +290,8 @@ export function Layout() {
     selectStartFrame,
     updateSelectedStartTime,
   } = useWellControl();
-  const unacknowledgedCount = alerts.filter((a) => !a.acknowledged && (a.level === 'critical' || a.level === 'warning')).length;
+  const currentWellAlerts = alerts.filter((a) => !a.wellId || a.wellId === selectedWellId);
+  const unacknowledgedCount = currentWellAlerts.filter((a) => !a.acknowledged && (a.level === 'critical' || a.level === 'warning')).length;
   const latestSampleTime = flowHistory.at(-1)?.time ?? historyRecords.at(-1)?.time ?? null;
 
   const statusColors = {
@@ -226,6 +309,7 @@ export function Layout() {
   const startDisabled = !isRunning && !canStartMonitoring;
   const actionLabel = isRunning ? '暂停监测' : canStartMonitoring ? '开始监测' : '先选时间';
   const actionTone = isRunning ? 'ops-button-secondary' : startDisabled ? 'ops-button-disabled' : 'ops-button-primary';
+  const currentWellBadge = `${wellInfo.wellName} · ${wellInfo.block || '实时监测井'}`;
 
   useEffect(() => {
     localStorage.setItem('wcs-sidebar-collapsed', String(sidebarCollapsed));
@@ -311,7 +395,7 @@ export function Layout() {
                     </span>
                   </span>
                   {label === '报警管理' && unacknowledgedCount > 0 && (
-                    <span className={`control-tower-nav-badge ${sidebarCollapsed ? 'control-tower-nav-badge-collapsed absolute right-1 top-1' : ''} flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs text-white`}>
+                    <span className={`control-tower-nav-badge ${sidebarCollapsed ? 'control-tower-nav-badge-collapsed absolute right-0.5 top-0.5' : ''} flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs text-white`}>
                       {unacknowledgedCount > 9 ? '9+' : unacknowledgedCount}
                     </span>
                   )}
@@ -339,159 +423,25 @@ export function Layout() {
             <Menu className="w-5 h-5" />
           </button>
           <button
-            className="sm:hidden p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-            onClick={() => setMobileControlsOpen((v) => !v)}
-            title="切换井和起点"
-            aria-expanded={mobileControlsOpen}
-          >
-            <Clock3 className="w-5 h-5" />
-          </button>
-          <button
             className="hidden lg:flex p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
             onClick={() => setSidebarCollapsed((v) => !v)}
             title={sidebarCollapsed ? '展开导航' : '收缩导航'}
           >
             {sidebarCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
           </button>
-          <div className="topbar-controls hidden min-w-0 items-center gap-2 sm:flex">
-            <select
-              value={selectedWellId}
-              onChange={(event) => selectWell(event.target.value)}
-              className="ops-field max-w-[210px] px-2.5 py-1.5 text-xs"
-              title="切换井号"
-            >
-              {wells.map((well) => (
-                <option key={well.wellId} value={well.wellId}>
-                  {well.wellId} · {well.wellName}
-                </option>
-              ))}
-            </select>
-            <select
-              value={startSelectValue}
-              onChange={(event) => selectStartFrame(Number(event.target.value))}
-              className="ops-field max-w-[220px] px-2.5 py-1.5 text-xs"
-              title="选择开始检测时间"
-            >
-              {startOptions.map((option) => (
-                <option key={`${option.frame}-${option.timestamp}`} value={option.frame}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <input
-              type="datetime-local"
-              step="1"
-              value={selectedStartTime}
-              onChange={(event) => updateSelectedStartTime(event.target.value)}
-              className="ops-field max-w-[196px] px-2.5 py-1.5 text-xs"
-              title="手动选择开始检测时间"
-            />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-slate-900">井控溢流监测系统</div>
+            <div className="truncate text-[11px] text-slate-500">{wellInfo.wellName} · {location.pathname === '/' ? '多井总览' : navItems.find((item) => item.to === location.pathname)?.label || '业务页面'}</div>
           </div>
           <div className="flex-1" />
-          <div className="hidden items-center gap-2 xl:flex">
-            <HeaderBackendLevelChip detection={backendDetection} />
+          <div className="top-user-chip hidden items-center gap-2 md:flex" title={user?.username || '当前用户'}>
+            <UserCircle className="h-4 w-4 shrink-0 text-slate-500" />
+            <span className="truncate">{user?.displayName || user?.username || 'operator'}</span>
           </div>
-          <DataSourcePill state={dataSourceState} />
-          <button
-            onClick={() => setIsRunning(isRunning ? false : true)}
-            disabled={startDisabled}
-            className={`${actionTone} topbar-action`}
-            title={selectedStartTime ? `开始时间 ${selectedStartTime.replace('T', ' ')}` : '请先选择开始检测时间'}
-          >
-            {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            {actionLabel}
+          <button onClick={() => void logout()} className="ops-button-secondary topbar-icon-action" title="退出登录">
+            <LogOut className="h-4 w-4" />
           </button>
-          <button onClick={handleReset} className="ops-button-secondary topbar-action">
-            <RotateCcw className="h-4 w-4" />
-            复位
-          </button>
-          <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
-            alertStatus === 'critical' ? 'border-red-200 bg-red-100 text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200' :
-            alertStatus === 'warning' ? 'border-amber-200 bg-amber-100 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200' :
-            'border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-200'
-          }`}>
-            <div className={`ops-led w-1.5 h-1.5 rounded-full ${statusColors[alertStatus]}`} data-state={alertStatus} />
-            L{backendDetection.publicLevel} {backendMeta.label}
-          </div>
         </header>
-
-        {mobileControlsOpen && (
-          <div className="border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950 sm:hidden">
-            <div className="grid gap-2">
-              <select
-                value={selectedWellId}
-                onChange={(event) => selectWell(event.target.value)}
-                className="ops-field w-full px-2.5 py-2 text-xs"
-                title="切换井号"
-              >
-                {wells.map((well) => (
-                  <option key={well.wellId} value={well.wellId}>
-                    {well.wellId} · {well.wellName}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={startSelectValue}
-                onChange={(event) => selectStartFrame(Number(event.target.value))}
-                className="ops-field w-full px-2.5 py-2 text-xs"
-                title="选择开始检测时间"
-              >
-                {startOptions.length > 0 ? (
-                  startOptions.map((option) => (
-                    <option key={`${option.frame}-${option.timestamp}`} value={option.frame}>
-                      {option.label}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">等待时间索引</option>
-                )}
-              </select>
-              <input
-                type="datetime-local"
-                step="1"
-                value={selectedStartTime}
-                onChange={(event) => updateSelectedStartTime(event.target.value)}
-                className="ops-field w-full px-2.5 py-2 text-xs"
-                title="手动选择开始检测时间"
-              />
-              <div className="grid grid-cols-2 gap-2 text-[11px]">
-                <div className="ops-inline-tile px-2.5 py-2">
-                  <div className="ops-muted">当前起点</div>
-                  <div className="mt-1 truncate text-slate-900 dark:text-slate-100">{mobileStartLabel}</div>
-                </div>
-                <div className="ops-inline-tile px-2.5 py-2">
-                  <div className="ops-muted">时间窗</div>
-                  <div className="mt-1 truncate text-slate-900 dark:text-slate-100">
-                    {timeBounds.discoveryTime || timeBounds.firstTime || '--'}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!isMonitoringRoute && (
-          <OperationsStrip
-            alertStatus={alertStatus}
-            isRunning={isRunning}
-            unacknowledgedCount={unacknowledgedCount}
-            latestSampleTime={latestSampleTime}
-            flowPointCount={flowHistory.length}
-            historyCount={historyRecords.length}
-            wellLabel={`${wellInfo.block} · ${wellInfo.crew}`}
-            baselineQuality={baselineInfo.qualityScore}
-          />
-        )}
-
-        {!isMonitoringRoute && (
-          <MobileTelemetry
-            returnResponse={currentData.returnResponse}
-            pitGain={currentData.pitGain}
-            totalGas={currentData.totalGas}
-            backendLevel={backendDetection.publicLevel}
-            activeSignals={backendDetection.activeSignals}
-          />
-        )}
 
         {/* Page content */}
         <main className={`ops-scroll flex-1 p-3 lg:p-4 ${isMonitoringRoute ? 'overflow-auto lg:overflow-hidden' : 'overflow-auto'}`} data-current-sample-time={currentSampleTime}>

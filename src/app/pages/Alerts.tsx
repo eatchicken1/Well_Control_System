@@ -2,6 +2,7 @@ import { useState, type ElementType } from 'react';
 import { AlertTriangle, Check, CheckCheck, Clock3, Filter, ShieldAlert, Siren, X } from 'lucide-react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
+import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 
 type BackendLevelFilter = 'all' | '2' | '3' | '4';
@@ -78,12 +79,24 @@ export default function Alerts() {
     acknowledgeAlert,
     acknowledgeAll,
     backendDetection,
+    wellInfo,
+    selectedWellId,
+    monitoredWellIds,
+    realtimeTabWellIds,
+    wells,
   } = useWellControl();
   const [levelFilter, setLevelFilter] = useState<BackendLevelFilter>('all');
   const [ackFilter, setAckFilter] = useState<AckFilter>('all');
   const [selectedAlertId, setSelectedAlertId] = useState<number | null>(null);
 
-  const filtered = alerts
+  const activeWellIds = [...new Set([
+    ...monitoredWellIds,
+    ...realtimeTabWellIds,
+    ...(selectedWellId ? [selectedWellId] : []),
+  ])];
+  const activeWellLabel = wells.find((well) => well.wellId === selectedWellId)?.wellName || wells.find((well) => well.wellId === activeWellIds[0])?.wellName || wellInfo.wellName;
+  const wellAlerts = alerts.filter((alert) => !alert.wellId || activeWellIds.length === 0 || activeWellIds.includes(alert.wellId));
+  const filtered = wellAlerts
     .filter((alert) => {
       if (levelFilter !== 'all' && alert.backendLevel !== Number(levelFilter)) return false;
       if (ackFilter === 'unacknowledged' && alert.acknowledged) return false;
@@ -92,13 +105,13 @@ export default function Alerts() {
     })
     .sort((a, b) => responsePriority(a.backendLevel, a.acknowledged) - responsePriority(b.backendLevel, b.acknowledged));
 
-  const countFor = (level: BackendLevel) => alerts.filter((alert) => alert.backendLevel === level && !alert.acknowledged).length;
+  const countFor = (level: BackendLevel) => wellAlerts.filter((alert) => alert.backendLevel === level && !alert.acknowledged).length;
   const l2Count = countFor(2);
   const l3Count = countFor(3);
   const l4Count = countFor(4);
-  const unacknowledgedCount = alerts.filter((alert) => !alert.acknowledged).length;
-  const acknowledgedCount = alerts.length - unacknowledgedCount;
-  const selectedAlert = selectedAlertId == null ? null : alerts.find((alert) => alert.id === selectedAlertId) ?? null;
+  const unacknowledgedCount = wellAlerts.filter((alert) => !alert.acknowledged).length;
+  const acknowledgedCount = wellAlerts.length - unacknowledgedCount;
+  const selectedAlert = selectedAlertId == null ? null : wellAlerts.find((alert) => alert.id === selectedAlertId) ?? null;
   const queueSteps = [
     {
       code: 'L2',
@@ -132,12 +145,13 @@ export default function Alerts() {
 
   return (
     <div className="ops-page space-y-4">
+      <MonitoringWellTabs />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="ops-eyebrow !text-slate-500">Event review</div>
+          <div className="ops-eyebrow !text-slate-500">报警复核</div>
           <h1 className="ops-title !text-slate-900">报警事件复核</h1>
           <p className="text-sm !text-slate-600">
-            当前报警等级 L{backendDetection.publicLevel} {BACKEND_LEVEL_META[backendDetection.publicLevel].label} · 事件 {alerts.length} 条
+            {activeWellIds.length > 0 ? `${activeWellLabel} 等 ${activeWellIds.length} 口` : wellInfo.wellName} · 当前报警等级 L{backendDetection.publicLevel} {BACKEND_LEVEL_META[backendDetection.publicLevel].label} · 事件 {wellAlerts.length} 条
           </p>
         </div>
         <div className="flex gap-2">
@@ -257,7 +271,7 @@ export default function Alerts() {
           <div className="ops-panel w-full max-w-xl overflow-hidden" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
               <div>
-                <div className="ops-eyebrow">Event detail</div>
+                <div className="ops-eyebrow">事件详情</div>
                 <h2 className="text-base text-slate-900 dark:text-slate-100">事件详情</h2>
               </div>
               <button className="ops-button-secondary px-2 py-1" onClick={() => setSelectedAlertId(null)} title="关闭">

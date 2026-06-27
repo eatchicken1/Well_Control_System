@@ -1648,6 +1648,17 @@
 .control-tower-sidebar {
   background: #ffffff;
   border-right: 1px solid rgba(203, 213, 225, 0.84);
+  width: 232px;
+  min-width: 232px;
+  max-width: 232px;
+  overflow: hidden;
+  will-change: width, min-width, max-width;
+}
+
+.control-tower-sidebar[data-collapsed='true'] {
+  width: 76px !important;
+  min-width: 76px !important;
+  max-width: 76px !important;
 }
 
 .control-tower-sidebar::before {
@@ -1816,6 +1827,12 @@
   font-size: 10px;
 }
 
+.control-tower-level-mini-collapsed {
+  margin-top: 2px;
+  align-self: center;
+  width: fit-content;
+}
+
 /* Realtime monitoring refinements */
 .vertical-lane-header {
   min-height: 48px;
@@ -1911,6 +1928,17 @@
   background: rgba(255, 255, 255, 0.98);
   padding: 8px 14px;
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.app-topbar > button[title='收缩导航'],
+.app-topbar > button[title='展开导航'] {
+  min-width: 36px;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  background: #ffffff;
+  color: #26313d;
 }
 
 .topbar-controls .ops-field {
@@ -2018,6 +2046,21 @@ body {
   min-height: 70px;
 }
 
+.control-tower-sidebar[data-collapsed='true'] .control-tower-logo-row {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+
+.control-tower-sidebar[data-collapsed='true'] .control-tower-status-wrap {
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
+.control-tower-sidebar[data-collapsed='true'] .control-tower-nav {
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
 .control-tower-nav-badge-collapsed {
   right: -7px !important;
   top: -7px !important;
@@ -2031,10 +2074,22 @@ body {
 
 .monitoring-workspace {
   padding-top: 0;
+  height: 100%;
+  min-height: 0;
 }
 
 .monitoring-lane-panel {
   border-top: 2px solid rgba(15, 118, 110, 0.9);
+}
+
+.monitoring-main-grid {
+  height: 100%;
+  min-height: 0;
+}
+
+.monitoring-side-stack {
+  height: 100%;
+  min-height: 0;
 }
 
 .ops-table th {
@@ -2056,4 +2111,548 @@ body {
   padding: 0 3px;
   font-size: 9px;
   line-height: 1;
+}
+
+.auth-shell,
+.auth-loading-screen {
+  min-height: 100vh;
+  background:
+    linear-gradient(90deg, rgba(8, 145, 178, 0.06) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+    #eef5f9;
+  background-size: 34px 34px;
+  color: #0f172a;
+}
+
+.auth-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+}
+
+.auth-login-panel {
+  display: grid;
+  width: min(980px, 100%);
+  grid-template-columns: minmax(0, 1.05fr) 390px;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.auth-login-copy {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-top: 3px solid rgba(220, 38, 38, 0.96);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 250, 252, 0.98)),
+    linear-gradient(90deg, rgba(8, 145, 178, 0.04), transparent 48%);
+  padding: 28px;
+}
+
+.auth-login-copy::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(8, 145, 178, 0.06) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(8, 145, 178, 0.05) 1px, transparent 1px);
+  background-size: 30px 30px;
+  mask-image: linear-gradient(90deg, black, transparent 76%);
+}
+
+.auth-login-copy > * {
+  position: relative;
+  z-index: 1;
+}
+
+.auth-brand-mark {
+  display: flex;
+  height: 44px;
+  width: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: white;
+}
+
+.auth-login-copy h1 {
+  margin-top: 18px;
+  max-width: 520px;
+  color: #0f172a;
+  font-family: 'IBM Plex Sans Condensed', 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  font-size: 2rem;
+  line-height: 1.08;
+}
+
+.auth-login-copy p {
+  margin-top: 10px;
+  max-width: 520px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.auth-signal-grid {
+  margin-top: 34px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auth-signal-grid div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(203, 213, 225, 0.88);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 10px;
+  color: #334155;
+  font-size: 12px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px;
+}
+
+.auth-form h2 {
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 1.35rem;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.auth-form label span {
+  color: #475569;
+  font-size: 12px;
+}
+
+.auth-form .ops-field {
+  height: 42px;
+  padding: 0 12px;
+}
+
+.auth-submit {
+  min-height: 42px;
+  margin-top: 2px;
+}
+
+.auth-error {
+  border: 1px solid rgba(248, 113, 113, 0.32);
+  border-radius: 7px;
+  background: rgba(254, 242, 242, 0.98);
+  padding: 10px 12px;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.auth-loading-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-loading-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  padding: 14px 16px;
+  color: #334155;
+  font-size: 14px;
+}
+
+.top-user-chip {
+  max-width: 160px;
+  border: 1px solid rgba(203, 213, 225, 0.88);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+  color: #334155;
+  font-size: 12px;
+}
+
+.topbar-icon-action {
+  height: 36px;
+  width: 36px;
+  padding: 0;
+}
+
+.password-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.password-form-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.password-form-grid span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+/* Multi-well command dashboard */
+.multiwell-dashboard {
+  min-height: 100%;
+}
+
+.multiwell-selector {
+  border-top: 2px solid rgba(15, 118, 110, 0.92);
+}
+
+.multiwell-search-row {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.multiwell-search-box {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0 12px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.multiwell-picker-list {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.multiwell-picker-item {
+  display: inline-flex;
+  min-width: 138px;
+  height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 10px;
+  color: #334155;
+  font-size: 13px;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.multiwell-picker-item:hover {
+  border-color: rgba(15, 118, 110, 0.32);
+  background: #f7fbfa;
+}
+
+.multiwell-picker-active {
+  border-color: rgba(15, 118, 110, 0.42);
+  background: #ecfdf5;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.multiwell-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 12px;
+}
+
+.multiwell-summary-tile {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.99);
+  padding: 10px 12px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.multiwell-summary-tile strong {
+  margin-left: auto;
+  color: #0f172a;
+  font-size: 1.45rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.multiwell-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.multiwell-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(203, 213, 225, 0.96);
+  border-top: 3px solid rgba(15, 118, 110, 0.9);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.99);
+  padding: 14px;
+}
+
+.multiwell-card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 30px;
+  align-items: start;
+  gap: 10px;
+}
+
+.multiwell-card-status {
+  display: flex;
+  min-width: 120px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.multiwell-card-warning {
+  border-top-color: rgba(245, 158, 11, 0.95);
+}
+
+.multiwell-card-critical {
+  border-top-color: rgba(220, 38, 38, 0.96);
+}
+
+.multiwell-icon-button {
+  display: inline-flex;
+  height: 30px;
+  width: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  border-radius: 7px;
+  background: #fff;
+  color: #64748b;
+}
+
+.multiwell-icon-button:hover {
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #b91c1c;
+}
+
+.multiwell-card-metric {
+  min-width: 0;
+  border: 1px solid rgba(226, 232, 240, 0.96);
+  border-radius: 7px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.82));
+  padding: 8px 9px;
+}
+
+.multiwell-card-metric span {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.multiwell-card-metric strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  margin-top: 3px;
+  color: #0f172a;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiwell-card-toolbar {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(86px, 0.8fr) minmax(104px, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.multiwell-card-progress {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  border: 1px solid rgba(226, 232, 240, 0.96);
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 7px 9px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.multiwell-card-progress-live {
+  border-color: rgba(14, 165, 233, 0.28);
+  background: #f0f9ff;
+  color: #075985;
+}
+
+.multiwell-card-action {
+  min-height: 34px;
+  padding: 0 9px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.multiwell-card-action:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.multiwell-card-action svg {
+  flex: 0 0 auto;
+}
+
+.multiwell-event-panel {
+  display: flex;
+  min-height: 0;
+  max-height: calc(100vh - 210px);
+  flex-direction: column;
+  border-top: 2px solid rgba(220, 38, 38, 0.88);
+}
+
+.multiwell-event-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.multiwell-event-card {
+  display: block;
+  width: 100%;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-left: 3px solid rgba(245, 158, 11, 0.92);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  text-align: left;
+}
+
+.multiwell-event-card + .multiwell-event-card {
+  margin-top: 8px;
+}
+
+.multiwell-event-card:hover {
+  background: #f8fafc;
+}
+
+.multiwell-event-critical {
+  border-left-color: rgba(220, 38, 38, 0.96);
+}
+
+.multiwell-event-warning {
+  border-left-color: rgba(245, 158, 11, 0.92);
+}
+
+.multiwell-footnote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.monitoring-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.99);
+  padding: 7px;
+}
+
+.monitoring-tab {
+  display: inline-flex;
+  min-width: 156px;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 7px;
+  background: #fff;
+  padding: 0 10px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.monitoring-tab:hover {
+  background: #f8fafc;
+}
+
+.monitoring-tab-active {
+  border-color: rgba(15, 118, 110, 0.42);
+  background: #ecfdf5;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.monitoring-tab-level {
+  margin-left: auto;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.monitoring-empty-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+}
+
+@media (max-width: 860px) {
+  .auth-login-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .password-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .multiwell-search-row,
+  .multiwell-dashboard-grid,
+  .multiwell-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .multiwell-event-panel {
+    max-height: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .auth-login-copy,
+  .auth-form {
+    padding: 18px;
+  }
+
+  .auth-signal-grid {
+    grid-template-columns: 1fr;
+  }
 }

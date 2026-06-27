@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import { appendAccessToken, authenticatedFetch } from '../api/authToken';
 
 export type AlertStatus = 'normal' | 'warning' | 'critical';
 export type BackendLevel = 0 | 1 | 2 | 3 | 4;
@@ -17,6 +18,16 @@ export interface WellInfo {
   startTime?: string;
   endTime?: string;
   discoveryTime?: string;
+  wellNameStd?: string;
+  wellNameRaw?: string;
+  blockName?: string;
+  depthMinM?: number;
+  depthMaxM?: number;
+  qualityGrade?: string;
+  recordCount?: number;
+  realtimeTableName?: string;
+  sampleStartTime?: string;
+  sampleEndTime?: string;
 }
 
 export interface MonitoringData {
@@ -82,6 +93,12 @@ export interface AlgorithmInterfaceInfo {
 
 export interface Alert {
   id: number;
+  wellId?: string;
+  wellName?: string;
+  wellBlock?: string;
+  wellDepth?: number;
+  bitDepth?: number;
+  formation?: string;
   time: string;
   date: string;
   lastTime?: string;
@@ -180,7 +197,6 @@ export interface ThresholdSettings {
 }
 
 export const DEFAULT_REALTIME_ENDPOINT = '/api/realtime';
-const LEGACY_REALTIME_ENDPOINT = 'http://127.0.0.1:8787/api/realtime';
 
 export interface RealtimeStartOption {
   frame: number;
@@ -214,6 +230,31 @@ export interface DataSourceState {
   recordCount: number;
 }
 
+export interface WellRuntimeState {
+  wellId: string;
+  status: DataSourceConnectionStatus;
+  isRunning: boolean;
+  recordCount: number;
+  lastRecordAt: string | null;
+  backendLevel: BackendLevel;
+  monitoringStartedAt: string | null;
+  startedSampleTime: string | null;
+  message: string;
+  updatedAt: string;
+}
+
+interface WellMonitoringSnapshot {
+  currentData: MonitoringData;
+  currentSampleTime: string;
+  flowHistory: FlowDataPoint[];
+  pressureHistory: PressureDataPoint[];
+  backendDetection: BackendDetectionState;
+  historyRecords: HistoryRecord[];
+  cycleInfo: CycleInfo;
+  shutInActive: boolean;
+  shutInStartedAt: string | null;
+}
+
 interface DataSourceAdapter {
   connect: (well: WellInfo, seed: MonitoringData) => void;
   disconnect: () => void;
@@ -234,6 +275,9 @@ interface WellControlContextType {
   cycleInfo: CycleInfo;
   baselineInfo: BaselineInfo;
   wells: WellInfo[];
+  wellRuntimeStates: Record<string, WellRuntimeState>;
+  monitoredWellIds: string[];
+  realtimeTabWellIds: string[];
   wellInfo: WellInfo;
   selectedWellId: string;
   algorithmInterface: AlgorithmInterfaceInfo;
@@ -252,6 +296,13 @@ interface WellControlContextType {
   acknowledgeAlert: (id: number) => void;
   acknowledgeAll: () => void;
   selectWell: (wellId: string) => void;
+  toggleMonitoredWell: (wellId: string) => void;
+  addMonitoredWell: (wellId: string) => void;
+  removeMonitoredWell: (wellId: string) => void;
+  openRealtimeWell: (wellId: string) => void;
+  startWellMonitoring: (wellId: string) => void;
+  pauseWellMonitoring: (wellId: string) => void;
+  resumeWellMonitoring: (wellId: string) => void;
   selectStartFrame: (frame: number) => void;
   updateSelectedStartTime: (value: string) => void;
   startShutInProcedure: () => void;
@@ -399,7 +450,7 @@ const WELLS: WellInfo[] = [
 ];
 
 const ALGORITHM_INTERFACE: AlgorithmInterfaceInfo = {
-  rootPath: 'D:\\Study\\research\\wall_control\\V7.0\\app\\server.cjs',
+  rootPath: 'D:\\Study\\research\\wall_control\\V7.0\\kick_detection_system\\backend\\src\\KickDetectionSystem.Api',
   mode: 'connected',
   endpoints: [
     {
@@ -497,6 +548,10 @@ function keepMonitoringWindow<T extends { timestampMs?: number }>(items: T[]) {
   return byTime.length < MIN_MONITORING_POINTS ? items.slice(-MIN_MONITORING_POINTS) : byTime;
 }
 
+function sortMonitoringPoints<T extends { timestampMs?: number }>(items: T[]) {
+  return [...items].sort((a, b) => Number(a.timestampMs ?? 0) - Number(b.timestampMs ?? 0));
+}
+
 function readNumber(record: RealTimeRecord, keys: string[], fallback: number) {
   for (const key of keys) {
     const raw = record[key];
@@ -527,6 +582,20 @@ function toDatetimeLocalValue(value?: string) {
 function fromDatetimeLocalValue(value: string) {
   if (!value) return '';
   return value.replace('T', ' ') + (value.length === 16 ? ':00' : '');
+}
+
+function shiftTimestamp(value: string, deltaMs: number) {
+  if (!value) return '';
+  const parsed = new Date(value.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) return value;
+  const shifted = new Date(parsed.getTime() + deltaMs);
+  const yyyy = shifted.getFullYear();
+  const mm = String(shifted.getMonth() + 1).padStart(2, '0');
+  const dd = String(shifted.getDate()).padStart(2, '0');
+  const hh = String(shifted.getHours()).padStart(2, '0');
+  const mi = String(shifted.getMinutes()).padStart(2, '0');
+  const ss = String(shifted.getSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
 function formatStartLabel(frame: number, timestamp: string) {
@@ -582,17 +651,12 @@ function buildStartOptionsFromTimeIndex(data: {
 }
 
 function getInitialRealtimeEndpoint() {
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-  const envValue = env?.VITE_WELL_REALTIME_HTTP_URL || env?.VITE_WELL_REALTIME_WS_URL;
-  if (envValue) return envValue;
-  if (typeof window === 'undefined') return DEFAULT_REALTIME_ENDPOINT;
-  const stored = localStorage.getItem('wcs-realtime-endpoint');
-  if (!stored) return DEFAULT_REALTIME_ENDPOINT;
-  if (stored === LEGACY_REALTIME_ENDPOINT) {
-    localStorage.setItem('wcs-realtime-endpoint', DEFAULT_REALTIME_ENDPOINT);
-    return DEFAULT_REALTIME_ENDPOINT;
-  }
-  return stored;
+  return DEFAULT_REALTIME_ENDPOINT;
+}
+
+function normalizeRealtimeEndpoint(endpoint: string) {
+  const next = endpoint.trim() || DEFAULT_REALTIME_ENDPOINT;
+  return next.startsWith('/api/realtime') ? next : DEFAULT_REALTIME_ENDPOINT;
 }
 
 function createInitialDataSourceState(endpoint: string, selectedStartTime = ''): DataSourceState {
@@ -634,6 +698,20 @@ function makeInitialData(well: WellInfo): MonitoringData {
     confidenceLevel: 0,
     pumpState: 'Normal',
     condition: '等待接入',
+  };
+}
+
+function createWellMonitoringSnapshot(well: WellInfo): WellMonitoringSnapshot {
+  return {
+    currentData: makeInitialData(well),
+    currentSampleTime: '',
+    flowHistory: [],
+    pressureHistory: [],
+    backendDetection: INITIAL_BACKEND_DETECTION,
+    historyRecords: [],
+    cycleInfo: getCycleInfo(0),
+    shutInActive: false,
+    shutInStartedAt: null,
   };
 }
 
@@ -697,10 +775,10 @@ function buildRealtimeApiUrl(endpoint: string, path: string) {
 }
 
 function buildRealtimeStreamUrl(endpoint: string, wellId: string, startTime: string, rateMs: number) {
-  const url = new URL(buildRealtimeApiUrl(endpoint, `/wells/${encodeURIComponent(wellId)}/stream`));
-  url.searchParams.set('rateMs', String(rateMs));
-  if (startTime) url.searchParams.set('startTime', startTime);
-  return url.toString();
+    const url = new URL(buildRealtimeApiUrl(endpoint, `/wells/${encodeURIComponent(wellId)}/stream`));
+    url.searchParams.set('rateMs', String(rateMs));
+    if (startTime) url.searchParams.set('startTime', startTime);
+    return appendAccessToken(url.toString());
 }
 
 const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
@@ -737,7 +815,8 @@ function parseActiveSignals(value: unknown): string[] {
 function displayAlarmText(value: unknown) {
   return String(value || '')
     .replace(/返出响应/g, '出口流量响应')
-    .replace(/返出/g, '出口流量');
+    .replace(/返出/g, '出口流量')
+    .replace(/流量差分/g, '出口流量');
 }
 
 interface BackendLogEntry {
@@ -820,20 +899,33 @@ function isMonitorableEventRecord(record: RealTimeRecord, data: MonitoringData) 
 function normalizeRealtimeWell(item: unknown): WellInfo | null {
   if (!item || typeof item !== 'object') return null;
   const row = item as Record<string, unknown>;
-  const key = String(row.key || row.well_key || row.wellId || row.tableName || '').trim();
+  const key = String(row.key || row.well_key || row.wellId || row.well_id || row.tableName || row.table_name || '').trim();
   if (!key) return null;
-  const frameCount = finite(row.frameCount ?? row.frame_count, 0);
+  const recordCount = finite(row.recordCount ?? row.record_count ?? row.realtimeRowCount ?? row.realtime_row_count ?? row.frameCount ?? row.frame_count, 0);
+  const depth = finite(row.depth ?? row.depth_m ?? row.depthMaxM ?? row.depth_max_m ?? row.depthMinM ?? row.depth_min_m, 4200);
+  const wellName = String(row.wellName || row.well_name_std || row.well_name_raw || row.name || key).trim();
+  const blockName = String(row.blockName || row.block_name || '').trim();
   return {
     wellId: key,
-    wellName: key,
-    block: '实时监测井 · MySQL',
-    depth: 4200,
-    crew: frameCount > 0 ? `${frameCount.toLocaleString('zh-CN')} 帧` : '现场队伍',
+    wellName,
+    block: blockName ? `${blockName} · MySQL` : '实时监测井 · MySQL',
+    depth,
+    crew: recordCount > 0 ? `${recordCount.toLocaleString('zh-CN')} 条记录` : '现场队伍',
     dataSource: 'realtime',
     baselineVersion: 'realtime-v7',
-    startTime: String(row.startTime || row.start_time || ''),
-    endTime: String(row.endTime || row.end_time || ''),
-    discoveryTime: String(row.discoveryTime || row.discovery_time || ''),
+    startTime: String(row.startTime || row.start_time || row.sampleStartTime || row.sample_start_time || ''),
+    endTime: String(row.endTime || row.end_time || row.sampleEndTime || row.sample_end_time || ''),
+    discoveryTime: String(row.discoveryTime || row.discovery_time || row.sampleStartTime || row.sample_start_time || ''),
+    wellNameStd: String(row.wellNameStd || row.well_name_std || wellName || ''),
+    wellNameRaw: String(row.wellNameRaw || row.well_name_raw || wellName || ''),
+    blockName,
+    depthMinM: Number.isFinite(Number(row.depthMinM ?? row.depth_min_m)) ? Number(row.depthMinM ?? row.depth_min_m) : undefined,
+    depthMaxM: Number.isFinite(Number(row.depthMaxM ?? row.depth_max_m)) ? Number(row.depthMaxM ?? row.depth_max_m) : undefined,
+    qualityGrade: String(row.qualityGrade || row.quality_grade || 'UNKNOWN'),
+    recordCount,
+    realtimeTableName: String(row.realtimeTableName || row.realtime_table_name || row.tableName || row.table_name || ''),
+    sampleStartTime: String(row.sampleStartTime || row.sample_start_time || ''),
+    sampleEndTime: String(row.sampleEndTime || row.sample_end_time || ''),
   };
 }
 
@@ -878,7 +970,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     });
 
     try {
-      this.stream = new EventSource(url);
+      this.stream = new EventSource(url, { withCredentials: true });
     } catch {
       this.emitStatus({
         mode: 'realtime',
@@ -1056,6 +1148,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const [thresholds, setThresholds] = useState<ThresholdSettings>(DEFAULT_THRESHOLDS);
   const [wells, setWells] = useState<WellInfo[]>(WELLS);
   const [selectedWellId, setSelectedWellId] = useState(WELLS[0].wellId);
+  const [monitoredWellIds, setMonitoredWellIds] = useState<string[]>([WELLS[0].wellId, WELLS[1].wellId, WELLS[2].wellId]);
+  const [realtimeTabWellIds, setRealtimeTabWellIds] = useState<string[]>([]);
   const [startOptions, setStartOptions] = useState<RealtimeStartOption[]>([]);
   const [selectedStartFrame, setSelectedStartFrame] = useState(0);
   const [selectedStartTime, setSelectedStartTime] = useState('');
@@ -1069,7 +1163,11 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   });
   const [realtimeEndpoint, setRealtimeEndpoint] = useState(getInitialRealtimeEndpoint);
   const [dataSourceState, setDataSourceState] = useState<DataSourceState>(() => createInitialDataSourceState(getInitialRealtimeEndpoint()));
+  const [wellRuntimeStates, setWellRuntimeStates] = useState<Record<string, WellRuntimeState>>({});
+  const [realtimeWellsLoaded, setRealtimeWellsLoaded] = useState(false);
+  const wellSnapshotsRef = useRef<Record<string, WellMonitoringSnapshot>>({});
   const wellInfo = wells.find((well) => well.wellId === selectedWellId) || wells[0] || WELLS[0];
+  const selectedWellRuntime = wellRuntimeStates[wellInfo?.wellId];
   const [currentData, setCurrentData] = useState<MonitoringData>(() => makeInitialData(wellInfo));
   const currentDataRef = useRef<MonitoringData>(currentData);
   const [flowHistory, setFlowHistory] = useState<FlowDataPoint[]>([]);
@@ -1083,10 +1181,39 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const historyIdCounter = useRef(1);
   const timeCounter = useRef(0);
   const adapterRef = useRef<DataSourceAdapter | null>(null);
+  const backgroundAdaptersRef = useRef<Record<string, DataSourceAdapter>>({});
   const backendEventIdsRef = useRef<Set<string>>(new Set());
   const backendEventKeysRef = useRef<Set<string>>(new Set());
   const activeEventIdRef = useRef<string | null>(null);
   const [cycleInfo, setCycleInfo] = useState<CycleInfo>(() => getCycleInfo(0));
+
+  const getWellSnapshot = useCallback((well: WellInfo) => {
+    const existing = wellSnapshotsRef.current[well.wellId];
+    if (existing) return existing;
+    const created = createWellMonitoringSnapshot(well);
+    wellSnapshotsRef.current[well.wellId] = created;
+    return created;
+  }, []);
+
+  const setWellSnapshot = useCallback((wellId: string, patch: Partial<WellMonitoringSnapshot>) => {
+    const nextWell = wells.find((well) => well.wellId === wellId) || wellInfo;
+    const previous = wellSnapshotsRef.current[wellId] || createWellMonitoringSnapshot(nextWell);
+    wellSnapshotsRef.current[wellId] = { ...previous, ...patch };
+  }, [wellInfo, wells]);
+
+  const hydrateWellView = useCallback((well: WellInfo) => {
+    const snapshot = getWellSnapshot(well);
+    currentDataRef.current = snapshot.currentData;
+    setCurrentData(snapshot.currentData);
+    setCurrentSampleTime(snapshot.currentSampleTime);
+    setFlowHistory(snapshot.flowHistory);
+    setPressureHistory(snapshot.pressureHistory);
+    setBackendDetection(snapshot.backendDetection);
+    setHistoryRecords(snapshot.historyRecords);
+    setCycleInfo(snapshot.cycleInfo);
+    setShutInActive(snapshot.shutInActive);
+    setShutInStartedAt(snapshot.shutInStartedAt);
+  }, [getWellSnapshot]);
 
   const alertStatus = backendLevelToStatus(backendDetection.publicLevel);
   const baselineInfo = useMemo<BaselineInfo>(() => {
@@ -1107,14 +1234,281 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     };
   }, [alerts, cycleInfo.cycleIndex, thresholds.coldStartCycleCount]);
 
+  const updateWellRuntime = useCallback((wellId: string, patch: Partial<WellRuntimeState>) => {
+    setWellRuntimeStates((prev) => {
+      const now = new Date().toISOString();
+      return {
+        ...prev,
+        [wellId]: {
+          wellId,
+          status: 'paused',
+          isRunning: false,
+          recordCount: 0,
+          lastRecordAt: null,
+          backendLevel: 0,
+          monitoringStartedAt: null,
+          startedSampleTime: null,
+          message: '待启动',
+          updatedAt: now,
+          ...prev[wellId],
+          ...patch,
+        },
+      };
+    });
+  }, []);
+
+  const appendAlertsFromRecord = useCallback((well: WellInfo, record: RealTimeRecord, data: MonitoringData) => {
+    const backendLogs = normalizeBackendLogEntries(record);
+    if (backendLogs.length === 0) return;
+    setAlerts((previous) => {
+      let nextAlerts = previous;
+      const additions: Alert[] = [];
+      backendLogs.forEach((entry) => {
+        const eventKey = `${well.wellId}:${backendEventKey(entry)}`;
+        const eventInstanceId = `${well.wellId}:${entry.eventId}`;
+        const eventTime = formatRecordTime(entry.timestamp || record.timestamp);
+        const existingIndex = nextAlerts.findIndex((alert) => alert.backendEventId === eventKey);
+        if (existingIndex >= 0) {
+          nextAlerts = nextAlerts.map((alert, index) => index === existingIndex ? {
+            ...alert,
+            level: Math.max(alert.backendLevel, entry.publicLevel) >= 4 ? 'critical' as const : 'warning' as const,
+            message: entry.reason || alert.message,
+            time: eventTime.timeStr,
+            date: eventTime.dateStr,
+            lastTime: eventTime.timeStr,
+            lastDate: eventTime.dateStr,
+            count: entry.sampleCount || (alert.count || 1) + 1,
+            backendLevel: Math.max(alert.backendLevel, entry.publicLevel) as BackendLevel,
+            formalEvalLevel: Math.max(alert.formalEvalLevel, entry.formalEvalLevel) as BackendLevel,
+            activeSignals: entry.activeSignals,
+            eventState: entry.eventState,
+            pumpState: entry.pumpState,
+          } : alert);
+          return;
+        }
+        if (backendEventIdsRef.current.has(eventInstanceId) || backendEventKeysRef.current.has(eventKey)) return;
+        backendEventIdsRef.current.add(eventInstanceId);
+        backendEventKeysRef.current.add(eventKey);
+        additions.push({
+          id: alertIdCounter.current++,
+          wellId: well.wellId,
+          wellName: well.wellName,
+          wellBlock: well.blockName || well.block,
+          wellDepth: well.depth,
+          bitDepth: data.bitDepth,
+          formation: data.condition || well.blockName || '实时监测层段',
+          time: eventTime.timeStr,
+          date: eventTime.dateStr,
+          lastTime: eventTime.timeStr,
+          lastDate: eventTime.dateStr,
+          level: entry.publicLevel >= 4 ? 'critical' as const : 'warning' as const,
+          message: entry.reason,
+          acknowledged: false,
+          code: entry.eventId,
+          backendEventId: eventKey,
+          backendLevel: entry.publicLevel,
+          formalEvalLevel: entry.formalEvalLevel,
+          activeSignals: entry.activeSignals,
+          eventState: entry.eventState,
+          pumpState: entry.pumpState,
+          count: entry.sampleCount || 1,
+        });
+      });
+      return additions.length > 0 ? [...additions.reverse(), ...nextAlerts].slice(0, 120) : nextAlerts;
+    });
+  }, []);
+
+  const syncWellSnapshotFromSample = useCallback((
+    well: WellInfo,
+    nextData: MonitoringData,
+    sampleTime: string,
+    backendDetectionState: BackendDetectionState,
+    cycleState: CycleInfo,
+    flowHistoryItems: FlowDataPoint[],
+    pressureHistoryItems: PressureDataPoint[],
+    historyItems: HistoryRecord[],
+    shutInState?: { active: boolean; startedAt: string | null },
+  ) => {
+    wellSnapshotsRef.current[well.wellId] = {
+      currentData: nextData,
+      currentSampleTime: sampleTime,
+      flowHistory: flowHistoryItems,
+      pressureHistory: pressureHistoryItems,
+      backendDetection: backendDetectionState,
+      historyRecords: historyItems,
+      cycleInfo: cycleState,
+      shutInActive: shutInState?.active ?? false,
+      shutInStartedAt: shutInState?.startedAt ?? null,
+    };
+    if (well.wellId === selectedWellId) {
+      currentDataRef.current = nextData;
+      setCurrentData(nextData);
+      setCurrentSampleTime(sampleTime);
+      setFlowHistory(flowHistoryItems);
+      setPressureHistory(pressureHistoryItems);
+      setBackendDetection(backendDetectionState);
+      setHistoryRecords(historyItems);
+      setCycleInfo(cycleState);
+      setShutInActive(shutInState?.active ?? false);
+      setShutInStartedAt(shutInState?.startedAt ?? null);
+    }
+  }, [selectedWellId]);
+
+  const resetWellSnapshot = useCallback((well: WellInfo) => {
+    wellSnapshotsRef.current[well.wellId] = createWellMonitoringSnapshot(well);
+  }, []);
+
+  const stopBackgroundMonitoring = useCallback((wellId: string) => {
+    const adapter = backgroundAdaptersRef.current[wellId];
+    if (!adapter) return;
+    adapter.disconnect();
+    delete backgroundAdaptersRef.current[wellId];
+  }, []);
+
+  const startBackgroundMonitoring = useCallback((well: WellInfo, startTime: string, preserveSnapshot = false) => {
+    stopBackgroundMonitoring(well.wellId);
+    const initialSnapshot = preserveSnapshot ? getWellSnapshot(well) : createWellMonitoringSnapshot(well);
+    if (!preserveSnapshot) {
+      resetWellSnapshot(well);
+    }
+    let lastData = initialSnapshot.currentData;
+    let flowItems = [...initialSnapshot.flowHistory];
+    let pressureItems = [...initialSnapshot.pressureHistory];
+    let historyItems = [...initialSnapshot.historyRecords];
+    let cycleState = initialSnapshot.cycleInfo;
+    let sampleTime = initialSnapshot.currentSampleTime;
+    let backendState = initialSnapshot.backendDetection;
+    let shutInState = {
+      active: initialSnapshot.shutInActive,
+      startedAt: initialSnapshot.shutInStartedAt,
+    };
+    let recordCount = 0;
+    const adapter = new SseDetectionDataSourceAdapter(realtimeEndpoint, startTime, 1200);
+    backgroundAdaptersRef.current[well.wellId] = adapter;
+    adapter.onStatus((state) => {
+      updateWellRuntime(well.wellId, {
+        status: state.status,
+        isRunning: state.status === 'connected' || state.status === 'connecting',
+        recordCount: state.recordCount,
+        lastRecordAt: state.lastRecordAt,
+        message: state.message,
+      });
+      if (state.status === 'paused' || state.status === 'error') {
+        delete backgroundAdaptersRef.current[well.wellId];
+      }
+    });
+    adapter.onRecord((record) => {
+      recordCount += 1;
+      lastData = normalizeRealTimeRecord(record, lastData);
+      const recordTime = formatRecordTime(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
+      const timestampMs = recordMillis(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
+      const nextDetection = normalizeBackendDetection(record);
+      const canPaintEvent = isMonitorableEventRecord(record, lastData);
+      const recordCycleState = parseCycleState(record.cycleState ?? record.operation_state_std);
+      cycleState = recordCycleState === null ? getCycleInfo(recordCount) : {
+        ...getCycleInfo(recordCount),
+        ...CYCLE_STATES[recordCycleState],
+        state: recordCycleState,
+      };
+      const sampleTimeText = String(record.sampleTime || record.sample_time || record.timestamp || '');
+      if (sampleTimeText) sampleTime = sampleTimeText.replace('T', ' ');
+      const activeEventId = nextDetection.publicLevel >= 2 && canPaintEvent ? (nextDetection.eventId || null) : null;
+      backendState = nextDetection;
+      flowItems = keepMonitoringWindow(sortMonitoringPoints([
+        ...flowItems,
+        {
+          time: recordTime.timeStr,
+          timestampMs,
+          backendLevel: nextDetection.publicLevel,
+          eventId: activeEventId,
+          flowIn: lastData.flowIn,
+          flowOut: lastData.flowOut,
+          bitDepth: lastData.bitDepth,
+          pitGain: lastData.pitGain,
+          pitVolume: lastData.pitVolume,
+          returnResponse: lastData.returnResponse,
+          spm: lastData.spm,
+          totalGas: lastData.totalGas,
+          hookLoad: lastData.hookLoad,
+        },
+      ]));
+      pressureItems = keepMonitoringWindow(sortMonitoringPoints([
+        ...pressureItems,
+        {
+          time: recordTime.timeStr,
+          timestampMs,
+          backendLevel: nextDetection.publicLevel,
+          eventId: activeEventId,
+          casingPressure: lastData.casingPressure,
+          drillPipePressure: lastData.drillPipePressure,
+          spp: lastData.spp,
+          sppPredicted: lastData.sppPredicted,
+        },
+      ]));
+      historyItems = [
+        ...historyItems.slice(-239),
+        {
+          id: historyItems.at(-1)?.id ? historyItems.at(-1)!.id + 1 : 1,
+          time: recordTime.timeStr,
+          date: recordTime.dateStr,
+          pitGain: lastData.pitGain,
+          pitVolume: lastData.pitVolume,
+          returnResponse: lastData.returnResponse,
+          flowIn: lastData.flowIn,
+          flowOut: lastData.flowOut,
+          casingPressure: lastData.casingPressure,
+          drillPipePressure: lastData.drillPipePressure,
+          spp: lastData.spp,
+          sppPredicted: lastData.sppPredicted,
+          spm: lastData.spm,
+          totalGas: lastData.totalGas,
+          hookLoad: lastData.hookLoad,
+          mudWeight: lastData.mudWeight,
+          rop: lastData.rop,
+          bitDepth: lastData.bitDepth,
+          cycleState: cycleState.state,
+          backendLevel: nextDetection.publicLevel,
+          status: backendLevelToStatus(nextDetection.publicLevel),
+        },
+      ];
+      updateWellRuntime(well.wellId, {
+        status: 'connected',
+        isRunning: true,
+        backendLevel: nextDetection.publicLevel,
+        recordCount,
+        lastRecordAt: recordTime.timeStr,
+        message: `检测流推送中 · ${well.wellName} · ${recordCount} 帧`,
+      });
+      appendAlertsFromRecord(well, record, lastData);
+      syncWellSnapshotFromSample(well, lastData, sampleTime, backendState, cycleState, flowItems, pressureItems, historyItems, shutInState);
+    });
+    adapter.connect(well, lastData);
+  }, [appendAlertsFromRecord, getWellSnapshot, realtimeEndpoint, resetWellSnapshot, stopBackgroundMonitoring, syncWellSnapshotFromSample, updateWellRuntime]);
+
+  useEffect(() => () => {
+    Object.values(backgroundAdaptersRef.current).forEach((adapter) => adapter.disconnect());
+    backgroundAdaptersRef.current = {};
+  }, []);
+
+  useEffect(() => {
+    const validIds = new Set(wells.map((well) => well.wellId));
+    setMonitoredWellIds((current) => {
+      const next = current.filter((wellId) => validIds.has(wellId));
+      if (next.length > 0) return next;
+      return wells.slice(0, 3).map((well) => well.wellId);
+    });
+    setRealtimeTabWellIds((current) => current.filter((wellId) => validIds.has(wellId)));
+  }, [wells]);
+
   useEffect(() => {
     let cancelled = false;
+    setRealtimeWellsLoaded(false);
     setDataSourceState((prev) => ({
       ...prev,
       status: 'connecting',
       message: '正在读取实时井列表',
     }));
-    fetch(buildRealtimeApiUrl(realtimeEndpoint, '/wells'), { cache: 'no-store' })
+    authenticatedFetch(buildRealtimeApiUrl(realtimeEndpoint, '/wells'), { cache: 'no-store' })
       .then((response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
@@ -1122,6 +1516,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       .then((payload: { wells?: unknown[] }) => {
         if (cancelled) return;
         const nextWells = (payload.wells || []).map(normalizeRealtimeWell).filter(Boolean) as WellInfo[];
+        setRealtimeWellsLoaded(true);
         if (!nextWells.length) return;
         setWells(nextWells);
         setSelectedWellId((current) => nextWells.some((well) => well.wellId === current) ? current : nextWells[0].wellId);
@@ -1133,6 +1528,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       })
       .catch((error: Error) => {
         if (cancelled) return;
+        setRealtimeWellsLoaded(true);
         setDataSourceState((prev) => ({
           ...prev,
           status: 'error',
@@ -1145,15 +1541,17 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   }, [realtimeEndpoint]);
 
   useEffect(() => {
-    if (!wellInfo?.wellId) return;
+    if (!realtimeWellsLoaded || !wellInfo?.wellId) return;
     let cancelled = false;
-    setIsRunning(false);
+    const preservedStartTime = selectedWellRuntime?.startedSampleTime ? toDatetimeLocalValue(selectedWellRuntime.startedSampleTime) : '';
+    const preserveRunning = Boolean(preservedStartTime && selectedWellRuntime?.isRunning);
+    if (!preserveRunning) setIsRunning(false);
     setStartOptions([]);
     setSelectedStartFrame(0);
-    setSelectedStartTime('');
+    setSelectedStartTime(preservedStartTime);
     setTimeBounds({ firstTime: '', lastTime: '', discoveryTime: '', discoveryFrame: 0, discoveryRelMin: null });
-    setDataSourceState(createInitialDataSourceState(realtimeEndpoint));
-    fetch(buildRealtimeApiUrl(realtimeEndpoint, `/wells/${encodeURIComponent(wellInfo.wellId)}/times?maxOptions=30`), { cache: 'no-store' })
+    setDataSourceState(createInitialDataSourceState(realtimeEndpoint, preservedStartTime));
+    authenticatedFetch(buildRealtimeApiUrl(realtimeEndpoint, `/wells/${encodeURIComponent(wellInfo.wellId)}/times?maxOptions=30`), { cache: 'no-store' })
       .then((response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
@@ -1173,6 +1571,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           discoveryFrame,
           discoveryRelMin: data.discovery_rel_min ?? data.discovery?.rel_min ?? null,
         });
+        if (preservedStartTime) {
+          const preservedText = fromDatetimeLocalValue(preservedStartTime);
+          const preservedOption = options.find((option) => option.timestamp >= preservedText);
+          setSelectedStartFrame(preservedOption?.frame ?? discoveryFrame);
+          setSelectedStartTime(preservedStartTime);
+          return;
+        }
         const preferred = options.find((option) => option.label.startsWith('现场发现')) || options[0];
         if (preferred) {
           setSelectedStartFrame(preferred.frame);
@@ -1193,10 +1598,11 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [realtimeEndpoint, wellInfo?.wellId]);
+  }, [realtimeEndpoint, realtimeWellsLoaded, selectedWellRuntime?.isRunning, selectedWellRuntime?.startedSampleTime, updateWellRuntime, wellInfo?.wellId]);
 
   useEffect(() => {
     adapterRef.current?.disconnect();
+    if (backgroundAdaptersRef.current[wellInfo.wellId]) return;
     if (!isRunning) {
       setDataSourceState((prev) => ({
         ...prev,
@@ -1217,7 +1623,16 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       ? new SseDetectionDataSourceAdapter(realtimeEndpoint, fromDatetimeLocalValue(selectedStartTime), 1200)
       : new DisabledDataSourceAdapter();
     adapterRef.current = adapter;
-    adapter.onStatus(setDataSourceState);
+    adapter.onStatus((state) => {
+      setDataSourceState(state);
+      updateWellRuntime(wellInfo.wellId, {
+        status: state.status,
+        isRunning: state.status === 'connected' || state.status === 'connecting',
+        recordCount: state.recordCount,
+        lastRecordAt: state.lastRecordAt,
+        message: state.message,
+      });
+    });
     adapter.onRecord((record) => {
       const recordTime = formatRecordTime(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
       const timestampMs = recordMillis(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
@@ -1244,60 +1659,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       }
       const activeEventId = nextDetection.publicLevel >= 2 && canPaintEvent ? activeEventIdRef.current : null;
       setBackendDetection(nextDetection);
-      const backendLogs = normalizeBackendLogEntries(record);
-      if (backendLogs.length > 0) {
-        setAlerts((previous) => {
-          let nextAlerts = previous;
-          const additions: Alert[] = [];
-          backendLogs.forEach((entry) => {
-            const eventKey = backendEventKey(entry);
-            const eventTime = formatRecordTime(entry.timestamp || record.timestamp);
-            const existingIndex = nextAlerts.findIndex((alert) => alert.backendEventId === eventKey);
-            if (existingIndex >= 0) {
-              nextAlerts = nextAlerts.map((alert, index) => index === existingIndex ? {
-                ...alert,
-                level: Math.max(alert.backendLevel, entry.publicLevel) >= 4 ? 'critical' as const : 'warning' as const,
-                message: entry.reason || alert.message,
-                time: eventTime.timeStr,
-                date: eventTime.dateStr,
-                lastTime: eventTime.timeStr,
-                lastDate: eventTime.dateStr,
-                count: entry.sampleCount || (alert.count || 1) + 1,
-                backendLevel: Math.max(alert.backendLevel, entry.publicLevel) as BackendLevel,
-                formalEvalLevel: Math.max(alert.formalEvalLevel, entry.formalEvalLevel) as BackendLevel,
-                activeSignals: entry.activeSignals,
-                eventState: entry.eventState,
-                pumpState: entry.pumpState,
-              } : alert);
-              return;
-            }
-            if (backendEventIdsRef.current.has(entry.eventId) || backendEventKeysRef.current.has(eventKey)) return;
-            backendEventIdsRef.current.add(entry.eventId);
-            backendEventKeysRef.current.add(eventKey);
-            additions.push({
-              id: alertIdCounter.current++,
-              time: eventTime.timeStr,
-              date: eventTime.dateStr,
-              lastTime: eventTime.timeStr,
-              lastDate: eventTime.dateStr,
-              level: entry.publicLevel >= 4 ? 'critical' as const : 'warning' as const,
-              message: entry.reason,
-              acknowledged: false,
-              code: entry.eventId,
-              backendEventId: eventKey,
-              backendLevel: entry.publicLevel,
-              formalEvalLevel: entry.formalEvalLevel,
-              activeSignals: entry.activeSignals,
-              eventState: entry.eventState,
-              pumpState: entry.pumpState,
-              count: entry.sampleCount || 1,
-            });
-          });
-          return additions.length > 0 ? [...additions.reverse(), ...nextAlerts].slice(0, 60) : nextAlerts;
-        });
-      }
-      setFlowHistory((prev) => keepMonitoringWindow([
-        ...prev,
+      const nextFlowHistory = sortMonitoringPoints(keepMonitoringWindow([
+        ...flowHistory,
         {
           time: recordTime.timeStr,
           timestampMs,
@@ -1314,8 +1677,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           hookLoad: nextData.hookLoad,
         },
       ]));
-      setPressureHistory((prev) => keepMonitoringWindow([
-        ...prev,
+      const nextPressureHistory = sortMonitoringPoints(keepMonitoringWindow([
+        ...pressureHistory,
         {
           time: recordTime.timeStr,
           timestampMs,
@@ -1327,8 +1690,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           sppPredicted: nextData.sppPredicted,
         },
       ]));
-      setHistoryRecords((prev) => [
-        ...prev.slice(-239),
+      const nextHistoryRecords = [
+        ...historyRecords.slice(-239),
         {
           id: historyIdCounter.current++,
           time: recordTime.timeStr,
@@ -1352,22 +1715,55 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           backendLevel: nextDetection.publicLevel,
           status: backendLevelToStatus(nextDetection.publicLevel),
         },
-      ]);
+      ];
+      updateWellRuntime(wellInfo.wellId, {
+        backendLevel: nextDetection.publicLevel,
+        status: 'connected',
+        isRunning: true,
+        recordCount: historyIdCounter.current,
+        lastRecordAt: recordTime.timeStr,
+        message: `检测流推送中 · ${historyIdCounter.current} 帧`,
+      });
+      appendAlertsFromRecord(wellInfo, record, nextData);
+      setFlowHistory(nextFlowHistory);
+      setPressureHistory(nextPressureHistory);
+      setHistoryRecords(nextHistoryRecords);
+      syncWellSnapshotFromSample(
+        wellInfo,
+        nextData,
+        sampleTimeText ? sampleTimeText.replace('T', ' ') : recordTime.timeStr,
+        nextDetection,
+        nextCycleInfo,
+        nextFlowHistory,
+        nextPressureHistory,
+        nextHistoryRecords,
+        { active: shutInActive, startedAt: shutInStartedAt },
+      );
     });
     adapter.connect(wellInfo, seed);
 
     return () => {
       adapter.disconnect();
     };
-  }, [isRunning, selectedWellId, realtimeEndpoint, selectedStartTime, wellInfo]);
+  }, [appendAlertsFromRecord, isRunning, selectedWellId, realtimeEndpoint, selectedStartTime, wellInfo]);
 
-  const resetForWell = (well: WellInfo, startTime = selectedStartTime) => {
+  const resetForWell = (well: WellInfo, startTime = selectedStartTime, clearEvents = false) => {
     const nextInitial = makeInitialData(well);
+    wellSnapshotsRef.current[well.wellId] = {
+      currentData: nextInitial,
+      currentSampleTime: '',
+      flowHistory: [],
+      pressureHistory: [],
+      backendDetection: INITIAL_BACKEND_DETECTION,
+      historyRecords: [],
+      cycleInfo: getCycleInfo(0),
+      shutInActive: false,
+      shutInStartedAt: null,
+    };
     currentDataRef.current = nextInitial;
     setCurrentData(nextInitial);
     setFlowHistory([]);
     setPressureHistory([]);
-    setAlerts([]);
     setCurrentSampleTime('');
     setBackendDetection(INITIAL_BACKEND_DETECTION);
     setHistoryRecords([]);
@@ -1375,24 +1771,169 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     setShutInStartedAt(null);
     setCycleInfo(getCycleInfo(0));
     timeCounter.current = 0;
-    alertIdCounter.current = 1;
     historyIdCounter.current = 1;
-    backendEventIdsRef.current.clear();
-    backendEventKeysRef.current.clear();
     activeEventIdRef.current = null;
+    if (clearEvents) {
+      setAlerts([]);
+      alertIdCounter.current = 1;
+      backendEventIdsRef.current.clear();
+      backendEventKeysRef.current.clear();
+    }
     setIsRunning(false);
     setDataSourceState(createInitialDataSourceState(realtimeEndpoint, startTime));
   };
 
   const handleReset = () => {
-    resetForWell(wellInfo);
+    resetForWell(wellInfo, selectedStartTime, true);
   };
 
   const selectWell = (wellId: string) => {
     const nextWell = wells.find((well) => well.wellId === wellId);
     if (!nextWell) return;
+    const runtime = wellRuntimeStates[wellId];
+    const hasBackgroundStream = Boolean(backgroundAdaptersRef.current[wellId]);
     setSelectedWellId(wellId);
-    resetForWell(nextWell, '');
+    hydrateWellView(nextWell);
+    if (runtime?.startedSampleTime) {
+      const nextStartTime = toDatetimeLocalValue(runtime.startedSampleTime);
+      setSelectedStartTime(nextStartTime);
+      setSelectedStartFrame(0);
+    }
+    if (runtime?.isRunning || runtime?.status === 'connected' || runtime?.status === 'connecting' || hasBackgroundStream) {
+      setIsRunning(true);
+      updateWellRuntime(wellId, {
+        status: runtime.status === 'paused' ? 'connecting' : runtime.status,
+        isRunning: true,
+        message: runtime.message || '正在切换监测井',
+      });
+      return;
+    }
+    setIsRunning(false);
+  };
+
+  const addMonitoredWell = (wellId: string) => {
+    if (!wells.some((well) => well.wellId === wellId)) return;
+    setMonitoredWellIds((prev) => prev.includes(wellId) ? prev : [...prev, wellId]);
+  };
+
+  const removeMonitoredWell = (wellId: string) => {
+    stopBackgroundMonitoring(wellId);
+    setMonitoredWellIds((prev) => prev.filter((item) => item !== wellId));
+    setRealtimeTabWellIds((prev) => prev.filter((item) => item !== wellId));
+    if (wellId === selectedWellId) setIsRunning(false);
+    updateWellRuntime(wellId, { status: 'paused', isRunning: false, message: '待启动' });
+  };
+
+  const toggleMonitoredWell = (wellId: string) => {
+    setMonitoredWellIds((prev) => (
+      prev.includes(wellId)
+        ? prev.filter((item) => item !== wellId)
+        : wells.some((well) => well.wellId === wellId)
+          ? [...prev, wellId]
+          : prev
+    ));
+  };
+
+  const openRealtimeWell = (wellId: string) => {
+    const nextWell = wells.find((well) => well.wellId === wellId);
+    if (!nextWell) return;
+    const runtime = wellRuntimeStates[wellId];
+    const nextStartTime = runtime?.startedSampleTime ? toDatetimeLocalValue(runtime.startedSampleTime) : '';
+    addMonitoredWell(wellId);
+    setRealtimeTabWellIds((prev) => prev.includes(wellId) ? prev : [...prev, wellId]);
+    hydrateWellView(nextWell);
+    if (nextStartTime) {
+      setSelectedWellId(wellId);
+      setSelectedStartTime(nextStartTime);
+      updateWellRuntime(wellId, {
+        status: 'connecting',
+        isRunning: true,
+        message: '正在进入实时监测',
+      });
+      setIsRunning(true);
+      if (!backgroundAdaptersRef.current[wellId]) {
+        startBackgroundMonitoring(nextWell, nextStartTime, true);
+      }
+      return;
+    }
+    setSelectedWellId(wellId);
+    startWellMonitoring(wellId);
+  };
+
+  const startWellMonitoring = (wellId: string) => {
+    const nextWell = wells.find((well) => well.wellId === wellId);
+    if (!nextWell) return;
+    addMonitoredWell(wellId);
+    setRealtimeTabWellIds((prev) => prev.includes(wellId) ? prev : [...prev, wellId]);
+    if (wellRuntimeStates[wellId]?.isRunning || backgroundAdaptersRef.current[wellId]) return;
+    updateWellRuntime(wellId, {
+      status: 'connecting',
+      isRunning: true,
+      monitoringStartedAt: new Date().toISOString(),
+      message: '正在读取时间索引',
+    });
+    authenticatedFetch(buildRealtimeApiUrl(realtimeEndpoint, `/wells/${encodeURIComponent(wellId)}/times?maxOptions=30`), { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        const options = buildStartOptionsFromTimeIndex(data);
+        const discoveryTime = String(data.discovery_time || data.discovery?.timestamp || options[0]?.timestamp || nextWell.discoveryTime || nextWell.startTime || '');
+        const discoveryFrame = finite(data.discovery_frame ?? data.discovery?.frame, 0);
+        const autoStartTimestamp = shiftTimestamp(discoveryTime, -60 * 60 * 1000);
+        const autoStartOption = autoStartTimestamp ? options.find((option) => option.timestamp >= autoStartTimestamp) : undefined;
+        const nextStartTime = autoStartOption?.timestamp || autoStartTimestamp || discoveryTime;
+        if (!nextStartTime) throw new Error('未读取到可用开始时间');
+        updateWellRuntime(wellId, {
+          status: 'connecting',
+          isRunning: true,
+          startedSampleTime: nextStartTime,
+          recordCount: 0,
+          backendLevel: 0,
+          lastRecordAt: null,
+          message: `正在建立检测流 · 起始 ${formatRecordTime(nextStartTime).timeStr}`,
+        });
+        if (wellId === selectedWellId) {
+          setSelectedStartFrame(autoStartOption?.frame ?? discoveryFrame);
+          setSelectedStartTime(toDatetimeLocalValue(nextStartTime));
+          hydrateWellView(nextWell);
+          setIsRunning(true);
+        }
+        startBackgroundMonitoring(nextWell, nextStartTime, false);
+      })
+      .catch((error: Error) => {
+        updateWellRuntime(wellId, {
+          status: 'error',
+          isRunning: false,
+          message: `启动失败：${error.message}`,
+        });
+      });
+  };
+
+  const pauseWellMonitoring = (wellId: string) => {
+    stopBackgroundMonitoring(wellId);
+    if (wellId === selectedWellId) setIsRunning(false);
+    updateWellRuntime(wellId, { status: 'paused', isRunning: false, message: '已暂停' });
+  };
+
+  const resumeWellMonitoring = (wellId: string) => {
+    const nextWell = wells.find((well) => well.wellId === wellId);
+    const runtime = wellRuntimeStates[wellId];
+    const startTime = runtime?.startedSampleTime;
+    if (!nextWell || !startTime) {
+      startWellMonitoring(wellId);
+      return;
+    }
+    addMonitoredWell(wellId);
+    setRealtimeTabWellIds((prev) => prev.includes(wellId) ? prev : [...prev, wellId]);
+    updateWellRuntime(wellId, {
+      status: 'connecting',
+      isRunning: true,
+      monitoringStartedAt: runtime.monitoringStartedAt || new Date().toISOString(),
+      message: '正在恢复检测流',
+    });
+    startBackgroundMonitoring(nextWell, startTime, true);
   };
 
   const selectStartFrame = (frame: number) => {
@@ -1434,11 +1975,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const updateThresholds = (t: ThresholdSettings) => setThresholds(t);
 
   const updateRealtimeEndpoint = (endpoint: string) => {
-    const next = endpoint.trim();
-    setRealtimeEndpoint(next);
-    if (next) localStorage.setItem('wcs-realtime-endpoint', next);
-    else localStorage.removeItem('wcs-realtime-endpoint');
-    setDataSourceState(createInitialDataSourceState(next, selectedStartTime));
+    const safe = normalizeRealtimeEndpoint(endpoint);
+    setRealtimeEndpoint(safe);
+    setDataSourceState(createInitialDataSourceState(safe, selectedStartTime));
   };
 
   return (
@@ -1456,6 +1995,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         cycleInfo,
         baselineInfo,
         wells,
+        wellRuntimeStates,
+        monitoredWellIds,
+        realtimeTabWellIds,
         wellInfo,
         selectedWellId,
         algorithmInterface: ALGORITHM_INTERFACE,
@@ -1474,6 +2016,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         acknowledgeAlert,
         acknowledgeAll,
         selectWell,
+        toggleMonitoredWell,
+        addMonitoredWell,
+        removeMonitoredWell,
+        openRealtimeWell,
+        startWellMonitoring,
+        pauseWellMonitoring,
+        resumeWellMonitoring,
         selectStartFrame,
         updateSelectedStartTime,
         startShutInProcedure,

@@ -20,7 +20,7 @@ export default defineConfig({
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if
-    // Tailwind is not being actively used – do not remove them
+    // Tailwind is not being actively used - do not remove them
     react(),
     tailwindcss(),
   ],
@@ -34,7 +34,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/realtime': {
-        target: 'http://127.0.0.1:3001',
+        target: 'http://127.0.0.1:5007',
+        changeOrigin: true,
+      },
+      '/api': {
+        target: 'http://127.0.0.1:5007',
         changeOrigin: true,
       },
     },
@@ -43,3 +47,4 @@ export default defineConfig({
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })
+

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Database, Download, Eye, RefreshCw, X } from 'lucide-react';
 import { useWellControl, type AlertStatus, type BackendLevel } from '../context/WellControlContext';
+import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
+import { authenticatedFetch } from '../api/authToken';
 
 type DbHistoryRecord = {
   id?: number;
@@ -73,7 +75,17 @@ export default function History() {
     selectedStartTime,
     currentSampleTime,
     buildRealtimeApiUrl,
+    monitoredWellIds,
+    realtimeTabWellIds,
+    selectedWellId,
+    wells,
   } = useWellControl();
+  const activeWellIds = [...new Set([
+    ...monitoredWellIds,
+    ...realtimeTabWellIds,
+    ...(selectedWellId ? [selectedWellId] : []),
+  ])];
+  const activeWellLabel = wells.find((well) => well.wellId === selectedWellId)?.wellName || wells.find((well) => well.wellId === activeWellIds[0])?.wellName || wellInfo.wellName;
   const [page, setPage] = useState(1);
   const [payload, setPayload] = useState<HistoryPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -94,7 +106,7 @@ export default function History() {
       const replayEndTime = currentSampleTime || (selectedStartTime ? selectedStartTime.replace('T', ' ') + (selectedStartTime.length === 16 ? ':00' : '') : '');
       if (replayEndTime) params.set('endTime', replayEndTime);
       const url = buildRealtimeApiUrl(`/wells/${encodeURIComponent(wellInfo.wellId)}/history?${params.toString()}`);
-      const response = await fetch(url, { cache: 'no-store' });
+      const response = await authenticatedFetch(url, { cache: 'no-store' });
       const data = await response.json();
       if (!response.ok || data.ok === false) throw new Error(data.error || `HTTP ${response.status}`);
       setPayload(data);
@@ -148,9 +160,10 @@ export default function History() {
 
   return (
     <div className="ops-page space-y-4">
+      <MonitoringWellTabs />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="ops-eyebrow">Database review</div>
+          <div className="ops-eyebrow">数据库复核</div>
           <h1 className="ops-title">数据库复核</h1>
           <p className="text-sm ops-muted">
             表格直接查询数据库，按当前回放时间向前复核，最新记录在第一页，每 30 秒自动刷新。
@@ -170,8 +183,8 @@ export default function History() {
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <div className="ops-panel-soft p-3">
-          <div className="text-[11px] ops-muted">当前井</div>
-          <div className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{wellInfo.wellName}</div>
+          <div className="text-[11px] ops-muted">当前井组</div>
+          <div className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{activeWellLabel} 等 {Math.max(1, activeWellIds.length)} 口</div>
         </div>
         <div className="ops-panel-soft p-3">
           <div className="text-[11px] ops-muted">数据库记录</div>
@@ -268,7 +281,7 @@ export default function History() {
           <div className="w-full max-w-xl rounded-md border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-950" onClick={(event) => event.stopPropagation()}>
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
-                <div className="ops-eyebrow">Event detail</div>
+                <div className="ops-eyebrow">复核详情</div>
                 <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">复核详情</h3>
               </div>
               <button className="ops-button-secondary px-2 py-1" onClick={() => setSelected(null)}><X className="h-4 w-4" /></button>

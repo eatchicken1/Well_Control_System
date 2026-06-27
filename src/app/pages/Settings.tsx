@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { AlertTriangle, CheckCircle, Info, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
+import { FormEvent, useState } from 'react';
+import { AlertTriangle, CheckCircle, Info, KeyRound, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
 import { DEFAULT_REALTIME_ENDPOINT, DEFAULT_THRESHOLDS, useWellControl } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
+import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
+import { useAuth } from '../context/AuthContext';
 
 function ThresholdInput({
   label, value, activeValue, unit, onChange, min, max, step, description, level,
@@ -224,9 +226,13 @@ function ConfigRiskBanner({
 
 export default function Settings() {
   const { thresholds, updateThresholds, dataSourceState, realtimeEndpoint, updateRealtimeEndpoint } = useWellControl();
+  const { changePassword } = useAuth();
   const [draft, setDraft] = useState({ ...thresholds });
   const [endpointDraft, setEndpointDraft] = useState(realtimeEndpoint);
   const [saved, setSaved] = useState(false);
+  const [passwordDraft, setPasswordDraft] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
+  const [passwordState, setPasswordState] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const thresholdInvalid = draft.returnResponseWarning >= draft.returnResponseCritical || draft.pitGainWarning >= draft.pitGainCritical;
   const algorithmInvalid =
     draft.sppResidualWarning >= draft.sppResidualCritical
@@ -247,6 +253,29 @@ export default function Settings() {
   const handleReset = () => {
     setDraft({ ...DEFAULT_THRESHOLDS });
     setEndpointDraft(DEFAULT_REALTIME_ENDPOINT);
+  };
+
+  const handlePasswordSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setPasswordState({ type: 'idle', message: '' });
+    if (passwordDraft.newPassword.length < 8) {
+      setPasswordState({ type: 'error', message: '新密码至少需要 8 位。' });
+      return;
+    }
+    if (passwordDraft.newPassword !== passwordDraft.confirmPassword) {
+      setPasswordState({ type: 'error', message: '两次输入的新密码不一致。' });
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await changePassword(passwordDraft.oldPassword, passwordDraft.newPassword, passwordDraft.confirmPassword);
+      setPasswordDraft({ oldPassword: '', newPassword: '', confirmPassword: '' });
+      setPasswordState({ type: 'success', message: '密码已更新，下次登录请使用新密码。' });
+    } catch (err) {
+      setPasswordState({ type: 'error', message: err instanceof Error ? err.message : '密码修改失败。' });
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   const set = (key: keyof typeof draft) => (v: number) => setDraft((prev) => ({ ...prev, [key]: v }));
@@ -285,9 +314,10 @@ export default function Settings() {
 
   return (
     <div className="ops-page space-y-4">
+      <MonitoringWellTabs />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="ops-eyebrow">Display reference</div>
+          <div className="ops-eyebrow">显示参考</div>
           <h1 className="ops-title">系统设置</h1>
           <p className="text-sm ops-muted">配置曲线参考线与基线显示参数；报警等级由实时检测接口返回</p>
         </div>
@@ -341,9 +371,7 @@ export default function Settings() {
                   placeholder={DEFAULT_REALTIME_ENDPOINT}
                   className="ops-field w-full px-3 py-2 text-sm"
                 />
-                <div className="mt-1 text-[11px] ops-muted">
-                  默认读取本机 MySQL 代理接口；实时记录字段使用 standpipe_pressure_mpa、pump_spm_total、total_gas_pct、hook_load_kn、total_pit_volume_m3 等标准列。
-                </div>
+                <div className="mt-1 text-[11px] ops-muted">默认读取本机接口；字段使用标准列。</div>
               </div>
               <div className={`rounded-md border p-3 text-xs ${
                 dataSourceState.status === 'connected'
@@ -357,6 +385,65 @@ export default function Settings() {
                 <div className="mt-2 tabular-nums opacity-75">样本 {dataSourceState.recordCount} · {dataSourceState.lastRecordAt || '--:--:--'}</div>
               </div>
             </div>
+          </section>
+
+          <section className="ops-panel p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-base text-slate-800 dark:text-slate-100">
+              <KeyRound className="h-4 w-4 text-teal-500" />
+              修改登录密码
+            </h3>
+            <form onSubmit={handlePasswordSubmit} className="space-y-3">
+              <div className="password-form-grid">
+                <label>
+                  <span>旧密码</span>
+                  <input
+                    type="password"
+                    className="ops-field w-full px-3 py-2 text-sm"
+                    value={passwordDraft.oldPassword}
+                    autoComplete="current-password"
+                    onChange={(event) => setPasswordDraft((prev) => ({ ...prev, oldPassword: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>新密码</span>
+                  <input
+                    type="password"
+                    className="ops-field w-full px-3 py-2 text-sm"
+                    value={passwordDraft.newPassword}
+                    autoComplete="new-password"
+                    minLength={8}
+                    onChange={(event) => setPasswordDraft((prev) => ({ ...prev, newPassword: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>确认新密码</span>
+                  <input
+                    type="password"
+                    className="ops-field w-full px-3 py-2 text-sm"
+                    value={passwordDraft.confirmPassword}
+                    autoComplete="new-password"
+                    minLength={8}
+                    onChange={(event) => setPasswordDraft((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+                    required
+                  />
+                </label>
+              </div>
+              {passwordState.type !== 'idle' && (
+                <div className={`rounded-md border p-3 text-sm ${
+                  passwordState.type === 'success'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200'
+                    : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/20 dark:text-red-200'
+                }`}>
+                  {passwordState.message}
+                </div>
+              )}
+              <button className="ops-button-primary px-3 py-2" type="submit" disabled={passwordSaving}>
+                <KeyRound className="h-4 w-4" />
+                {passwordSaving ? '正在修改' : '修改密码'}
+              </button>
+            </form>
           </section>
 
           <ThresholdGroup title="出口流量响应曲线参考">
@@ -375,15 +462,15 @@ export default function Settings() {
           </ThresholdGroup>
 
           <ThresholdGroup title="曲线与基线参考参数">
-            <ThresholdInput label="立压变化量参考线 1" value={draft.sppResidualWarning} activeValue={thresholds.sppResidualWarning} unit="MPa" onChange={set('sppResidualWarning')} min={0.1} max={2} step={0.01} description="仅用于曲线参考显示" level="warning" />
-            <ThresholdInput label="立压变化量参考线 2" value={draft.sppResidualCritical} activeValue={thresholds.sppResidualCritical} unit="MPa" onChange={set('sppResidualCritical')} min={0.2} max={3} step={0.01} description="仅用于曲线参考显示" level="critical" />
-            <PlainConfigInput label="趋势参考线间隔" value={draft.cusumDecisionInterval} unit="score" onChange={set('cusumDecisionInterval')} min={2} max={9} step={0.1} description="历史曲线显示参数" />
-            <PlainConfigInput label="RLS 遗忘因子" value={draft.rlsForgettingFactor} unit="lambda" onChange={set('rlsForgettingFactor')} min={0.9} max={0.999} step={0.001} description="基线质量显示参数" />
-            <PlainConfigInput label="偏离容忍倍数" value={draft.madTolerance} unit="x" onChange={set('madTolerance')} min={1} max={6} step={0.1} description="历史偏离显示参数" />
-            <PlainConfigInput label="全烃迟到窗口" value={draft.gasLagWindowMinutes} unit="min" onChange={set('gasLagWindowMinutes')} min={10} max={180} step={5} description="气测窗口显示参数" />
-            <PlainConfigInput label="停泵出口流量衰减率" value={draft.stopFlowDecayThreshold} unit="%" onChange={set('stopFlowDecayThreshold')} min={40} max={98} step={1} description="停泵分析参考参数" />
-            <PlainConfigInput label="基线样本目标" value={draft.coldStartCycleCount} unit="组" onChange={set('coldStartCycleCount')} min={5} max={40} step={1} description="基线质量展示所需样本量" />
-            <PlainConfigInput label="协方差惩罚参考值" value={draft.covariancePenaltyThreshold} unit="rho" onChange={set('covariancePenaltyThreshold')} min={0.1} max={0.9} step={0.01} description="历史多参数分析参考值" />
+            <ThresholdInput label="立压变化量参考线 1" value={draft.sppResidualWarning} activeValue={thresholds.sppResidualWarning} unit="MPa" onChange={set('sppResidualWarning')} min={0.1} max={2} step={0.01} description="仅用于曲线显示" level="warning" />
+            <ThresholdInput label="立压变化量参考线 2" value={draft.sppResidualCritical} activeValue={thresholds.sppResidualCritical} unit="MPa" onChange={set('sppResidualCritical')} min={0.2} max={3} step={0.01} description="仅用于曲线显示" level="critical" />
+            <PlainConfigInput label="趋势参考线间隔" value={draft.cusumDecisionInterval} unit="score" onChange={set('cusumDecisionInterval')} min={2} max={9} step={0.1} description="曲线显示参数" />
+            <PlainConfigInput label="RLS 遗忘因子" value={draft.rlsForgettingFactor} unit="lambda" onChange={set('rlsForgettingFactor')} min={0.9} max={0.999} step={0.001} description="稳定性显示参数" />
+            <PlainConfigInput label="偏离容忍倍数" value={draft.madTolerance} unit="x" onChange={set('madTolerance')} min={1} max={6} step={0.1} description="曲线显示参数" />
+            <PlainConfigInput label="全烃迟到窗口" value={draft.gasLagWindowMinutes} unit="min" onChange={set('gasLagWindowMinutes')} min={10} max={180} step={5} description="曲线显示参数" />
+            <PlainConfigInput label="停泵出口流量衰减率" value={draft.stopFlowDecayThreshold} unit="%" onChange={set('stopFlowDecayThreshold')} min={40} max={98} step={1} description="停泵显示参数" />
+            <PlainConfigInput label="基线样本目标" value={draft.coldStartCycleCount} unit="组" onChange={set('coldStartCycleCount')} min={5} max={40} step={1} description="样本量显示参数" />
+            <PlainConfigInput label="协方差惩罚参考值" value={draft.covariancePenaltyThreshold} unit="rho" onChange={set('covariancePenaltyThreshold')} min={0.1} max={0.9} step={0.01} description="历史分析显示参数" />
           </ThresholdGroup>
         </div>
 
@@ -402,7 +489,7 @@ export default function Settings() {
                 ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100'
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200'
           }`}>
-            {configInvalid ? '参考线校验失败：参考线 1 必须低于参考线 2。' : changedCount > 0 ? '存在未保存草稿，保存后仅同步到曲线显示。' : '所有显示参数与当前生效值一致。'}
+            {configInvalid ? '参考线校验失败：参考线 1 必须低于参考线 2。' : changedCount > 0 ? '存在未保存草稿，保存后仅同步到显示。' : '所有参数与当前生效值一致。'}
           </div>
           <div className="mb-4 grid grid-cols-2 gap-2">
             <button onClick={handleReset} className="ops-button-secondary justify-center px-2">
@@ -414,7 +501,7 @@ export default function Settings() {
               生效
             </button>
           </div>
-          <div className="mb-2 text-[11px] uppercase tracking-[0.16em] ops-muted">Active Values</div>
+          <div className="mb-2 text-[11px] uppercase tracking-[0.16em] ops-muted">当前参数</div>
           <div className="space-y-2 text-sm">
             {[ 
               ['出口流量响应预警', `${thresholds.returnResponseWarning}%`],

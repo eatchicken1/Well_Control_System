@@ -152,6 +152,7 @@ export function WellSchematic({
           </defs>
 
           <rect width="360" height="430" fill={panel} />
+          <rect x="8" y="8" width="344" height="414" rx="12" fill={isLight ? '#fffdf8' : '#08111f'} stroke={line} strokeWidth="1.2" opacity="0.96" />
           <rect y="88" width="360" height="72" fill={isLight ? '#f1eadc' : '#29251d'} />
           <rect y="88" width="360" height="72" fill="url(#formationDots)" />
           <rect y="160" width="360" height="82" fill={isLight ? '#e7edf1' : '#17212d'} />
@@ -185,17 +186,17 @@ export function WellSchematic({
           <path d="M164 382 L172 394 L180 385 L188 394 L196 382" fill="none" stroke={line} strokeWidth="2.2" />
 
           <FlowPath d="M180 103 V360" color="#2563eb" active={circulationActive} />
-          <FlowPath d="M157 350 C151 302 155 246 156 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
-          <FlowPath d="M203 350 C209 302 205 246 204 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
+          <FlowPath d="M157 350 C152 304 154 250 157 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} reverse />
+          <FlowPath d="M203 350 C208 304 206 250 203 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
 
           {influxActive && (
             <g opacity={1} filter="url(#influxGlow)">
-              <path d="M78 374 C101 372 112 362 139 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
-              <path d="M282 374 C259 372 248 362 221 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
-              <path d="M92 398 C112 393 123 382 143 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
-              <path d="M268 398 C248 393 237 382 217 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
-              <circle r="3.5" fill={visual.accent}><animateMotion dur="1.4s" repeatCount="indefinite" path="M78 374 C101 372 112 362 139 358" /></circle>
-              <circle r="3.5" fill={visual.accent}><animateMotion dur="1.55s" repeatCount="indefinite" path="M282 374 C259 372 248 362 221 358" /></circle>
+              <path d="M82 382 C104 379 116 369 140 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
+              <path d="M278 382 C256 379 244 369 220 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
+              <path d="M94 406 C114 401 125 389 144 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
+              <path d="M266 406 C246 401 235 389 216 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
+              <circle r="3.5" fill={visual.accent}><animateMotion dur="1.4s" repeatCount="indefinite" path="M82 382 C104 379 116 369 140 358" /></circle>
+              <circle r="3.5" fill={visual.accent}><animateMotion dur="1.55s" repeatCount="indefinite" path="M278 382 C256 379 244 369 220 358" /></circle>
             </g>
           )}
 
@@ -207,30 +208,30 @@ export function WellSchematic({
           <g fontFamily="sans-serif" fontSize={compact ? 9.5 : 10.5} fill={muted}>
             <text x="12" y="82">地表</text>
             <path d="M35 79 H90 L100 88" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="9" y="121" fill="#2563eb" fontSize={compact ? 11 : 12} fontWeight="700">入口 {flowIn.toFixed(1)}</text>
-            <text x="276" y="121" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 11 : 12} fontWeight="700">出口 {flowOut.toFixed(1)}</text>
-            <text x="251" y="43">防喷器组</text>
+            <text x="10" y="121" fill="#2563eb" fontSize={compact ? 12.5 : 13.5} fontWeight="700">入口流量 {flowIn.toFixed(1)}</text>
+            <text x="236" y="121" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 12.5 : 13.5} fontWeight="700">出口流量 {flowOut.toFixed(1)}</text>
+            <text x="242" y="43">防喷器组</text>
             <path d="M247 46 H218" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="254" y="179">套管</text>
+            <text x="248" y="179">套管</text>
             <path d="M247 176 H217" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="254" y="214">水泥环</text>
+            <text x="248" y="214">水泥环</text>
             <path d="M247 211 H226" fill="none" stroke={muted} strokeWidth="1" />
             <text x="12" y="246">钻柱</text>
             <path d="M41 243 H173" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="244" y="278" fill={influxActive ? visual.accent : muted}>环空出口流</text>
-            <path d="M238 275 H207" fill="none" stroke={influxActive ? visual.accent : muted} strokeWidth="1" />
-            <text x="251" y="350">高压地层</text>
+            <text x="214" y="278" fill={influxActive ? visual.accent : muted}>环空出口流量</text>
+            <path d="M239 275 H207" fill="none" stroke={influxActive ? visual.accent : muted} strokeWidth="1" />
+            <text x="246" y="350">高压地层</text>
             <path d="M246 347 H225" fill="none" stroke={muted} strokeWidth="1" />
             {influxActive && (
               <>
-                <text x="12" y="414" fill={visual.accent}>地层流体侵入</text>
+                <text x="12" y="410" fill={visual.accent}>地层流体侵入</text>
                 <path d="M92 411 H126" fill="none" stroke={visual.accent} strokeWidth="1" />
               </>
             )}
             {!compact && (
               <>
                 <text x="12" y="145" fill={muted}>立压 {drillPipePressure.toFixed(2)} MPa</text>
-                <text x="235" y="145" fill={muted}>套压 {casingPressure.toFixed(2)} MPa</text>
+                <text x="234" y="145" fill={muted}>套压 {casingPressure.toFixed(2)} MPa</text>
                 <text x="12" y="165" fill={activeSignals.includes('standpipe_pressure') ? visual.accent : muted}>活动信号 {activeSignals.length}</text>
               </>
             )}
