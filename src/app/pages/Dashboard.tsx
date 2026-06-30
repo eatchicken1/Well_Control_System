@@ -11,6 +11,7 @@ import {
   PlayCircle,
   RadioTower,
   Search,
+  Square,
   X,
 } from 'lucide-react';
 import { useWellControl, type Alert, type BackendLevel, type WellInfo, type WellRuntimeState } from '../context/WellControlContext';
@@ -129,7 +130,7 @@ function MonitoredWellCard({
     currentSampleTime,
     openRealtimeWell,
     startWellMonitoring,
-    pauseWellMonitoring,
+    stopWellMonitoring,
     resumeWellMonitoring,
     removeMonitoredWell,
   } = useWellControl();
@@ -143,6 +144,7 @@ function MonitoredWellCard({
   const level = (runtime?.backendLevel ?? (isActiveWell ? current.confidenceLevel : 0)) as BackendLevel;
   const isRunning = Boolean(runtime?.isRunning || (isActiveWell && runtime?.status === 'connected'));
   const isConnecting = runtime?.status === 'connecting';
+  const canStop = isRunning || isConnecting;
   const hasStarted = Boolean(runtime?.monitoringStartedAt || runtime?.startedSampleTime || runtime?.recordCount);
   const bitDepth = isActiveWell ? current.bitDepth : alert?.bitDepth ?? well.depth - 28;
   const latestTime = isActiveWell ? currentSampleTime || runtime?.lastRecordAt : runtime?.lastRecordAt || alert?.time;
@@ -217,13 +219,23 @@ function MonitoredWellCard({
       </div>
 
       <div className="multiwell-card-toolbar">
-        <button type="button" onClick={startOrResume} disabled={isRunning} className="ops-button-primary multiwell-card-action" title="自动选择现场发现前 1 小时并开始监测">
+        <button type="button" onClick={startOrResume} disabled={isRunning} className="ops-button-primary multiwell-card-action multiwell-card-action-primary" title="自动选择现场发现前 1 小时并开始监测">
           {isRunning ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
           {isConnecting ? '接入中' : isRunning ? '监测中' : '自动监测'}
         </button>
-        <button type="button" onClick={() => isRunning ? pauseWellMonitoring(well.wellId) : resumeWellMonitoring(well.wellId)} disabled={!hasStarted} className="ops-button-secondary multiwell-card-action">
+        <button
+          type="button"
+          onClick={() => stopWellMonitoring(well.wellId)}
+          disabled={!canStop}
+          className={`multiwell-card-action multiwell-stop-action ${canStop ? 'multiwell-stop-action-live' : ''}`}
+          title={canStop ? '明确停止当前井监测并写入会话状态' : '当前井未接入监测流'}
+        >
+          <Square className="h-4 w-4" />
+          停止监测
+        </button>
+        <button type="button" onClick={() => resumeWellMonitoring(well.wellId)} disabled={!hasStarted || isRunning} className="ops-button-secondary multiwell-card-action" title={isRunning ? '实时监测进行中，前端不可暂停' : '按上次起点继续监测'}>
           {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          {isRunning ? '暂停' : '继续'}
+          {isRunning ? '持续监测' : '继续监测'}
         </button>
         <button type="button" onClick={enterRealtime} className="ops-button-secondary multiwell-card-action">
           <ArrowRight className="h-4 w-4" />
@@ -270,7 +282,9 @@ function EventOverview({ selectedAlerts }: { selectedAlerts: Alert[] }) {
                   <div className="truncate text-sm font-semibold text-slate-950">{alert.wellName || alert.wellId || '当前井'}</div>
                   <div className="mt-0.5 truncate text-[11px] text-slate-500">{alert.date} {alert.time}</div>
                 </div>
-                <span className={`dashboard-chip ${levelTone(alert.backendLevel)}`}>L{alert.backendLevel}</span>
+                <span className={`dashboard-chip ${levelTone(alert.backendLevel)}`}>
+                  L{alert.backendLevel}{(alert.peakBackendLevel ?? alert.backendLevel) > alert.backendLevel ? ` / 峰L${alert.peakBackendLevel}` : ''}
+                </span>
               </div>
               <div className="mt-2 line-clamp-2 text-xs text-slate-700">{alert.message}</div>
               <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">

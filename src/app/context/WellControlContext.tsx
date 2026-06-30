@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
 import { appendAccessToken, authenticatedFetch } from '../api/authToken';
+import { saveSelectedWells } from '../api/authApi';
+import { useAuth } from './AuthContext';
 
 export type AlertStatus = 'normal' | 'warning' | 'critical';
 export type BackendLevel = 0 | 1 | 2 | 3 | 4;
@@ -109,7 +111,9 @@ export interface Alert {
   code?: string;
   backendEventId: string;
   backendLevel: BackendLevel;
+  peakBackendLevel: BackendLevel;
   formalEvalLevel: BackendLevel;
+  peakFormalEvalLevel: BackendLevel;
   activeSignals: string[];
   eventState: string;
   pumpState: string;
@@ -125,6 +129,15 @@ export interface BackendDetectionState {
   pumpState: string;
   timestamp: string;
   eventId: string | null;
+  baselineValid: boolean;
+  baselineWarmup: boolean;
+  monitoringReady: boolean;
+  baselineCount: number;
+  baselineSource: string;
+  baselineSelection: string;
+  baselineStartTime: string;
+  baselineEndTime: string;
+  baselineInvalidReason: string;
 }
 
 export interface FlowDataPoint {
@@ -173,8 +186,13 @@ export interface HistoryRecord {
   mudWeight: number;
   rop: number;
   bitDepth: number;
+  pumpState: string;
   cycleState: CycleState;
   backendLevel: BackendLevel;
+  baselineValid: boolean;
+  baselineWarmup: boolean;
+  monitoringReady: boolean;
+  baselineCount: number;
   status: AlertStatus;
 }
 
@@ -197,6 +215,14 @@ export interface ThresholdSettings {
 }
 
 export const DEFAULT_REALTIME_ENDPOINT = '/api/realtime';
+const STORAGE_PREFIX = 'wcs-overflow-2026';
+const STORAGE_SELECTED_WELL = `${STORAGE_PREFIX}:selected-well-id`;
+const STORAGE_MONITORED_WELLS = `${STORAGE_PREFIX}:monitored-well-ids`;
+const STORAGE_REALTIME_TABS = `${STORAGE_PREFIX}:realtime-tab-well-ids`;
+const STORAGE_REALTIME_ENDPOINT = `${STORAGE_PREFIX}:realtime-endpoint`;
+const STORAGE_WELL_RUNTIME_STATES = `${STORAGE_PREFIX}:well-runtime-states`;
+const STORAGE_ACKNOWLEDGED_EVENTS = `${STORAGE_PREFIX}:acknowledged-events`;
+const STORAGE_ALERT_EVENTS = `${STORAGE_PREFIX}:alert-events`;
 
 export interface RealtimeStartOption {
   frame: number;
@@ -255,6 +281,8 @@ interface WellMonitoringSnapshot {
   shutInStartedAt: string | null;
 }
 
+type AcknowledgedEventMap = Record<string, true>;
+
 interface DataSourceAdapter {
   connect: (well: WellInfo, seed: MonitoringData) => void;
   disconnect: () => void;
@@ -301,6 +329,7 @@ interface WellControlContextType {
   removeMonitoredWell: (wellId: string) => void;
   openRealtimeWell: (wellId: string) => void;
   startWellMonitoring: (wellId: string) => void;
+  stopWellMonitoring: (wellId: string) => void;
   pauseWellMonitoring: (wellId: string) => void;
   resumeWellMonitoring: (wellId: string) => void;
   selectStartFrame: (frame: number) => void;
@@ -567,6 +596,25 @@ function finite(value: unknown, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function readValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return undefined;
+}
+
+function readBoolean(value: unknown, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return fallback;
+}
+
 function parseFrameMillis(value?: string) {
   if (!value) return Number.NaN;
   const millis = Date.parse(value.replace(' ', 'T'));
@@ -596,6 +644,144 @@ function shiftTimestamp(value: string, deltaMs: number) {
   const mi = String(shifted.getMinutes()).padStart(2, '0');
   const ss = String(shifted.getSeconds()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function readStoredJson<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredJson(key: string, value: unknown) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function persistStringListState(key: string, value: string[]) {
+  writeStoredJson(key, value);
+  return value;
+}
+
+function persistStringValueState(key: string, value: string) {
+  if (typeof window === 'undefined') return value;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ignore storage failures
+  }
+  return value;
+}
+
+function saveWellSelection(key: string, value: string) {
+  persistStringValueState(key, value);
+}
+
+function saveWellListSelection(key: string, value: string[]) {
+  persistStringListState(key, value);
+}
+
+function sanitizeWellRuntimeState(value: unknown): WellRuntimeState | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const wellId = String(row.wellId || '').trim();
+  if (!wellId) return null;
+  const rawStatus = String(row.status || 'paused');
+  const persistedRunning = readBoolean(row.isRunning, false);
+  const wasActive = persistedRunning || rawStatus === 'connected' || rawStatus === 'connecting';
+  return {
+    wellId,
+    status: wasActive ? 'connecting' : (['paused', 'disconnected', 'error'].includes(rawStatus) ? rawStatus as DataSourceConnectionStatus : 'paused'),
+    isRunning: false,
+    recordCount: Math.max(0, finite(row.recordCount, 0)),
+    lastRecordAt: row.lastRecordAt ? String(row.lastRecordAt) : null,
+    backendLevel: normalizeBackendLevel(row.backendLevel),
+    monitoringStartedAt: row.monitoringStartedAt ? String(row.monitoringStartedAt) : null,
+    startedSampleTime: row.startedSampleTime ? String(row.startedSampleTime) : null,
+    message: wasActive
+      ? '正在恢复上次监测流'
+      : String(row.message || '待启动'),
+    updatedAt: String(row.updatedAt || new Date().toISOString()),
+  };
+}
+
+function getInitialWellRuntimeStates() {
+  const stored = readStoredJson<Record<string, unknown>>(STORAGE_WELL_RUNTIME_STATES, {});
+  const sanitized: Record<string, WellRuntimeState> = {};
+  Object.entries(stored).forEach(([key, value]) => {
+    const runtime = sanitizeWellRuntimeState(value);
+    if (runtime) sanitized[key] = runtime;
+  });
+  return sanitized;
+}
+
+function getInitialAcknowledgedEvents() {
+  const stored = readStoredJson<Record<string, unknown>>(STORAGE_ACKNOWLEDGED_EVENTS, {});
+  const sanitized: AcknowledgedEventMap = {};
+  Object.entries(stored).forEach(([key, value]) => {
+    if (value === true) sanitized[key] = true;
+  });
+  return sanitized;
+}
+
+function alertLevelFromBackend(level: BackendLevel) {
+  if (level >= 4) return 'critical' as const;
+  if (level >= 2) return 'warning' as const;
+  return 'info' as const;
+}
+
+function sanitizeAlert(value: unknown): Alert | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const backendEventId = String(row.backendEventId || '').trim();
+  const message = String(row.message || '').trim();
+  if (!backendEventId || !message) return null;
+  const backendLevel = normalizeBackendLevel(row.backendLevel);
+  const formalEvalLevel = normalizeBackendLevel(row.formalEvalLevel);
+  const id = Math.max(1, Math.round(finite(row.id, 0)));
+  return {
+    id,
+    wellId: row.wellId ? String(row.wellId) : undefined,
+    wellName: row.wellName ? String(row.wellName) : undefined,
+    wellBlock: row.wellBlock ? String(row.wellBlock) : undefined,
+    wellDepth: Number.isFinite(Number(row.wellDepth)) ? Number(row.wellDepth) : undefined,
+    bitDepth: Number.isFinite(Number(row.bitDepth)) ? Number(row.bitDepth) : undefined,
+    formation: row.formation ? String(row.formation) : undefined,
+    time: String(row.time || ''),
+    date: String(row.date || ''),
+    lastTime: row.lastTime ? String(row.lastTime) : undefined,
+    lastDate: row.lastDate ? String(row.lastDate) : undefined,
+    level: alertLevelFromBackend(backendLevel),
+    message,
+    acknowledged: readBoolean(row.acknowledged, false),
+    code: row.code ? String(row.code) : undefined,
+    backendEventId,
+    backendLevel,
+    peakBackendLevel: normalizeBackendLevel(row.peakBackendLevel ?? backendLevel),
+    formalEvalLevel,
+    peakFormalEvalLevel: normalizeBackendLevel(row.peakFormalEvalLevel ?? formalEvalLevel),
+    activeSignals: parseActiveSignals(row.activeSignals),
+    eventState: String(row.eventState || 'tracking'),
+    pumpState: String(row.pumpState || 'Unknown'),
+    count: Math.max(1, Math.round(finite(row.count, 1))),
+  };
+}
+
+function getInitialAlerts() {
+  const stored = readStoredJson<unknown[]>(STORAGE_ALERT_EVENTS, []);
+  return Array.isArray(stored)
+    ? stored.flatMap((item) => {
+      const alert = sanitizeAlert(item);
+      return alert ? [alert] : [];
+    }).slice(0, 120)
+    : [];
 }
 
 function formatStartLabel(frame: number, timestamp: string) {
@@ -651,7 +837,9 @@ function buildStartOptionsFromTimeIndex(data: {
 }
 
 function getInitialRealtimeEndpoint() {
-  return DEFAULT_REALTIME_ENDPOINT;
+  if (typeof window === 'undefined') return DEFAULT_REALTIME_ENDPOINT;
+  const saved = window.localStorage.getItem(STORAGE_REALTIME_ENDPOINT);
+  return normalizeRealtimeEndpoint(saved || DEFAULT_REALTIME_ENDPOINT);
 }
 
 function normalizeRealtimeEndpoint(endpoint: string) {
@@ -790,6 +978,15 @@ const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
   pumpState: 'Unknown',
   timestamp: '',
   eventId: null,
+  baselineValid: false,
+  baselineWarmup: true,
+  monitoringReady: false,
+  baselineCount: 0,
+  baselineSource: '',
+  baselineSelection: '',
+  baselineStartTime: '',
+  baselineEndTime: '',
+  baselineInvalidReason: '',
 };
 
 function normalizeBackendLevel(value: unknown): BackendLevel {
@@ -834,66 +1031,111 @@ interface BackendLogEntry {
 }
 
 function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
-  const rawEntries = Array.isArray(record.log_entries) ? record.log_entries : [];
+  const rawEntriesValue = readValue(record as Record<string, unknown>, ['log_entries', 'logEntries']);
+  const rawEntries = Array.isArray(rawEntriesValue) ? rawEntriesValue : [];
   return rawEntries.flatMap((item, index) => {
     if (!item || typeof item !== 'object') return [];
     const row = item as Record<string, unknown>;
-    const publicLevel = normalizeBackendLevel(row.public_level ?? row.level ?? row.formal_eval_level);
-    if (publicLevel < 2) return [];
-    const timestamp = String(row.timestamp || record.timestamp || record.sampleTime || record.sample_time || '');
-    const eventId = String(row.event_id ?? `${timestamp || 'frame'}-${row.frame ?? index}-${publicLevel}`);
+    const publicLevel = normalizeBackendLevel(
+      readValue(row, ['public_level', 'publicLevel', 'level', 'formal_eval_level', 'formalEvalLevel']),
+    );
+    const timestamp = String(readValue(row, ['timestamp']) ?? record.timestamp ?? record.sampleTime ?? record.sample_time ?? '');
+    const eventId = String(readValue(row, ['event_id', 'eventId']) ?? `${timestamp || 'frame'}-${readValue(row, ['frame']) ?? index}-${publicLevel}`);
+    const eventState = String(readValue(row, ['event_state', 'eventState']) || (publicLevel >= 4 ? 'confirmed' : publicLevel >= 2 ? 'tracking' : publicLevel === 1 ? 'recovering' : 'normal'));
+    const shouldKeep = publicLevel >= 2 || eventState === 'recovering' || eventState === 'normal';
+    if (!shouldKeep) return [];
     return [{
       eventId,
       publicLevel,
-      formalEvalLevel: normalizeBackendLevel(row.formal_eval_level ?? publicLevel),
-      reason: displayAlarmText(row.reason || `实时判级 L${publicLevel}`),
-      activeSignals: parseActiveSignals(row.active_signals),
-      eventState: String(row.event_state || (publicLevel >= 4 ? 'confirmed' : 'tracking')),
-      pumpState: String(row.pump_state || record.pump_state || 'Unknown'),
+      formalEvalLevel: normalizeBackendLevel(readValue(row, ['formal_eval_level', 'formalEvalLevel']) ?? publicLevel),
+      reason: displayAlarmText(readValue(row, ['reason']) || `实时判级 L${publicLevel}`),
+      activeSignals: parseActiveSignals(readValue(row, ['active_signals', 'activeSignals'])),
+      eventState,
+      pumpState: String(readValue(row, ['pump_state', 'pumpState']) || record.pump_state || record.pumpState || 'Unknown'),
       timestamp,
-      startTime: String(row.start_time || ''),
-      endTime: String(row.end_time || ''),
-      sampleCount: Number(row.sample_count) || undefined,
+      startTime: String(readValue(row, ['start_time', 'startTime']) || ''),
+      endTime: String(readValue(row, ['end_time', 'endTime']) || ''),
+      sampleCount: finite(readValue(row, ['sample_count', 'sampleCount']), 0) || undefined,
     }];
   });
 }
 
 function backendEventKey(entry: BackendLogEntry) {
-  return entry.eventId;
+  return `${entry.eventId}:${entry.startTime || entry.timestamp || ''}`;
 }
 
 function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionState {
+  const source = record as Record<string, unknown>;
   const logs = normalizeBackendLogEntries(record);
   const latestLog = logs.at(-1);
   const publicLevel = normalizeBackendLevel(
-    record.public_level ?? record.formal_eval_level ?? record.confidence_level ?? record.confidenceLevel,
+    readValue(source, ['public_level', 'publicLevel', 'formal_eval_level', 'formalEvalLevel', 'confidence_level', 'confidenceLevel'])
+      ?? latestLog?.publicLevel,
   );
-  const formalEvalLevel = normalizeBackendLevel(record.formal_eval_level ?? latestLog?.formalEvalLevel ?? publicLevel);
-  const timestamp = String(record.timestamp || record.sampleTime || record.sample_time || latestLog?.timestamp || '');
-  const activeSignals = parseActiveSignals(record.active_signals);
-  const frameEventId = record.event_id === undefined || record.event_id === null || String(record.event_id).trim() === ''
+  const formalEvalLevel = normalizeBackendLevel(
+    readValue(source, ['formal_eval_level', 'formalEvalLevel']) ?? latestLog?.formalEvalLevel ?? publicLevel,
+  );
+  const timestamp = String(readValue(source, ['timestamp', 'sampleTime', 'sample_time']) || latestLog?.timestamp || '');
+  const activeSignals = parseActiveSignals(readValue(source, ['active_signals', 'activeSignals']));
+  const baselines = (readValue(source, ['baselines']) as Record<string, unknown> | undefined) ?? undefined;
+  const frameEventIdValue = readValue(source, ['event_id', 'eventId']);
+  const frameEventId = frameEventIdValue === undefined || frameEventIdValue === null || String(frameEventIdValue).trim() === ''
     ? null
-    : String(record.event_id);
+    : String(frameEventIdValue);
+  const baselineCount = finite(
+    readValue(source, ['eval_baseline_count', 'evalBaselineCount'])
+      ?? readValue(baselines ?? {}, ['count', 'Count']),
+    0,
+  );
+  const baselineWarmup = readBoolean(readValue(source, ['baseline_warmup', 'baselineWarmup']), false);
+  const monitoringReady = readBoolean(readValue(source, ['monitoring_ready', 'monitoringReady']), publicLevel >= 0);
+  const baselineValid = readBoolean(readValue(source, ['baseline_valid', 'baselineValid']), baselineCount >= 20);
+  const baselineInvalidReason = String(readValue(source, ['baseline_invalid_reason', 'baselineInvalidReason']) || '');
   return {
     publicLevel,
     formalEvalLevel,
-    reason: displayAlarmText(record.reason || latestLog?.reason || ''),
+    reason: displayAlarmText(readValue(source, ['reason']) || latestLog?.reason || ''),
     activeSignals: activeSignals.length > 0 ? activeSignals : latestLog?.activeSignals || [],
-    eventState: String(record.event_state || latestLog?.eventState || (publicLevel >= 4 ? 'confirmed' : publicLevel >= 2 ? 'tracking' : publicLevel === 1 ? 'observing' : 'normal')),
-    pumpState: String(record.pump_state || record.pumpState || latestLog?.pumpState || 'Unknown'),
+    eventState: String(
+      readValue(source, ['event_state', 'eventState'])
+        || latestLog?.eventState
+        || (publicLevel >= 4 ? 'confirmed' : publicLevel >= 2 ? 'tracking' : publicLevel === 1 ? 'observing' : 'normal'),
+    ),
+    pumpState: String(readValue(source, ['pump_state', 'pumpState']) || latestLog?.pumpState || 'Unknown'),
     timestamp,
     eventId: latestLog?.eventId || (publicLevel >= 2 ? frameEventId : null),
+    baselineValid,
+    baselineWarmup,
+    monitoringReady,
+    baselineCount,
+    baselineSource: String(
+      readValue(source, ['eval_baseline_source', 'evalBaselineSource'])
+        || readValue(baselines ?? {}, ['source', 'Source'])
+        || '',
+    ),
+    baselineSelection: String(
+      readValue(source, ['eval_baseline_selection', 'evalBaselineSelection'])
+        || readValue(baselines ?? {}, ['selection', 'Selection'])
+        || '',
+    ),
+    baselineStartTime: String(
+      readValue(source, ['eval_baseline_start_time', 'evalBaselineStartTime'])
+        || readValue(baselines ?? {}, ['startTime', 'StartTime'])
+        || '',
+    ),
+    baselineEndTime: String(
+      readValue(source, ['eval_baseline_end_time', 'evalBaselineEndTime', 'dynamic_baseline_end_time', 'dynamicBaselineEndTime'])
+        || readValue(baselines ?? {}, ['endTime', 'EndTime'])
+        || '',
+    ),
+    baselineInvalidReason: baselineInvalidReason || (!baselineValid && !baselineWarmup ? '基线未建立或已失效' : ''),
   };
 }
 
 function isMonitorableEventRecord(record: RealTimeRecord, data: MonitoringData) {
   if (record.monitoring_ready === false || record.monitoringReady === false) return false;
   if (record.baseline_warmup === true || record.baselineWarmup === true) return false;
-  const condition = String(record.condition || data.condition || '').trim();
-  const pumpState = String(record.pump_state || record.pumpState || data.pumpState || '');
-  if (pumpState === 'Stopped') return false;
-  if (/提离井底|停泵|起下钻|接单根|划眼|关井/.test(condition)) return false;
-  return condition === 'DrillingCirculating' || /钻进|钻井/.test(condition);
+  return true;
 }
 
 function normalizeRealtimeWell(item: unknown): WellInfo | null {
@@ -1147,9 +1389,31 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const [isRunning, setIsRunning] = useState(false);
   const [thresholds, setThresholds] = useState<ThresholdSettings>(DEFAULT_THRESHOLDS);
   const [wells, setWells] = useState<WellInfo[]>(WELLS);
-  const [selectedWellId, setSelectedWellId] = useState(WELLS[0].wellId);
-  const [monitoredWellIds, setMonitoredWellIds] = useState<string[]>([WELLS[0].wellId, WELLS[1].wellId, WELLS[2].wellId]);
-  const [realtimeTabWellIds, setRealtimeTabWellIds] = useState<string[]>([]);
+  const { user } = useAuth();
+  const [selectedWellId, setSelectedWellId] = useState(() => {
+    if (typeof window === 'undefined') return WELLS[0].wellId;
+    return window.localStorage.getItem(STORAGE_SELECTED_WELL) || WELLS[0].wellId;
+  });
+  const [monitoredWellIds, setMonitoredWellIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = window.localStorage.getItem(STORAGE_MONITORED_WELLS);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.map((item) => String(item)).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [realtimeTabWellIds, setRealtimeTabWellIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = window.localStorage.getItem(STORAGE_REALTIME_TABS);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.map((item) => String(item)).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  });
   const [startOptions, setStartOptions] = useState<RealtimeStartOption[]>([]);
   const [selectedStartFrame, setSelectedStartFrame] = useState(0);
   const [selectedStartTime, setSelectedStartTime] = useState('');
@@ -1163,7 +1427,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   });
   const [realtimeEndpoint, setRealtimeEndpoint] = useState(getInitialRealtimeEndpoint);
   const [dataSourceState, setDataSourceState] = useState<DataSourceState>(() => createInitialDataSourceState(getInitialRealtimeEndpoint()));
-  const [wellRuntimeStates, setWellRuntimeStates] = useState<Record<string, WellRuntimeState>>({});
+  const [wellRuntimeStates, setWellRuntimeStates] = useState<Record<string, WellRuntimeState>>(getInitialWellRuntimeStates);
   const [realtimeWellsLoaded, setRealtimeWellsLoaded] = useState(false);
   const wellSnapshotsRef = useRef<Record<string, WellMonitoringSnapshot>>({});
   const wellInfo = wells.find((well) => well.wellId === selectedWellId) || wells[0] || WELLS[0];
@@ -1172,20 +1436,46 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const currentDataRef = useRef<MonitoringData>(currentData);
   const [flowHistory, setFlowHistory] = useState<FlowDataPoint[]>([]);
   const [pressureHistory, setPressureHistory] = useState<PressureDataPoint[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>(getInitialAlerts);
+  const [acknowledgedEvents, setAcknowledgedEvents] = useState<AcknowledgedEventMap>(getInitialAcknowledgedEvents);
   const [backendDetection, setBackendDetection] = useState<BackendDetectionState>(INITIAL_BACKEND_DETECTION);
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [shutInActive, setShutInActive] = useState(false);
   const [shutInStartedAt, setShutInStartedAt] = useState<string | null>(null);
-  const alertIdCounter = useRef(1);
+  const alertIdCounter = useRef(Math.max(0, ...alerts.map((alert) => alert.id)) + 1);
   const historyIdCounter = useRef(1);
   const timeCounter = useRef(0);
   const adapterRef = useRef<DataSourceAdapter | null>(null);
   const backgroundAdaptersRef = useRef<Record<string, DataSourceAdapter>>({});
+  const autoRestoringWellIdsRef = useRef<Set<string>>(new Set());
+  const autoRestoreFailureAtRef = useRef<Record<string, number>>({});
+  const wellRuntimeStatesRef = useRef(wellRuntimeStates);
   const backendEventIdsRef = useRef<Set<string>>(new Set());
   const backendEventKeysRef = useRef<Set<string>>(new Set());
   const activeEventIdRef = useRef<string | null>(null);
+  const selectedWellIdRef = useRef(selectedWellId);
+  const acknowledgedEventsRef = useRef<AcknowledgedEventMap>(acknowledgedEvents);
   const [cycleInfo, setCycleInfo] = useState<CycleInfo>(() => getCycleInfo(0));
+
+  useEffect(() => {
+    selectedWellIdRef.current = selectedWellId;
+  }, [selectedWellId]);
+
+  useEffect(() => {
+    wellRuntimeStatesRef.current = wellRuntimeStates;
+  }, [wellRuntimeStates]);
+
+  useEffect(() => {
+    acknowledgedEventsRef.current = acknowledgedEvents;
+  }, [acknowledgedEvents]);
+
+  const selectedWellIdsFromUser = useMemo(() => (
+    Array.isArray(user?.selectedWellIds) ? user.selectedWellIds.map((item) => String(item).trim()).filter(Boolean) : []
+  ), [user?.selectedWellIds]);
+
+  const runningWellIdsFromUser = useMemo(() => (
+    Array.isArray(user?.runningWellIds) ? user.runningWellIds.map((item) => String(item).trim()).filter(Boolean) : []
+  ), [user?.runningWellIds]);
 
   const getWellSnapshot = useCallback((well: WellInfo) => {
     const existing = wellSnapshotsRef.current[well.wellId];
@@ -1217,22 +1507,27 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
 
   const alertStatus = backendLevelToStatus(backendDetection.publicLevel);
   const baselineInfo = useMemo<BaselineInfo>(() => {
-    const frozenCycles = Math.max(0, alerts.filter((alert) => alert.backendLevel >= 4).length);
-    const acceptedCycleCount = Math.max(0, cycleInfo.cycleIndex * 3 + 7 - frozenCycles);
-    const totalCycles = acceptedCycleCount + frozenCycles + 4;
+    const totalCycles = Math.max(historyRecords.length, backendDetection.baselineCount);
+    const acceptedCycleCount = backendDetection.baselineCount;
+    const frozenCycles = Math.max(0, historyRecords.filter((record) => record.backendLevel >= 4).length);
+    const coverageBase = backendDetection.baselineValid
+      ? 100
+      : (acceptedCycleCount / Math.max(thresholds.coldStartCycleCount, 1)) * 100;
+    const qualityPenalty = totalCycles > 0 ? (frozenCycles / Math.max(totalCycles, 1)) * 100 : 0;
+    const isColdStart = backendDetection.baselineWarmup || !backendDetection.baselineValid;
     return {
       totalCycles,
       qualifiedCycles: acceptedCycleCount,
       frozenCycles,
       acceptedCycleCount,
-      isColdStart: acceptedCycleCount < thresholds.coldStartCycleCount,
+      isColdStart,
       coldStartRemaining: Math.max(0, thresholds.coldStartCycleCount - acceptedCycleCount),
-      qualityScore: clamp(72 + acceptedCycleCount * 0.8 - frozenCycles * 3.5, 48, 96),
-      templateCoverage: clamp(62 + acceptedCycleCount * 1.2, 62, 98),
-      lastResetReason: null,
-      lastResetTime: null,
+      qualityScore: clamp(coverageBase - qualityPenalty * 0.6, 0, 100),
+      templateCoverage: clamp(coverageBase, 0, 100),
+      lastResetReason: backendDetection.baselineInvalidReason || (isColdStart ? '等待后端基线状态稳定' : null),
+      lastResetTime: backendDetection.baselineEndTime || null,
     };
-  }, [alerts, cycleInfo.cycleIndex, thresholds.coldStartCycleCount]);
+  }, [backendDetection, historyRecords, thresholds.coldStartCycleCount]);
 
   const updateWellRuntime = useCallback((wellId: string, patch: Partial<WellRuntimeState>) => {
     setWellRuntimeStates((prev) => {
@@ -1257,6 +1552,25 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const clearWellAlertState = useCallback((wellId: string) => {
+    const prefix = `${wellId}:`;
+    setAlerts((prev) => prev.filter((alert) => alert.wellId !== wellId));
+    setAcknowledgedEvents((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        if (key.startsWith(prefix)) delete next[key];
+      });
+      acknowledgedEventsRef.current = next;
+      return next;
+    });
+    Array.from(backendEventIdsRef.current).forEach((key) => {
+      if (key.startsWith(prefix)) backendEventIdsRef.current.delete(key);
+    });
+    Array.from(backendEventKeysRef.current).forEach((key) => {
+      if (key.startsWith(prefix)) backendEventKeysRef.current.delete(key);
+    });
+  }, []);
+
   const appendAlertsFromRecord = useCallback((well: WellInfo, record: RealTimeRecord, data: MonitoringData) => {
     const backendLogs = normalizeBackendLogEntries(record);
     if (backendLogs.length === 0) return;
@@ -1264,6 +1578,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       let nextAlerts = previous;
       const additions: Alert[] = [];
       backendLogs.forEach((entry) => {
+        if (!entry.eventId || !(entry.startTime || entry.timestamp)) return;
         const eventKey = `${well.wellId}:${backendEventKey(entry)}`;
         const eventInstanceId = `${well.wellId}:${entry.eventId}`;
         const eventTime = formatRecordTime(entry.timestamp || record.timestamp);
@@ -1271,21 +1586,24 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         if (existingIndex >= 0) {
           nextAlerts = nextAlerts.map((alert, index) => index === existingIndex ? {
             ...alert,
-            level: Math.max(alert.backendLevel, entry.publicLevel) >= 4 ? 'critical' as const : 'warning' as const,
+            level: entry.publicLevel >= 4 ? 'critical' as const : entry.publicLevel >= 2 ? 'warning' as const : 'info' as const,
             message: entry.reason || alert.message,
             time: eventTime.timeStr,
             date: eventTime.dateStr,
             lastTime: eventTime.timeStr,
             lastDate: eventTime.dateStr,
             count: entry.sampleCount || (alert.count || 1) + 1,
-            backendLevel: Math.max(alert.backendLevel, entry.publicLevel) as BackendLevel,
-            formalEvalLevel: Math.max(alert.formalEvalLevel, entry.formalEvalLevel) as BackendLevel,
+            backendLevel: entry.publicLevel,
+            peakBackendLevel: Math.max(alert.peakBackendLevel ?? alert.backendLevel, entry.publicLevel) as BackendLevel,
+            formalEvalLevel: entry.formalEvalLevel,
+            peakFormalEvalLevel: Math.max(alert.peakFormalEvalLevel ?? alert.formalEvalLevel, entry.formalEvalLevel) as BackendLevel,
             activeSignals: entry.activeSignals,
             eventState: entry.eventState,
             pumpState: entry.pumpState,
           } : alert);
           return;
         }
+        if (entry.publicLevel < 2) return;
         if (backendEventIdsRef.current.has(eventInstanceId) || backendEventKeysRef.current.has(eventKey)) return;
         backendEventIdsRef.current.add(eventInstanceId);
         backendEventKeysRef.current.add(eventKey);
@@ -1303,11 +1621,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           lastDate: eventTime.dateStr,
           level: entry.publicLevel >= 4 ? 'critical' as const : 'warning' as const,
           message: entry.reason,
-          acknowledged: false,
+          acknowledged: acknowledgedEventsRef.current[eventKey] === true,
           code: entry.eventId,
           backendEventId: eventKey,
           backendLevel: entry.publicLevel,
+          peakBackendLevel: entry.publicLevel,
           formalEvalLevel: entry.formalEvalLevel,
+          peakFormalEvalLevel: entry.formalEvalLevel,
           activeSignals: entry.activeSignals,
           eventState: entry.eventState,
           pumpState: entry.pumpState,
@@ -1340,7 +1660,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       shutInActive: shutInState?.active ?? false,
       shutInStartedAt: shutInState?.startedAt ?? null,
     };
-    if (well.wellId === selectedWellId) {
+    if (well.wellId === selectedWellIdRef.current) {
       currentDataRef.current = nextData;
       setCurrentData(nextData);
       setCurrentSampleTime(sampleTime);
@@ -1352,7 +1672,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       setShutInActive(shutInState?.active ?? false);
       setShutInStartedAt(shutInState?.startedAt ?? null);
     }
-  }, [selectedWellId]);
+  }, []);
 
   const resetWellSnapshot = useCallback((well: WellInfo) => {
     wellSnapshotsRef.current[well.wellId] = createWellMonitoringSnapshot(well);
@@ -1466,8 +1786,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           mudWeight: lastData.mudWeight,
           rop: lastData.rop,
           bitDepth: lastData.bitDepth,
+          pumpState: nextDetection.pumpState,
           cycleState: cycleState.state,
           backendLevel: nextDetection.publicLevel,
+          baselineValid: nextDetection.baselineValid,
+          baselineWarmup: nextDetection.baselineWarmup,
+          monitoringReady: nextDetection.monitoringReady,
+          baselineCount: nextDetection.baselineCount,
           status: backendLevelToStatus(nextDetection.publicLevel),
         },
       ];
@@ -1492,13 +1817,97 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const validIds = new Set(wells.map((well) => well.wellId));
-    setMonitoredWellIds((current) => {
-      const next = current.filter((wellId) => validIds.has(wellId));
-      if (next.length > 0) return next;
-      return wells.slice(0, 3).map((well) => well.wellId);
-    });
+    setMonitoredWellIds((current) => current.filter((wellId) => validIds.has(wellId)));
     setRealtimeTabWellIds((current) => current.filter((wellId) => validIds.has(wellId)));
+    setWellRuntimeStates((current) => Object.fromEntries(
+      Object.entries(current).filter(([wellId]) => validIds.has(wellId)),
+    ));
+    setAlerts((current) => current.filter((alert) => !alert.wellId || validIds.has(alert.wellId)));
+    setAcknowledgedEvents((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([eventKey]) => {
+        const splitIndex = eventKey.indexOf(':');
+        return splitIndex > 0 && validIds.has(eventKey.slice(0, splitIndex));
+      })) as AcknowledgedEventMap;
+      acknowledgedEventsRef.current = next;
+      return next;
+    });
   }, [wells]);
+
+  useEffect(() => {
+    if (!user) return;
+    const selected = selectedWellIdsFromUser;
+    const running = runningWellIdsFromUser;
+    running.forEach((wellId) => {
+      updateWellRuntime(wellId, {
+        status: 'connecting',
+        isRunning: false,
+        message: '后端会话运行中，正在恢复检测流',
+      });
+    });
+    if (selected.length > 0) {
+      setMonitoredWellIds((current) => {
+        const next = Array.from(new Set([...running, ...selected, ...current]));
+        saveWellListSelection(STORAGE_MONITORED_WELLS, next);
+        return next;
+      });
+      setRealtimeTabWellIds((current) => {
+        const next = Array.from(new Set([...selected, ...running, ...current]));
+        saveWellListSelection(STORAGE_REALTIME_TABS, next);
+        return next;
+      });
+      setSelectedWellId((current) => {
+        const selectable = [...running, ...selected];
+        const next = selectable.includes(current) ? current : selectable[0] || current;
+        saveWellSelection(STORAGE_SELECTED_WELL, next);
+        return next;
+      });
+      return;
+    }
+    if (running.length > 0) {
+      setMonitoredWellIds((current) => {
+        const next = Array.from(new Set([...running, ...current]));
+        saveWellListSelection(STORAGE_MONITORED_WELLS, next);
+        return next;
+      });
+      setRealtimeTabWellIds((current) => {
+        const next = Array.from(new Set([...running, ...current]));
+        saveWellListSelection(STORAGE_REALTIME_TABS, next);
+        return next;
+      });
+    }
+  }, [runningWellIdsFromUser, selectedWellIdsFromUser, updateWellRuntime, user]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_SELECTED_WELL, selectedWellId);
+  }, [selectedWellId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_MONITORED_WELLS, JSON.stringify(monitoredWellIds));
+  }, [monitoredWellIds]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_REALTIME_TABS, JSON.stringify(realtimeTabWellIds));
+  }, [realtimeTabWellIds]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_REALTIME_ENDPOINT, realtimeEndpoint);
+  }, [realtimeEndpoint]);
+
+  useEffect(() => {
+    writeStoredJson(STORAGE_WELL_RUNTIME_STATES, wellRuntimeStates);
+  }, [wellRuntimeStates]);
+
+  useEffect(() => {
+    writeStoredJson(STORAGE_ACKNOWLEDGED_EVENTS, acknowledgedEvents);
+  }, [acknowledgedEvents]);
+
+  useEffect(() => {
+    writeStoredJson(STORAGE_ALERT_EVENTS, alerts.slice(0, 120));
+  }, [alerts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1519,7 +1928,11 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         setRealtimeWellsLoaded(true);
         if (!nextWells.length) return;
         setWells(nextWells);
-        setSelectedWellId((current) => nextWells.some((well) => well.wellId === current) ? current : nextWells[0].wellId);
+        setSelectedWellId((current) => {
+          const nextSelected = nextWells.some((well) => well.wellId === current) ? current : nextWells[0].wellId;
+          saveWellSelection(STORAGE_SELECTED_WELL, nextSelected);
+          return nextSelected;
+        });
         setDataSourceState((prev) => ({
           ...prev,
           status: 'connecting',
@@ -1634,6 +2047,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       });
     });
     adapter.onRecord((record) => {
+      const previousSnapshot = getWellSnapshot(wellInfo);
       const recordTime = formatRecordTime(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
       const timestampMs = recordMillis(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
       timeCounter.current = Number(record.cycleSeconds) > 0 ? Number(record.cycleSeconds) : timeCounter.current + 1;
@@ -1660,7 +2074,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const activeEventId = nextDetection.publicLevel >= 2 && canPaintEvent ? activeEventIdRef.current : null;
       setBackendDetection(nextDetection);
       const nextFlowHistory = sortMonitoringPoints(keepMonitoringWindow([
-        ...flowHistory,
+        ...previousSnapshot.flowHistory,
         {
           time: recordTime.timeStr,
           timestampMs,
@@ -1678,7 +2092,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         },
       ]));
       const nextPressureHistory = sortMonitoringPoints(keepMonitoringWindow([
-        ...pressureHistory,
+        ...previousSnapshot.pressureHistory,
         {
           time: recordTime.timeStr,
           timestampMs,
@@ -1691,7 +2105,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         },
       ]));
       const nextHistoryRecords = [
-        ...historyRecords.slice(-239),
+        ...previousSnapshot.historyRecords.slice(-239),
         {
           id: historyIdCounter.current++,
           time: recordTime.timeStr,
@@ -1711,8 +2125,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           mudWeight: nextData.mudWeight,
           rop: nextData.rop,
           bitDepth: nextData.bitDepth,
+          pumpState: nextDetection.pumpState,
           cycleState: nextCycleInfo.state,
           backendLevel: nextDetection.publicLevel,
+          baselineValid: nextDetection.baselineValid,
+          baselineWarmup: nextDetection.baselineWarmup,
+          monitoringReady: nextDetection.monitoringReady,
+          baselineCount: nextDetection.baselineCount,
           status: backendLevelToStatus(nextDetection.publicLevel),
         },
       ];
@@ -1745,7 +2164,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     return () => {
       adapter.disconnect();
     };
-  }, [appendAlertsFromRecord, isRunning, selectedWellId, realtimeEndpoint, selectedStartTime, wellInfo]);
+  }, [appendAlertsFromRecord, getWellSnapshot, isRunning, realtimeEndpoint, selectedStartTime, wellInfo]);
 
   const resetForWell = (well: WellInfo, startTime = selectedStartTime, clearEvents = false) => {
     const nextInitial = makeInitialData(well);
@@ -1774,10 +2193,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     historyIdCounter.current = 1;
     activeEventIdRef.current = null;
     if (clearEvents) {
-      setAlerts([]);
-      alertIdCounter.current = 1;
-      backendEventIdsRef.current.clear();
-      backendEventKeysRef.current.clear();
+      clearWellAlertState(well.wellId);
     }
     setIsRunning(false);
     setDataSourceState(createInitialDataSourceState(realtimeEndpoint, startTime));
@@ -1792,6 +2208,11 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     if (!nextWell) return;
     const runtime = wellRuntimeStates[wellId];
     const hasBackgroundStream = Boolean(backgroundAdaptersRef.current[wellId]);
+    selectedWellIdRef.current = wellId;
+    saveWellSelection(STORAGE_SELECTED_WELL, wellId);
+    if (user) {
+      void saveSelectedWells(Array.from(new Set([wellId, ...monitoredWellIds])));
+    }
     setSelectedWellId(wellId);
     hydrateWellView(nextWell);
     if (runtime?.startedSampleTime) {
@@ -1811,27 +2232,43 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     setIsRunning(false);
   };
 
-  const addMonitoredWell = (wellId: string) => {
+  const addMonitoredWell = useCallback((wellId: string) => {
     if (!wells.some((well) => well.wellId === wellId)) return;
-    setMonitoredWellIds((prev) => prev.includes(wellId) ? prev : [...prev, wellId]);
-  };
+    setMonitoredWellIds((prev) => {
+      const next = prev.includes(wellId) ? prev : [...prev, wellId];
+      saveWellListSelection(STORAGE_MONITORED_WELLS, next);
+      if (user) void saveSelectedWells(next);
+      return next;
+    });
+  }, [user, wells]);
 
   const removeMonitoredWell = (wellId: string) => {
     stopBackgroundMonitoring(wellId);
-    setMonitoredWellIds((prev) => prev.filter((item) => item !== wellId));
-    setRealtimeTabWellIds((prev) => prev.filter((item) => item !== wellId));
+    setMonitoredWellIds((prev) => {
+      const next = prev.filter((item) => item !== wellId);
+      saveWellListSelection(STORAGE_MONITORED_WELLS, next);
+      return next;
+    });
+    setRealtimeTabWellIds((prev) => {
+      const next = prev.filter((item) => item !== wellId);
+      saveWellListSelection(STORAGE_REALTIME_TABS, next);
+      return next;
+    });
     if (wellId === selectedWellId) setIsRunning(false);
     updateWellRuntime(wellId, { status: 'paused', isRunning: false, message: '待启动' });
   };
 
   const toggleMonitoredWell = (wellId: string) => {
-    setMonitoredWellIds((prev) => (
-      prev.includes(wellId)
+    setMonitoredWellIds((prev) => {
+      const next = prev.includes(wellId)
         ? prev.filter((item) => item !== wellId)
         : wells.some((well) => well.wellId === wellId)
           ? [...prev, wellId]
-          : prev
-    ));
+          : prev;
+      saveWellListSelection(STORAGE_MONITORED_WELLS, next);
+      if (user) void saveSelectedWells(next);
+      return next;
+    });
   };
 
   const openRealtimeWell = (wellId: string) => {
@@ -1840,18 +2277,32 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     const runtime = wellRuntimeStates[wellId];
     const nextStartTime = runtime?.startedSampleTime ? toDatetimeLocalValue(runtime.startedSampleTime) : '';
     addMonitoredWell(wellId);
-    setRealtimeTabWellIds((prev) => prev.includes(wellId) ? prev : [...prev, wellId]);
+    setRealtimeTabWellIds((prev) => {
+      const next = prev.includes(wellId) ? prev : [...prev, wellId];
+      saveWellListSelection(STORAGE_REALTIME_TABS, next);
+      return next;
+    });
     hydrateWellView(nextWell);
+    selectedWellIdRef.current = wellId;
     if (nextStartTime) {
       setSelectedWellId(wellId);
       setSelectedStartTime(nextStartTime);
-      updateWellRuntime(wellId, {
-        status: 'connecting',
-        isRunning: true,
-        message: '正在进入实时监测',
-      });
-      setIsRunning(true);
-      if (!backgroundAdaptersRef.current[wellId]) {
+      if (runtime?.isRunning || runtime?.status === 'connected' || runtime?.status === 'connecting' || backgroundAdaptersRef.current[wellId]) {
+        updateWellRuntime(wellId, {
+          status: runtime?.status === 'paused' ? 'connecting' : (runtime?.status || 'connecting'),
+          isRunning: true,
+          message: runtime?.message || '正在进入实时监测',
+        });
+        setIsRunning(true);
+      } else {
+        updateWellRuntime(wellId, {
+          status: 'paused',
+          isRunning: false,
+          message: '已恢复上次监测起点，点击继续监测',
+        });
+        setIsRunning(false);
+      }
+      if ((runtime?.isRunning || runtime?.status === 'connected' || runtime?.status === 'connecting') && !backgroundAdaptersRef.current[wellId]) {
         startBackgroundMonitoring(nextWell, nextStartTime, true);
       }
       return;
@@ -1860,12 +2311,19 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     startWellMonitoring(wellId);
   };
 
-  const startWellMonitoring = (wellId: string) => {
+  const startWellMonitoring = useCallback((wellId: string) => {
     const nextWell = wells.find((well) => well.wellId === wellId);
     if (!nextWell) return;
     addMonitoredWell(wellId);
-    setRealtimeTabWellIds((prev) => prev.includes(wellId) ? prev : [...prev, wellId]);
-    if (wellRuntimeStates[wellId]?.isRunning || backgroundAdaptersRef.current[wellId]) return;
+    setRealtimeTabWellIds((prev) => {
+      const next = prev.includes(wellId) ? prev : [...prev, wellId];
+      saveWellListSelection(STORAGE_REALTIME_TABS, next);
+      return next;
+    });
+    if (wellRuntimeStatesRef.current[wellId]?.isRunning || backgroundAdaptersRef.current[wellId]) {
+      autoRestoringWellIdsRef.current.delete(wellId);
+      return;
+    }
     updateWellRuntime(wellId, {
       status: 'connecting',
       isRunning: true,
@@ -1894,27 +2352,66 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           lastRecordAt: null,
           message: `正在建立检测流 · 起始 ${formatRecordTime(nextStartTime).timeStr}`,
         });
-        if (wellId === selectedWellId) {
+        if (wellId === selectedWellIdRef.current) {
           setSelectedStartFrame(autoStartOption?.frame ?? discoveryFrame);
           setSelectedStartTime(toDatetimeLocalValue(nextStartTime));
           hydrateWellView(nextWell);
           setIsRunning(true);
         }
         startBackgroundMonitoring(nextWell, nextStartTime, false);
+        autoRestoringWellIdsRef.current.delete(wellId);
+        delete autoRestoreFailureAtRef.current[wellId];
       })
       .catch((error: Error) => {
+        autoRestoringWellIdsRef.current.delete(wellId);
+        autoRestoreFailureAtRef.current[wellId] = Date.now();
         updateWellRuntime(wellId, {
           status: 'error',
           isRunning: false,
           message: `启动失败：${error.message}`,
         });
       });
-  };
+  }, [addMonitoredWell, hydrateWellView, realtimeEndpoint, startBackgroundMonitoring, updateWellRuntime, wells]);
+
+  useEffect(() => {
+    if (!user || !realtimeWellsLoaded) return;
+    runningWellIdsFromUser.forEach((wellId) => {
+      if (!wells.some((well) => well.wellId === wellId)) return;
+      if (backgroundAdaptersRef.current[wellId]) return;
+      if (autoRestoringWellIdsRef.current.has(wellId)) return;
+      if (Date.now() - (autoRestoreFailureAtRef.current[wellId] || 0) < 30000) return;
+      const runtime = wellRuntimeStates[wellId];
+      if (runtime?.isRunning && runtime.status === 'connected') return;
+      autoRestoringWellIdsRef.current.add(wellId);
+      startWellMonitoring(wellId);
+    });
+  }, [realtimeWellsLoaded, runningWellIdsFromUser, startWellMonitoring, user, wellRuntimeStates, wells]);
 
   const pauseWellMonitoring = (wellId: string) => {
+    updateWellRuntime(wellId, {
+      message: '实时监测已锁定，前端不可暂停；如需停监请发送明确暂停信号',
+    });
+  };
+
+  const stopWellMonitoring = (wellId: string) => {
     stopBackgroundMonitoring(wellId);
-    if (wellId === selectedWellId) setIsRunning(false);
-    updateWellRuntime(wellId, { status: 'paused', isRunning: false, message: '已暂停' });
+    updateWellRuntime(wellId, {
+      status: 'paused',
+      isRunning: false,
+      message: '监测已停止',
+      monitoringStartedAt: null,
+      startedSampleTime: null,
+    });
+    if (wellId === selectedWellIdRef.current) {
+      setIsRunning(false);
+    }
+    authenticatedFetch(buildRealtimeApiUrl('', `/api/monitoring/sessions/${encodeURIComponent(wellId)}/stop`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    }).catch(() => {
+      // stop is best-effort for now
+    });
   };
 
   const resumeWellMonitoring = (wellId: string) => {
@@ -1926,7 +2423,11 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       return;
     }
     addMonitoredWell(wellId);
-    setRealtimeTabWellIds((prev) => prev.includes(wellId) ? prev : [...prev, wellId]);
+    setRealtimeTabWellIds((prev) => {
+      const next = prev.includes(wellId) ? prev : [...prev, wellId];
+      saveWellListSelection(STORAGE_REALTIME_TABS, next);
+      return next;
+    });
     updateWellRuntime(wellId, {
       status: 'connecting',
       isRunning: true,
@@ -1959,10 +2460,26 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
 
   const acknowledgeAlert = (id: number) => {
     setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acknowledged: true } : a)));
+    const target = alerts.find((alert) => alert.id === id);
+    if (target?.backendEventId) {
+      setAcknowledgedEvents((prev) => {
+        const next = { ...prev, [target.backendEventId]: true };
+        acknowledgedEventsRef.current = next;
+        return next;
+      });
+    }
   };
 
   const acknowledgeAll = () => {
     setAlerts((prev) => prev.map((a) => ({ ...a, acknowledged: true })));
+    setAcknowledgedEvents((prev) => {
+      const next = { ...prev };
+      alerts.forEach((alert) => {
+        if (alert.backendEventId) next[alert.backendEventId] = true;
+      });
+      acknowledgedEventsRef.current = next;
+      return next;
+    });
   };
 
   const startShutInProcedure = () => {
@@ -2021,6 +2538,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         removeMonitoredWell,
         openRealtimeWell,
         startWellMonitoring,
+        stopWellMonitoring,
         pauseWellMonitoring,
         resumeWellMonitoring,
         selectStartFrame,

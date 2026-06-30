@@ -1,4 +1,4 @@
-import { Bell, Clock3, X } from 'lucide-react';
+import { Bell, Clock3, Square, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useState } from 'react';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
@@ -55,6 +55,9 @@ function AlertQueueMini({
               <div className="flex min-w-0 items-center gap-2">
                 <span className={`h-2 w-2 flex-shrink-0 rounded-full ${alert.level === 'critical' ? 'bg-red-600' : alert.level === 'warning' ? 'bg-amber-500' : 'bg-blue-500'}`} />
                 <span className="ops-inline-tile rounded px-1.5 py-0.5 text-[10px] dark:bg-white/10">L{alert.backendLevel}</span>
+                {(alert.peakBackendLevel ?? alert.backendLevel) > alert.backendLevel ? (
+                  <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">峰L{alert.peakBackendLevel}</span>
+                ) : null}
                 <div className="min-w-0 flex-1 truncate">{alert.message}</div>
                 <span className="shrink-0 text-[10px] opacity-65">{alert.count && alert.count > 1 ? `${alert.count}帧` : alert.time}</span>
               </div>
@@ -76,9 +79,20 @@ function AlertQueueMini({
             </div>
             <div className="space-y-3 p-4 text-sm">
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${selectedAlert.backendLevel >= 4 ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
-                  L{selectedAlert.backendLevel} {BACKEND_LEVEL_META[selectedAlert.backendLevel].label}
+                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                  selectedAlert.backendLevel >= 4
+                    ? 'bg-red-100 text-red-800'
+                    : selectedAlert.backendLevel >= 2
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  当前 L{selectedAlert.backendLevel} {BACKEND_LEVEL_META[selectedAlert.backendLevel].label}
                 </span>
+                {(selectedAlert.peakBackendLevel ?? selectedAlert.backendLevel) > selectedAlert.backendLevel ? (
+                  <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700">
+                    峰值 L{selectedAlert.peakBackendLevel}
+                  </span>
+                ) : null}
                 <span className="ops-inline-tile px-2 py-1 text-xs">{selectedAlert.pumpState}</span>
                 <span className="ops-inline-tile px-2 py-1 text-xs">持续 {selectedAlert.count || 1} 帧</span>
               </div>
@@ -111,6 +125,13 @@ function signalState(signal: string, level: BackendLevel, activeSignals: string[
   return level >= 4 ? 'critical' as const : 'warning' as const;
 }
 
+function monitoringStatusLabel(isRunning: boolean, level: BackendLevel) {
+  if (!isRunning) return '未停监';
+  if (level >= 4) return '事件监测';
+  if (level >= 2) return '关注监测';
+  return '正常监测';
+}
+
 export default function Monitoring() {
   const {
     isRunning,
@@ -125,6 +146,7 @@ export default function Monitoring() {
     monitoredWellIds,
     realtimeTabWellIds,
     selectedWellId,
+    stopWellMonitoring,
     wells,
   } = useWellControl();
   const activeWellIds = monitoredWellIds.length > 0
@@ -142,10 +164,34 @@ export default function Monitoring() {
   const sppState = signalState('standpipe_pressure', backendDetection.publicLevel, backendDetection.activeSignals);
   const trackFlowData = flowHistory;
   const trackPressureData = pressureHistory;
-  const currentWellAlerts = alerts.filter((alert) => !alert.wellId || activeWellIds.length === 0 || activeWellIds.includes(alert.wellId));
+  const currentWellAlerts = alerts.filter((alert) => !alert.wellId || alert.wellId === selectedWellId);
+  const statusLabel = monitoringStatusLabel(isRunning, backendDetection.publicLevel);
 
   return (
     <div className="monitoring-workspace flex h-full min-h-0 flex-col gap-2 overflow-auto lg:overflow-hidden">
+      <div className="monitoring-header ops-panel flex items-center justify-between gap-3 px-3 py-2.5">
+        <div className="min-w-0">
+          <div className="ops-eyebrow">实时监测</div>
+          <div className="truncate text-[15px] font-semibold text-slate-900 dark:text-slate-100">{activeWell?.wellName || '未选择井'}</div>
+          <div className="mt-0.5 flex items-center gap-2 text-[11px] ops-muted">
+            <span>{statusLabel}</span>
+            <span>·</span>
+            <span>{currentWellAlerts.length} 条事件</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="ops-button-secondary px-3 py-2 text-xs"
+            disabled={!selectedWellId || !isRunning}
+            title="前端不可暂停，建议发送明确停监信号"
+            onClick={() => selectedWellId && stopWellMonitoring(selectedWellId)}
+          >
+            <Square className="h-4 w-4" />
+            停止监测
+          </button>
+        </div>
+      </div>
       <MonitoringWellTabs />
       {activeWellIds.length === 0 ? (
         <div className="ops-panel ops-empty-state min-h-[420px] flex-1">

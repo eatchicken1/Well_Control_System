@@ -16,7 +16,7 @@ export function MonitoringWellTabs() {
     return (
       <div className="monitoring-tabbar">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-900">监测井</div>
+          <div className="text-sm font-semibold text-slate-900">监测井卡片</div>
           <div className="mt-0.5 text-xs text-slate-500">请选择已纳入监测的井</div>
         </div>
         <button type="button" onClick={() => navigate('/')} className="ops-button-primary px-3 py-2 text-xs">

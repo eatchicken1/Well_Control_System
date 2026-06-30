@@ -5,6 +5,8 @@ export interface AuthUser {
   username: string;
   displayName: string;
   role: string;
+  selectedWellIds?: string[];
+  runningWellIds?: string[];
 }
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -56,5 +58,13 @@ export async function refreshToken() {
     body: JSON.stringify({ refreshToken: getRefreshToken() }),
   });
   setAuthTokens(data.accessToken, data.refreshToken);
+  return data.user;
+}
+
+export async function saveSelectedWells(selectedWellIds: string[]) {
+  const data = await apiJson<{ ok: boolean; user: AuthUser }>('/api/auth/selected-wells', {
+    method: 'PUT',
+    body: JSON.stringify({ selectedWellIds }),
+  });
   return data.user;
 }

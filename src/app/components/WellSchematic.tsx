@@ -42,11 +42,11 @@ function ReadoutCard({
   isLight: boolean;
 }) {
   return (
-    <div className={`flex min-h-[40px] min-w-0 flex-col justify-between rounded-md border px-2 py-1.5 ${metricTone(isLight, metric.state)}`}>
-      <div className="truncate text-[10px] leading-tight opacity-70">{metric.label}</div>
+    <div className={`flex min-h-[58px] min-w-0 flex-col justify-between rounded-md border px-2.5 py-2 ${metricTone(isLight, metric.state)}`}>
+      <div className="truncate text-[11px] leading-tight opacity-70">{metric.label}</div>
       <div className="mt-1 flex min-w-0 items-end justify-between gap-2">
-        <span className="truncate text-[14px] font-semibold tabular-nums leading-none">{metric.value}</span>
-        {metric.unit ? <span className="shrink-0 text-[9px] leading-none opacity-65">{metric.unit}</span> : null}
+        <span className="truncate text-[17px] font-semibold tabular-nums leading-none">{metric.value}</span>
+        {metric.unit ? <span className="shrink-0 text-[10px] leading-none opacity-65">{metric.unit}</span> : null}
       </div>
     </div>
   );
@@ -108,20 +108,30 @@ export function WellSchematic({
   ];
   const topReadouts = readouts.slice(0, 2);
   const bottomReadouts = compact ? [] : readouts.slice(2, 6);
+  const statusLabel = backendLevel >= 4
+    ? '井筒异常'
+    : backendLevel >= 2
+      ? '井筒关注'
+      : '井筒正常';
+  const statusCopy = backendLevel >= 4
+    ? '进入确认事件，关注关井与处置节奏'
+    : backendLevel >= 2
+      ? '已有异常证据，保持实时跟踪'
+      : '循环稳定，当前未见明显异常';
 
   return (
     <div className={`well-schematic-card flex h-full min-h-[260px] flex-col overflow-hidden rounded-md border p-2.5 lg:min-h-0 ${isLight ? 'border-slate-200 bg-white text-slate-900' : 'border-slate-700 bg-slate-950 text-slate-100'}`}>
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold">井筒溢流机理</h3>
-          {!compact && <p className="mt-0.5 truncate text-[10px] ops-muted">钻柱循环 · 环空出口流 · 地层流体侵入</p>}
+          <h3 className="truncate text-base font-semibold">井筒状态</h3>
+          {!compact && <p className="mt-0.5 truncate text-[11px] ops-muted">{statusCopy}</p>}
         </div>
         <div className={`shrink-0 rounded-md border px-2 py-1 text-[10px] font-semibold ${visual.badge}`}>
-          L{backendLevel} {BACKEND_LEVEL_META[backendLevel].shortLabel}
+          {statusLabel}
         </div>
       </div>
 
-      <div className="mb-2 grid grid-cols-2 gap-1.5">
+      <div className="mb-2 grid grid-cols-2 gap-2">
         {topReadouts.map((metric) => <ReadoutCard key={metric.label} metric={metric} isLight={isLight} />)}
       </div>
 
@@ -208,8 +218,10 @@ export function WellSchematic({
           <g fontFamily="sans-serif" fontSize={compact ? 9.5 : 10.5} fill={muted}>
             <text x="12" y="82">地表</text>
             <path d="M35 79 H90 L100 88" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="10" y="121" fill="#2563eb" fontSize={compact ? 12.5 : 13.5} fontWeight="700">入口流量 {flowIn.toFixed(1)}</text>
-            <text x="236" y="121" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 12.5 : 13.5} fontWeight="700">出口流量 {flowOut.toFixed(1)}</text>
+            <text x="10" y="121" fill="#2563eb" fontSize={compact ? 13.5 : 15} fontWeight="800">入口流量</text>
+            <text x="10" y="140" fill="#2563eb" fontSize={compact ? 15.5 : 17} fontWeight="800"> {flowIn.toFixed(1)} L/s</text>
+            <text x="236" y="121" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 13.5 : 15} fontWeight="800">出口流量</text>
+            <text x="236" y="140" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 15.5 : 17} fontWeight="800"> {flowOut.toFixed(1)} L/s</text>
             <text x="242" y="43">防喷器组</text>
             <path d="M247 46 H218" fill="none" stroke={muted} strokeWidth="1" />
             <text x="248" y="179">套管</text>

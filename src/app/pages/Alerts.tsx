@@ -65,6 +65,8 @@ function eventStateLabel(value: string) {
   if (value === 'confirmed') return '已确认风险';
   if (value === 'tracking') return '持续跟踪';
   if (value === 'observing') return '异常观察';
+  if (value === 'recovering') return '恢复观察';
+  if (value === 'normal') return '已恢复';
   return value || '报警事件';
 }
 
@@ -211,9 +213,14 @@ export default function Alerts() {
             </div>
           ) : (
             filtered.map((alert) => {
-              const backendLevel = Math.max(2, alert.backendLevel) as 2 | 3 | 4;
-              const visual = LEVEL_VISUAL[backendLevel];
+              const currentLevel = alert.backendLevel;
+              const peakLevel = Math.max(2, alert.peakBackendLevel ?? alert.backendLevel) as 2 | 3 | 4;
+              const visualLevel = Math.max(2, currentLevel >= 2 ? currentLevel : peakLevel) as 2 | 3 | 4;
+              const visual = LEVEL_VISUAL[visualLevel];
               const Icon = visual.icon;
+              const currentBadge = currentLevel >= 2
+                ? visual.badge
+                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-100';
               return (
                 <div
                   key={alert.id}
@@ -228,9 +235,14 @@ export default function Alerts() {
                   <Icon className="mt-0.5 h-5 w-5 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className={`rounded px-2 py-0.5 text-xs font-semibold ${visual.badge}`}>
-                        L{backendLevel} {BACKEND_LEVEL_META[backendLevel].label}
+                      <span className={`rounded px-2 py-0.5 text-xs font-semibold ${currentBadge}`}>
+                        当前 L{currentLevel} {BACKEND_LEVEL_META[currentLevel].label}
                       </span>
+                      {peakLevel > currentLevel ? (
+                        <span className="rounded bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-950/30 dark:text-red-200">
+                          峰值 L{peakLevel}
+                        </span>
+                      ) : null}
                       <span className="rounded bg-black/5 px-2 py-0.5 text-[11px] ops-muted dark:bg-white/10">{eventStateLabel(alert.eventState)}</span>
                       <span className="rounded bg-black/5 px-2 py-0.5 text-[11px] ops-muted dark:bg-white/10">{alert.pumpState}</span>
                       <span className="text-xs ops-muted">
@@ -280,9 +292,18 @@ export default function Alerts() {
             </div>
             <div className="space-y-3 p-4 text-sm">
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${LEVEL_VISUAL[Math.max(2, selectedAlert.backendLevel) as 2 | 3 | 4].badge}`}>
-                  L{selectedAlert.backendLevel} {BACKEND_LEVEL_META[selectedAlert.backendLevel].label}
+                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                  selectedAlert.backendLevel >= 2
+                    ? LEVEL_VISUAL[Math.max(2, selectedAlert.backendLevel) as 2 | 3 | 4].badge
+                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-100'
+                }`}>
+                  当前 L{selectedAlert.backendLevel} {BACKEND_LEVEL_META[selectedAlert.backendLevel].label}
                 </span>
+                {(selectedAlert.peakBackendLevel ?? selectedAlert.backendLevel) > selectedAlert.backendLevel ? (
+                  <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/30 dark:text-red-200">
+                    峰值 L{selectedAlert.peakBackendLevel}
+                  </span>
+                ) : null}
                 <span className="ops-inline-tile px-2 py-1 text-xs">{eventStateLabel(selectedAlert.eventState)}</span>
                 <span className="ops-inline-tile px-2 py-1 text-xs">{selectedAlert.pumpState}</span>
               </div>
@@ -308,7 +329,12 @@ export default function Alerts() {
                 </div>
                 <div className="ops-inline-tile px-3 py-2">
                   <div className="text-[11px] ops-muted">正式评估等级</div>
-                  <div className="mt-1 tabular-nums">L{selectedAlert.formalEvalLevel}</div>
+                  <div className="mt-1 tabular-nums">
+                    L{selectedAlert.formalEvalLevel}
+                    {(selectedAlert.peakFormalEvalLevel ?? selectedAlert.formalEvalLevel) > selectedAlert.formalEvalLevel
+                      ? ` / 峰值 L${selectedAlert.peakFormalEvalLevel}`
+                      : ''}
+                  </div>
                 </div>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
