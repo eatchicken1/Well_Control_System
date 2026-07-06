@@ -6,7 +6,7 @@ export const BACKEND_LEVEL_META: Record<BackendLevel, {
   description: string;
   action: string;
 }> = {
-  0: { label: '正常监测', shortLabel: '正常', description: '未识别到异常证据', action: '持续监测' },
+  0: { label: '正常监测', shortLabel: '正常', description: '未识别到异常证据', action: '保持监测' },
   1: { label: '异常观察', shortLabel: '观察', description: '单项轻微偏离', action: '保持跟踪' },
   2: { label: '溢流预警', shortLabel: '预警', description: '预警条件成立', action: '复核井况' },
   3: { label: '高度预警', shortLabel: '高预警', description: '多项或强异常条件成立', action: '准备处置' },

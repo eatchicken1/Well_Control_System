@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router';
 import { Activity, Database, Gauge, LockKeyhole, RadioTower, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -18,20 +18,39 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const mountedRef = useRef(true);
+  const usernameReady = username.trim().length > 0;
+  const passwordReady = password.length > 0;
+  const canSubmit = usernameReady && passwordReady && !submitting;
+  const submitHint = submitting
+    ? '正在校验账号，请稍候。'
+    : !usernameReady
+      ? '请输入用户名后继续。'
+      : !passwordReady
+        ? '请输入密码后继续。'
+        : '账号信息已填写，可以进入系统。';
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   if (user) return <Navigate to={from} replace />;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError('');
+    if (!usernameReady || !passwordReady) {
+      setError('请输入用户名和密码。');
+      return;
+    }
     setSubmitting(true);
     try {
       await login(username.trim(), password);
       navigate(from, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败，请检查账号密码');
+      if (mountedRef.current) setError(err instanceof Error ? err.message : '登录失败，请检查账号密码');
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) setSubmitting(false);
     }
   };
 
@@ -62,9 +81,15 @@ export default function Login() {
             <span>用户名</span>
             <input
               className="ops-field"
+              aria-label="用户名"
               value={username}
-              onChange={(event) => setUsername(event.target.value)}
+              onChange={(event) => {
+                setUsername(event.target.value);
+                if (error) setError('');
+              }}
               autoComplete="username"
+              aria-invalid={Boolean(error) && !usernameReady}
+              aria-describedby={error ? 'login-error' : undefined}
               required
             />
           </label>
@@ -73,14 +98,21 @@ export default function Login() {
             <input
               className="ops-field"
               type="password"
+              aria-label="密码"
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                if (error) setError('');
+              }}
               autoComplete="current-password"
+              aria-invalid={Boolean(error) && !passwordReady}
+              aria-describedby={error ? 'login-error' : undefined}
               required
             />
           </label>
-          {error && <div className="auth-error">{error}</div>}
-          <button className="ops-button-primary auth-submit" type="submit" disabled={submitting}>
+          {error && <div id="login-error" role="alert" className="auth-error">{error}</div>}
+          <div id="login-submit-hint" className="text-[11px] ops-muted" role="status" aria-live="polite">{submitHint}</div>
+          <button className="ops-button-primary auth-submit" type="submit" disabled={!canSubmit} aria-describedby="login-submit-hint">
             <LockKeyhole className="h-4 w-4" />
             {submitting ? '正在登录' : '进入系统'}
           </button>

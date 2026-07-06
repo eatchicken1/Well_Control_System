@@ -24,18 +24,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
     if (!getAccessToken()) {
-      setUser(null);
-      setLoading(false);
-      return;
+      if (active) {
+        setUser(null);
+        setLoading(false);
+      }
+      return () => {
+        active = false;
+      };
     }
     fetchMe()
-      .then(setUser)
-      .catch(() => refreshTokenApi().then(setUser).catch(() => {
+      .then((nextUser) => {
+        if (active) setUser(nextUser);
+      })
+      .catch(() => refreshTokenApi().then((nextUser) => {
+        if (active) setUser(nextUser);
+      }).catch(() => {
         clearAuthTokens();
-        setUser(null);
+        if (active) setUser(null);
       }))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {

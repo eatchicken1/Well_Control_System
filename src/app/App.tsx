@@ -1,11 +1,14 @@
 import { RouterProvider } from 'react-router';
 import { router } from './routes';
 import { AuthProvider } from './context/AuthContext';
+import { WellControlProvider } from './context/WellControlContext';
 
 export default function App() {
   return (
     <AuthProvider>
-      <RouterProvider router={router} />
+      <WellControlProvider>
+        <RouterProvider router={router} />
+      </WellControlProvider>
     </AuthProvider>
   );
 }

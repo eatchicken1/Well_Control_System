@@ -9,7 +9,7 @@ export function ProtectedRoute() {
   if (loading) {
     return (
       <div className="auth-loading-screen">
-        <div className="auth-loading-panel">
+        <div className="auth-loading-panel" role="status" aria-live="polite">
           <ShieldCheck className="h-5 w-5 text-teal-600" />
           <span>正在校验登录状态...</span>
         </div>
@@ -17,6 +17,6 @@ export function ProtectedRoute() {
     );
   }
 
-  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  if (!user) return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}${location.hash}` }} />;
   return <Outlet />;
 }

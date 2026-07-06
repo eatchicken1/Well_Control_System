@@ -10,6 +10,7 @@ interface VerticalCurveDeckProps {
   wellDepth?: number;
   currentDepth?: number;
   pitGain?: number;
+  isStopped?: boolean;
   compact?: boolean;
   fillViewport?: boolean;
 }
@@ -51,6 +52,7 @@ interface TrackHover {
 
 const AXIS_WIDTH = 108;
 const MOBILE_AXIS_WIDTH = 94;
+const MAX_RENDER_POINTS = 1800;
 const PAD = { top: 10, right: 10, bottom: 12, left: 10 };
 const COMPACT_PAD = { top: 8, right: 8, bottom: 8, left: 8 };
 const MOBILE_PAD = { top: 7, right: 6, bottom: 7, left: 6 };
@@ -100,9 +102,23 @@ function finite(value: unknown, fallback = 0) {
 }
 
 function fmt(value: number, digits = 1) {
-  if (!Number.isFinite(value)) return '-';
+  if (!Number.isFinite(value)) return '--';
   if (Math.abs(value) >= 100) return value.toFixed(0);
   return value.toFixed(digits).replace(/\.?0+$/, '');
+}
+
+function fmtWithUnit(value: number, digits: number, unit: string) {
+  const formatted = fmt(value, digits);
+  return formatted === '--' ? formatted : `${formatted} ${unit}`;
+}
+
+function fmtDepth(value: number) {
+  return Number.isFinite(value) ? value.toFixed(0) : '--';
+}
+
+function fmtDepthWithUnit(value: number) {
+  const formatted = fmtDepth(value);
+  return formatted === '--' ? formatted : `${formatted}m`;
 }
 
 function timeLabel(value: string) {
@@ -227,6 +243,48 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
       },
     };
   });
+}
+
+function curvePointPriority(point: CurvePoint, previous?: CurvePoint) {
+  const eventWeight = point.level >= 4 ? 1_000_000 : point.level >= 2 ? 500_000 : point.eventId ? 100_000 : 0;
+  if (!previous) return eventWeight;
+  const changeWeight = Object.keys(point.values).reduce((sum, key) => {
+    const current = point.values[key];
+    const prior = previous.values[key];
+    return Number.isFinite(current) && Number.isFinite(prior) ? sum + Math.abs(current - prior) : sum;
+  }, 0);
+  return eventWeight + changeWeight;
+}
+
+function downsampleCurvePoints(points: CurvePoint[], maxPoints = MAX_RENDER_POINTS) {
+  if (points.length <= maxPoints) return points;
+  if (maxPoints < 3) return points.slice(-maxPoints);
+
+  const sampled: CurvePoint[] = [points[0]];
+  const bucketCount = maxPoints - 2;
+  const bucketSize = (points.length - 2) / bucketCount;
+
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const start = Math.max(1, Math.floor(1 + bucket * bucketSize));
+    const end = Math.min(points.length - 1, Math.floor(1 + (bucket + 1) * bucketSize));
+    let bestIndex = start;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (let index = start; index < end; index += 1) {
+      const score = curvePointPriority(points[index], points[index - 1]);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+
+    const bestPoint = points[bestIndex];
+    if (bestPoint && sampled[sampled.length - 1] !== bestPoint) sampled.push(bestPoint);
+  }
+
+  const lastPoint = points[points.length - 1];
+  if (sampled[sampled.length - 1] !== lastPoint) sampled.push(lastPoint);
+  return sampled;
 }
 
 function VerticalTrack({
@@ -469,10 +527,10 @@ function VerticalTrack({
         ctx.fillText(timeLabel(point.time), 14, y + 5);
         ctx.fillStyle = palette.depth;
         ctx.font = `700 ${mobileDense ? '8.5px' : '9.5px'} 'JetBrains Mono', monospace`;
-        ctx.fillText(`井深 ${point.depth.toFixed(0)}m`, 14, y + (mobileDense ? 17 : 19));
+        ctx.fillText(`井深 ${fmtDepthWithUnit(point.depth)}`, 14, y + (mobileDense ? 17 : 19));
         ctx.fillStyle = palette.axisText;
         ctx.font = `700 ${mobileDense ? '8px' : '9px'} 'JetBrains Mono', monospace`;
-        ctx.fillText(`钻头 ${point.bitDepth.toFixed(0)}m`, 14, y + (mobileDense ? 27 : 31));
+        ctx.fillText(`钻头 ${fmtDepthWithUnit(point.bitDepth)}`, 14, y + (mobileDense ? 27 : 31));
       });
     }
   }, [config, points, showAxis, palette, compact, mobileDense, pad, sizeTick]);
@@ -519,6 +577,8 @@ function VerticalTrack({
         <canvas
           ref={canvasRef}
           className="block h-full w-full"
+          role="img"
+          aria-label={`${isAxis ? '时间井深轴' : config.title}，当前样本 ${points.length} 条`}
           onPointerMove={handlePointerMove}
           onPointerLeave={() => setHover(null)}
         />
@@ -527,13 +587,13 @@ function VerticalTrack({
             <div className="font-semibold">{timeLabel(hoverPoint.time)}</div>
             {isAxis ? (
               <>
-                <div>井深 {hoverPoint.depth.toFixed(0)} m</div>
-                <div>钻头 {hoverPoint.bitDepth.toFixed(0)} m</div>
+                <div>井深 {fmtDepthWithUnit(hoverPoint.depth)}</div>
+                <div>钻头 {fmtDepthWithUnit(hoverPoint.bitDepth)}</div>
               </>
             ) : config.curves.map((curve) => (
               <div key={curve.key} className="flex items-center justify-between gap-3">
                 <span>{curve.label}</span>
-                <span className="tabular-nums">{fmt(hoverPoint.values[curve.key])} {curve.unit}</span>
+                <span className="tabular-nums">{fmtWithUnit(hoverPoint.values[curve.key], 1, curve.unit)}</span>
               </div>
             ))}
           </div>,
@@ -570,6 +630,7 @@ export function VerticalCurveDeck({
   wellDepth,
   currentDepth,
   pitGain = 0,
+  isStopped = false,
   compact = false,
   fillViewport = false,
 }: VerticalCurveDeckProps) {
@@ -577,6 +638,9 @@ export function VerticalCurveDeck({
   const mobileDense = useNarrowViewport() && compact;
   const fillTracks = fillViewport && !mobileDense;
   const points = useMemo(() => buildTrackData(flowData, pressureData, wellDepth ?? currentDepth ?? 3200, currentDepth, pitGain), [flowData, pressureData, wellDepth, currentDepth, pitGain]);
+  const renderPoints = useMemo(() => downsampleCurvePoints(points), [points]);
+  const latestPoint = points.at(-1);
+  const isDownsampled = renderPoints.length < points.length;
   const eventStats = useMemo(() => {
     const byId = new Map<string, BackendLevel>();
     points.forEach((point) => {
@@ -650,7 +714,7 @@ export function VerticalCurveDeck({
 
   const displayTracks = mobileDense
     ? tracks
-      .filter((track) => ['出口/入口流量', '总池体积', '立压', '套压', '泵冲 / 钩载', '全烃'].includes(track.title))
+      .filter((track) => ['出口/入口流量', '总池体积', '立压变化量', '套压', '泵冲 / 钩载', '全烃'].includes(track.title))
       .map((track) => ({ ...track, width: '0 0 128px' }))
     : tracks.map((track) => (fillViewport ? { ...track, width: '1 1 0px' } : track));
 
@@ -663,19 +727,22 @@ export function VerticalCurveDeck({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
             <span>样本 {points.length}</span>
+            {isDownsampled ? <span>绘制 {renderPoints.length}</span> : null}
             <span>预警事件 {eventStats.warningCount}</span>
             <span>确认事件 {eventStats.criticalCount}</span>
           </div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400">时间向下 · 自动铺满</div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+            {latestPoint?.time ? `最新 ${timeLabel(latestPoint.time)} · ` : ''}30min 窗口 · 时间向下
+          </div>
         </div>
       </div>
       <div className={`vertical-curve-body flex min-h-0 flex-1 overflow-y-hidden ${fillTracks ? 'overflow-x-hidden' : 'overflow-x-auto'}`}>
-        <AxisLane points={points} compact={compact} mobileDense={mobileDense} />
+        <AxisLane points={renderPoints} compact={compact} mobileDense={mobileDense} />
         {displayTracks.map((track) => (
           <VerticalTrack
             key={track.title}
             config={track}
-            points={points}
+            points={renderPoints}
             isDark={isDark}
             compact={compact}
             mobileDense={mobileDense}
@@ -684,8 +751,15 @@ export function VerticalCurveDeck({
         ))}
       </div>
       {points.length < 2 && (
-        <div className="pointer-events-none absolute inset-x-4 bottom-4 rounded-md border border-slate-300 bg-white/96 p-3 text-slate-700 shadow-lg shadow-slate-900/10 backdrop-blur dark:border-slate-700 dark:bg-slate-950/90 dark:text-slate-200">
-          <div className="text-sm">等待采样</div>
+        <div
+          className="pointer-events-none absolute inset-x-4 bottom-4 rounded-md border border-slate-300 bg-white/96 p-3 text-slate-700 shadow-lg shadow-slate-900/10 backdrop-blur dark:border-slate-700 dark:bg-slate-950/90 dark:text-slate-200"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="text-sm">{isStopped ? '监测已停' : '等待采样'}</div>
+          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {isStopped ? '当前井已手动停止监测；保留历史点位，重新启动后继续刷新趋势曲线。' : '启动监测并收到至少 2 条样本后生成趋势曲线。'}
+          </div>
         </div>
       )}
     </div>

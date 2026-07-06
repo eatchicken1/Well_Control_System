@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle, Info, KeyRound, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
 import { DEFAULT_REALTIME_ENDPOINT, DEFAULT_THRESHOLDS, useWellControl } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
@@ -16,7 +16,19 @@ function ThresholdInput({
     : 'border-amber-200 bg-amber-50 dark:border-amber-900/70 dark:bg-amber-950/20';
   const clampValue = (next: number) => Math.min(max, Math.max(min, next));
   const precision = step < 0.1 ? 2 : step < 1 ? 1 : 0;
-  const changeBy = (delta: number) => onChange(Number(clampValue(value + delta).toFixed(precision)));
+  const [inputText, setInputText] = useState(String(value));
+  const canDecrease = value > min;
+  const canIncrease = value < max;
+  const commitValue = (next: number) => {
+    const clamped = Number(clampValue(next).toFixed(precision));
+    onChange(clamped);
+    setInputText(String(clamped));
+  };
+  const changeBy = (delta: number) => commitValue(value + delta);
+
+  useEffect(() => {
+    setInputText(String(value));
+  }, [value]);
 
   return (
     <div className={`rounded-md border p-3 ${tone}`}>
@@ -31,18 +43,49 @@ function ThresholdInput({
       </div>
       <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
         <div className="ops-control-input w-full sm:w-[156px] sm:max-w-full">
-          <button type="button" onClick={() => changeBy(-step)} aria-label={`${label} 减少`}>
+          <button
+            type="button"
+            onClick={() => changeBy(-step)}
+            aria-label={`${label} 减少`}
+            disabled={!canDecrease}
+            title={canDecrease ? `${label} 减少` : `已到最小值 ${min}`}
+          >
             -
           </button>
           <input
             type="number"
-            value={value}
+            aria-label={`${label} 数值`}
+            value={inputText}
             min={min}
             max={max}
             step={step}
-            onChange={(e) => onChange(clampValue(parseFloat(e.target.value) || 0))}
+            onChange={(e) => {
+              const nextText = e.target.value;
+              setInputText(nextText);
+              if (nextText.trim() === '' || nextText === '-' || nextText === '.' || nextText.endsWith('.')) return;
+              const parsed = Number(nextText);
+              if (Number.isFinite(parsed)) onChange(clampValue(parsed));
+            }}
+            onBlur={() => {
+              if (inputText.trim() === '') {
+                setInputText(String(value));
+                return;
+              }
+              const parsed = Number(inputText);
+              if (Number.isFinite(parsed)) {
+                commitValue(parsed);
+              } else {
+                setInputText(String(value));
+              }
+            }}
           />
-          <button type="button" onClick={() => changeBy(step)} aria-label={`${label} 增加`}>
+          <button
+            type="button"
+            onClick={() => changeBy(step)}
+            aria-label={`${label} 增加`}
+            disabled={!canIncrease}
+            title={canIncrease ? `${label} 增加` : `已到最大值 ${max}`}
+          >
             +
           </button>
         </div>
@@ -64,7 +107,7 @@ function ThresholdInput({
 
 function ThresholdGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="ops-panel p-4">
+    <section className="ops-surface p-4">
       <h3 className="mb-3 flex items-center gap-2 text-base text-slate-800 dark:text-slate-100">
         <AlertTriangle className="h-4 w-4 text-amber-500" />
         {title}
@@ -95,7 +138,19 @@ function PlainConfigInput({
 }) {
   const clampValue = (next: number) => Math.min(max, Math.max(min, next));
   const precision = step < 0.1 ? 2 : step < 1 ? 1 : 0;
-  const changeBy = (delta: number) => onChange(Number(clampValue(value + delta).toFixed(precision)));
+  const [inputText, setInputText] = useState(String(value));
+  const canDecrease = value > min;
+  const canIncrease = value < max;
+  const commitValue = (next: number) => {
+    const clamped = Number(clampValue(next).toFixed(precision));
+    onChange(clamped);
+    setInputText(String(clamped));
+  };
+  const changeBy = (delta: number) => commitValue(value + delta);
+
+  useEffect(() => {
+    setInputText(String(value));
+  }, [value]);
 
   return (
     <div className="ops-inline-tile p-3">
@@ -105,18 +160,49 @@ function PlainConfigInput({
       </div>
       <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
         <div className="ops-control-input w-full sm:w-[156px] sm:max-w-full">
-          <button type="button" onClick={() => changeBy(-step)} aria-label={`${label} 减少`}>
+          <button
+            type="button"
+            onClick={() => changeBy(-step)}
+            aria-label={`${label} 减少`}
+            disabled={!canDecrease}
+            title={canDecrease ? `${label} 减少` : `已到最小值 ${min}`}
+          >
             -
           </button>
           <input
             type="number"
-            value={value}
+            aria-label={`${label} 数值`}
+            value={inputText}
             min={min}
             max={max}
             step={step}
-            onChange={(e) => onChange(clampValue(parseFloat(e.target.value) || 0))}
+            onChange={(e) => {
+              const nextText = e.target.value;
+              setInputText(nextText);
+              if (nextText.trim() === '' || nextText === '-' || nextText === '.' || nextText.endsWith('.')) return;
+              const parsed = Number(nextText);
+              if (Number.isFinite(parsed)) onChange(clampValue(parsed));
+            }}
+            onBlur={() => {
+              if (inputText.trim() === '') {
+                setInputText(String(value));
+                return;
+              }
+              const parsed = Number(inputText);
+              if (Number.isFinite(parsed)) {
+                commitValue(parsed);
+              } else {
+                setInputText(String(value));
+              }
+            }}
           />
-          <button type="button" onClick={() => changeBy(step)} aria-label={`${label} 增加`}>
+          <button
+            type="button"
+            onClick={() => changeBy(step)}
+            aria-label={`${label} 增加`}
+            disabled={!canIncrease}
+            title={canIncrease ? `${label} 增加` : `已到最大值 ${max}`}
+          >
             +
           </button>
         </div>
@@ -139,8 +225,11 @@ function ThresholdScale({
   unit: string;
   max: number;
 }) {
-  const warnLeft = `${Math.max(0, Math.min(100, (warning / max) * 100))}%`;
-  const criticalLeft = `${Math.max(0, Math.min(100, (critical / max) * 100))}%`;
+  const safeMax = Number.isFinite(max) && max > 0 ? max : 1;
+  const safeWarning = Number.isFinite(warning) ? warning : 0;
+  const safeCritical = Number.isFinite(critical) ? critical : 0;
+  const warnLeft = `${Math.max(0, Math.min(100, (safeWarning / safeMax) * 100))}%`;
+  const criticalLeft = `${Math.max(0, Math.min(100, (safeCritical / safeMax) * 100))}%`;
 
   return (
     <div className="ops-inline-tile p-3">
@@ -153,10 +242,10 @@ function ThresholdScale({
           <div className="h-full w-full bg-gradient-to-r from-emerald-400 via-amber-400 to-red-500" />
         </div>
         <div className="absolute top-0 h-8 w-px bg-amber-500" style={{ left: warnLeft }}>
-          <span className="absolute left-1 top-0 whitespace-nowrap text-[10px] text-amber-600 dark:text-amber-300">W {warning}</span>
+          <span className="absolute left-1 top-0 whitespace-nowrap text-[10px] text-amber-600 dark:text-amber-300">W {safeWarning}</span>
         </div>
         <div className="absolute top-0 h-8 w-px bg-red-500" style={{ left: criticalLeft }}>
-          <span className="absolute left-1 bottom-0 whitespace-nowrap text-[10px] text-red-600 dark:text-red-300">C {critical}</span>
+          <span className="absolute left-1 bottom-0 whitespace-nowrap text-[10px] text-red-600 dark:text-red-300">C {safeCritical}</span>
         </div>
       </div>
     </div>
@@ -191,12 +280,16 @@ function ConfigGuardrail({
 
 function ConfigRiskBanner({
   invalid,
+  invalidReasons,
   changedCount,
   saved,
+  id,
 }: {
   invalid: boolean;
+  invalidReasons: string[];
   changedCount: number;
   saved: boolean;
+  id: string;
 }) {
   const shell = invalid
     ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-100'
@@ -207,7 +300,7 @@ function ConfigRiskBanner({
         : 'border-slate-200 bg-[#f6fafc] text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200';
   const label = invalid ? '配置锁定' : saved ? '同步完成' : changedCount > 0 ? '草稿待生效' : '配置一致';
   const copy = invalid
-    ? '存在参考线顺序反转，保存动作已被锁定。'
+    ? `${invalidReasons[0] || '存在无效参数'}，保存动作已被锁定。`
     : saved
       ? '显示参数已同步到实时监测页曲线，报警等级不受显示参数影响。'
       : changedCount > 0
@@ -215,11 +308,23 @@ function ConfigRiskBanner({
         : '当前草稿与生效显示参数一致。';
 
   return (
-    <div className={`rounded-md border p-3 ${shell}`}>
+    <div
+      id={id}
+      className={`rounded-md border p-3 ${shell}`}
+      role={invalid ? 'alert' : 'status'}
+      aria-live={invalid ? 'assertive' : 'polite'}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span className="ops-inline-tile px-2 py-0.5 text-xs dark:bg-white/10">{label}</span>
         <span className="text-sm">{copy}</span>
       </div>
+      {invalidReasons.length > 1 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+          {invalidReasons.map((reason) => (
+            <span key={reason} className="rounded bg-white/60 px-2 py-1 dark:bg-white/10">{reason}</span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -233,6 +338,11 @@ export default function Settings() {
   const [passwordDraft, setPasswordDraft] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
   const [passwordState, setPasswordState] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const mountedRef = useRef(true);
+  const savedResetTimeoutRef = useRef<number | null>(null);
+  const passwordReady = passwordDraft.oldPassword.length > 0 && passwordDraft.newPassword.length >= 8 && passwordDraft.confirmPassword.length >= 8;
+  const passwordMismatch = passwordDraft.confirmPassword.length > 0 && passwordDraft.newPassword !== passwordDraft.confirmPassword;
+  const passwordSubmitDisabled = passwordSaving || !passwordReady || passwordMismatch;
   const thresholdInvalid = draft.returnResponseWarning >= draft.returnResponseCritical || draft.pitGainWarning >= draft.pitGainCritical;
   const algorithmInvalid =
     draft.sppResidualWarning >= draft.sppResidualCritical
@@ -240,14 +350,31 @@ export default function Settings() {
     || draft.rlsForgettingFactor >= 1
     || draft.cusumDecisionInterval <= 0
     || draft.madTolerance <= 0;
-  const configInvalid = thresholdInvalid || algorithmInvalid;
+  const endpointInvalid = endpointDraft.trim().length === 0;
+  const invalidReasons = [
+    thresholdInvalid ? '参考线 1 必须低于参考线 2' : '',
+    algorithmInvalid ? '曲线与基线参考参数超出有效范围' : '',
+    endpointInvalid ? '实时数据接口不能为空' : '',
+  ].filter(Boolean);
+  const configInvalid = invalidReasons.length > 0;
+  const configBannerId = 'settings-config-status';
+  const endpointHelpId = 'settings-endpoint-help';
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    if (savedResetTimeoutRef.current != null) window.clearTimeout(savedResetTimeoutRef.current);
+  }, []);
 
   const handleSave = () => {
     if (configInvalid) return;
     updateThresholds(draft);
-    updateRealtimeEndpoint(endpointDraft);
+    updateRealtimeEndpoint(endpointDraft.trim());
     setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    if (savedResetTimeoutRef.current != null) window.clearTimeout(savedResetTimeoutRef.current);
+    savedResetTimeoutRef.current = window.setTimeout(() => {
+      if (mountedRef.current) setSaved(false);
+      savedResetTimeoutRef.current = null;
+    }, 3000);
   };
 
   const handleReset = () => {
@@ -258,6 +385,10 @@ export default function Settings() {
   const handlePasswordSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setPasswordState({ type: 'idle', message: '' });
+    if (!passwordDraft.oldPassword) {
+      setPasswordState({ type: 'error', message: '请输入旧密码。' });
+      return;
+    }
     if (passwordDraft.newPassword.length < 8) {
       setPasswordState({ type: 'error', message: '新密码至少需要 8 位。' });
       return;
@@ -269,16 +400,21 @@ export default function Settings() {
     setPasswordSaving(true);
     try {
       await changePassword(passwordDraft.oldPassword, passwordDraft.newPassword, passwordDraft.confirmPassword);
+      if (!mountedRef.current) return;
       setPasswordDraft({ oldPassword: '', newPassword: '', confirmPassword: '' });
       setPasswordState({ type: 'success', message: '密码已更新，下次登录请使用新密码。' });
     } catch (err) {
-      setPasswordState({ type: 'error', message: err instanceof Error ? err.message : '密码修改失败。' });
+      if (mountedRef.current) setPasswordState({ type: 'error', message: err instanceof Error ? err.message : '密码修改失败。' });
     } finally {
-      setPasswordSaving(false);
+      if (mountedRef.current) setPasswordSaving(false);
     }
   };
 
   const set = (key: keyof typeof draft) => (v: number) => setDraft((prev) => ({ ...prev, [key]: v }));
+  const setPasswordField = (key: keyof typeof passwordDraft) => (value: string) => {
+    setPasswordDraft((prev) => ({ ...prev, [key]: value }));
+    if (passwordState.type === 'error') setPasswordState({ type: 'idle', message: '' });
+  };
   const changedCount = (Object.keys(draft) as Array<keyof typeof draft>).filter((key) => draft[key] !== thresholds[key]).length
     + (endpointDraft.trim() !== realtimeEndpoint ? 1 : 0);
   const configSteps = [
@@ -291,8 +427,8 @@ export default function Settings() {
     },
     {
       code: '02',
-      label: '等级校验',
-      value: configInvalid ? '存在无效参数' : '顺序正确',
+      label: '参数校验',
+      value: configInvalid ? '存在无效参数' : '可保存',
       state: configInvalid ? 'critical' as const : 'done' as const,
       icon: AlertTriangle,
     },
@@ -315,30 +451,37 @@ export default function Settings() {
   return (
     <div className="ops-page space-y-4">
       <MonitoringWellTabs />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="ops-page-header">
+        <div className="ops-page-header-copy">
           <div className="ops-eyebrow">显示参考</div>
           <h1 className="ops-title">系统设置</h1>
           <p className="text-sm ops-muted">配置曲线参考线与基线显示参数；报警等级由实时检测接口返回</p>
         </div>
-        <div className="grid w-full grid-cols-2 gap-2 sm:w-auto">
-          <button onClick={handleReset} className="ops-button-secondary">
+        <div className="ops-page-toolbar w-full sm:w-auto sm:flex-nowrap">
+          <button type="button" onClick={handleReset} className="ops-button-secondary">
             <RotateCcw className="h-4 w-4" />
             恢复默认
           </button>
-          <button onClick={handleSave} disabled={configInvalid} className="ops-button-primary">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={configInvalid}
+            className="ops-button-primary"
+            aria-describedby={configBannerId}
+            title={configInvalid ? invalidReasons.join('；') : '保存显示参数'}
+          >
             <Save className="h-4 w-4" />
             保存设置
           </button>
         </div>
       </div>
 
-      <ConfigRiskBanner invalid={configInvalid} changedCount={changedCount} saved={saved} />
+      <ConfigRiskBanner id={configBannerId} invalid={configInvalid} invalidReasons={invalidReasons} changedCount={changedCount} saved={saved} />
 
       <div className="ops-status-line">
         <ConfigGuardrail
-          label="阈值顺序"
-          value={configInvalid ? '存在无效参数' : '预警低于严重'}
+          label="配置校验"
+          value={configInvalid ? invalidReasons[0] : '参数可保存'}
           state={configInvalid ? 'critical' : 'normal'}
         />
         <ConfigGuardrail
@@ -357,7 +500,7 @@ export default function Settings() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1.18fr)_360px]">
         <div className="space-y-4">
-          <section className="ops-panel p-4">
+          <section className="ops-surface p-4">
             <h3 className="mb-3 flex items-center gap-2 text-base text-slate-800 dark:text-slate-100">
               <SlidersHorizontal className="h-4 w-4 text-cyan-500" />
               实时数据源
@@ -366,14 +509,19 @@ export default function Settings() {
               <div>
                 <label className="mb-1 block text-sm text-slate-700 dark:text-slate-200">实时数据接口</label>
                 <input
+                  aria-label="实时数据接口"
+                  aria-invalid={endpointInvalid}
+                  aria-describedby={endpointHelpId}
                   value={endpointDraft}
                   onChange={(event) => setEndpointDraft(event.target.value)}
                   placeholder={DEFAULT_REALTIME_ENDPOINT}
                   className="ops-field w-full px-3 py-2 text-sm"
                 />
-                <div className="mt-1 text-[11px] ops-muted">默认读取本机接口；字段使用标准列。</div>
+                <div id={endpointHelpId} className={`mt-1 text-[11px] ${endpointInvalid ? 'text-red-600 dark:text-red-300' : 'ops-muted'}`}>
+                  {endpointInvalid ? '实时数据接口不能为空。' : '默认读取本机接口；字段使用标准列。'}
+                </div>
               </div>
-              <div className={`rounded-md border p-3 text-xs ${
+              <div className={`ops-break-text rounded-md border p-3 text-xs ${
                 dataSourceState.status === 'connected'
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-100'
                   : dataSourceState.status === 'error' || dataSourceState.status === 'disconnected'
@@ -387,7 +535,7 @@ export default function Settings() {
             </div>
           </section>
 
-          <section className="ops-panel p-4">
+          <section className="ops-surface p-4">
             <h3 className="mb-3 flex items-center gap-2 text-base text-slate-800 dark:text-slate-100">
               <KeyRound className="h-4 w-4 text-teal-500" />
               修改登录密码
@@ -398,10 +546,12 @@ export default function Settings() {
                   <span>旧密码</span>
                   <input
                     type="password"
+                    aria-label="旧密码"
                     className="ops-field w-full px-3 py-2 text-sm"
                     value={passwordDraft.oldPassword}
                     autoComplete="current-password"
-                    onChange={(event) => setPasswordDraft((prev) => ({ ...prev, oldPassword: event.target.value }))}
+                    onChange={(event) => setPasswordField('oldPassword')(event.target.value)}
+                    aria-describedby={passwordState.type !== 'idle' ? 'password-form-message' : undefined}
                     required
                   />
                 </label>
@@ -409,11 +559,14 @@ export default function Settings() {
                   <span>新密码</span>
                   <input
                     type="password"
+                    aria-label="新密码"
                     className="ops-field w-full px-3 py-2 text-sm"
                     value={passwordDraft.newPassword}
                     autoComplete="new-password"
                     minLength={8}
-                    onChange={(event) => setPasswordDraft((prev) => ({ ...prev, newPassword: event.target.value }))}
+                    onChange={(event) => setPasswordField('newPassword')(event.target.value)}
+                    aria-invalid={passwordDraft.newPassword.length > 0 && passwordDraft.newPassword.length < 8}
+                    aria-describedby={passwordState.type !== 'idle' ? 'password-form-message' : undefined}
                     required
                   />
                 </label>
@@ -421,25 +574,29 @@ export default function Settings() {
                   <span>确认新密码</span>
                   <input
                     type="password"
+                    aria-label="确认新密码"
                     className="ops-field w-full px-3 py-2 text-sm"
                     value={passwordDraft.confirmPassword}
                     autoComplete="new-password"
                     minLength={8}
-                    onChange={(event) => setPasswordDraft((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+                    onChange={(event) => setPasswordField('confirmPassword')(event.target.value)}
+                    aria-invalid={passwordMismatch}
+                    aria-describedby={passwordState.type !== 'idle' || passwordMismatch ? 'password-form-message' : undefined}
                     required
                   />
                 </label>
               </div>
-              {passwordState.type !== 'idle' && (
-                <div className={`rounded-md border p-3 text-sm ${
+              <div className="text-[11px] ops-muted">新密码至少 8 位，且两次输入一致后才可提交。</div>
+              {(passwordState.type !== 'idle' || passwordMismatch) && (
+                <div id="password-form-message" role="alert" className={`ops-break-text rounded-md border p-3 text-sm ${
                   passwordState.type === 'success'
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200'
                     : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/20 dark:text-red-200'
                 }`}>
-                  {passwordState.message}
+                  {passwordMismatch ? '两次输入的新密码不一致。' : passwordState.message}
                 </div>
               )}
-              <button className="ops-button-primary px-3 py-2" type="submit" disabled={passwordSaving}>
+              <button className="ops-button-primary px-3 py-2" type="submit" disabled={passwordSubmitDisabled}>
                 <KeyRound className="h-4 w-4" />
                 {passwordSaving ? '正在修改' : '修改密码'}
               </button>
@@ -474,32 +631,13 @@ export default function Settings() {
           </ThresholdGroup>
         </div>
 
-        <aside className="ops-panel h-fit p-4 xl:sticky xl:top-4">
+        <aside className="ops-surface h-fit p-4 xl:sticky xl:top-4">
           <div className="mb-3 flex items-center gap-2 text-sm text-slate-800 dark:text-slate-100">
             <SlidersHorizontal className="h-4 w-4 text-cyan-500" />
             阈值联锁面板
             <span className={`ml-auto rounded px-2 py-0.5 text-[11px] ${changedCount > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200'}`}>
               {changedCount > 0 ? `${changedCount} 项待保存` : '无改动'}
             </span>
-          </div>
-          <div className={`mb-3 rounded-md border p-3 text-xs ${
-            configInvalid
-              ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-200'
-              : changedCount > 0
-                ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200'
-          }`}>
-            {configInvalid ? '参考线校验失败：参考线 1 必须低于参考线 2。' : changedCount > 0 ? '存在未保存草稿，保存后仅同步到显示。' : '所有参数与当前生效值一致。'}
-          </div>
-          <div className="mb-4 grid grid-cols-2 gap-2">
-            <button onClick={handleReset} className="ops-button-secondary justify-center px-2">
-              <RotateCcw className="h-4 w-4" />
-              默认
-            </button>
-            <button onClick={handleSave} disabled={configInvalid} className="ops-button-primary justify-center px-2">
-              <Save className="h-4 w-4" />
-              生效
-            </button>
           </div>
           <div className="mb-2 text-[11px] uppercase tracking-[0.16em] ops-muted">当前参数</div>
           <div className="space-y-2 text-sm">

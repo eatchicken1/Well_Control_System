@@ -1,15 +1,22 @@
-import type { BackendLevel } from '../context/WellControlContext';
+import type { BackendLevel, CycleInfo } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
 
 interface WellSchematicProps {
   flowIn: number;
   flowOut: number;
+  spm?: number;
   casingPressure: number;
   drillPipePressure: number;
   pitGain: number;
   returnResponse: number;
   backendLevel: BackendLevel;
   activeSignals?: string[];
+  pumpState?: string;
+  condition?: string;
+  cycleInfo?: CycleInfo;
+  hasSamples?: boolean;
+  isRecovering?: boolean;
+  isStopped?: boolean;
   compact?: boolean;
   surface?: 'dark' | 'light';
   metrics?: Array<{
@@ -34,6 +41,146 @@ function levelVisual(level: BackendLevel) {
   return { accent: '#0f766e', soft: '#ccfbf1', badge: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
 }
 
+function formatFinite(value: number, digits: number) {
+  return Number.isFinite(value) ? value.toFixed(digits) : '--';
+}
+
+function formatFiniteWithUnit(value: number, digits: number, unit: string) {
+  const formatted = formatFinite(value, digits);
+  return formatted === '--' ? formatted : `${formatted} ${unit}`;
+}
+
+function includesAny(value: string | undefined, tokens: string[]) {
+  const normalized = value?.toLowerCase().trim() ?? '';
+  return tokens.some((token) => normalized.includes(token));
+}
+
+function deriveWellStatus({
+  backendLevel,
+  pumpState,
+  condition,
+  cycleInfo,
+  hasSamples = true,
+  isRecovering = false,
+  isStopped = false,
+  flowIn,
+  flowOut,
+  spm,
+  circulationActive,
+}: {
+  backendLevel: BackendLevel;
+  pumpState?: string;
+  condition?: string;
+  cycleInfo?: CycleInfo;
+  hasSamples?: boolean;
+  isRecovering?: boolean;
+  flowIn: number;
+  flowOut: number;
+  spm: number;
+  circulationActive: boolean;
+}) {
+  const cycleState = cycleInfo?.state;
+  const cycleLabel = cycleInfo?.stateLabel || cycleInfo?.shortLabel || '';
+  const pumpStateText = pumpState?.trim() || '';
+  const conditionText = condition?.trim() || '';
+  const pumpingActive = flowIn > 0.8 || spm > 8;
+  const returnOnlyActive = !pumpingActive && flowOut > 0.8;
+  const hasExplicitCondition = conditionText.length > 0 && !includesAny(condition, ['实时检测']);
+  const explicitStopPump = includesAny(pumpState, ['停泵', 'stop']);
+  const explicitRestart = includesAny(pumpState, ['开泵', 'restart', 'recover']);
+  const explicitTripping = includesAny(condition, ['起下钻', 'tripping', 'trip']);
+  const explicitObservation = includesAny(condition, ['扰动', '观察']);
+  const explicitCirculation = includesAny(condition, ['循环', 'circulating']);
+  const explicitDrilling = includesAny(condition, ['钻进', 'drilling']);
+  const explicitStable = includesAny(condition, ['稳态', '稳定', 'stable', '正常']);
+  const fallbackCycleTripping = !hasExplicitCondition && cycleState === 0 && returnOnlyActive;
+  const fallbackCycleCirculation = !hasExplicitCondition && (cycleState === 2 || cycleState === 5);
+  const fallbackCycleDrilling = !hasExplicitCondition && cycleState === 1;
+  const inferredTripping = !hasExplicitCondition && !explicitCirculation && !explicitDrilling && returnOnlyActive;
+  const inferredCirculation = !hasExplicitCondition && pumpingActive && flowOut > 0.5;
+  const stopPump = explicitStopPump || (!hasExplicitCondition && cycleState === 3);
+  const restart = explicitRestart || (!hasExplicitCondition && cycleState === 4);
+  const trippingObservation = explicitTripping || (explicitObservation && returnOnlyActive) || fallbackCycleTripping || inferredTripping;
+  const circulationStable = explicitCirculation
+    || fallbackCycleCirculation
+    || (inferredCirculation && includesAny(pumpState, ['normal', 'circulating', '循环']));
+  const drillingStable = explicitDrilling
+    || fallbackCycleDrilling
+    || (!trippingObservation && !circulationStable && explicitStable);
+  const waitingForData = !hasSamples && !circulationActive;
+
+  if (isStopped) {
+    return {
+      label: '监测已停',
+      copy: activeCopy(conditionText || cycleLabel || '当前井已手动停止监测，可保留历史点位并按需重新启动'),
+    };
+  }
+  if (isRecovering || includesAny(condition, ['恢复', '续接']) || includesAny(cycleLabel, ['恢复'])) {
+    return {
+      label: '恢复监测',
+      copy: activeCopy(conditionText || cycleLabel || '正在续接历史监测点，等待实时样本继续推送'),
+    };
+  }
+  if (waitingForData || includesAny(condition, ['等待接入', '未接入', '待启动'])) {
+    return {
+      label: '等待接入',
+      copy: activeCopy(conditionText || cycleLabel || '尚未收到实时样本，等待检测流接入'),
+    };
+  }
+  if (backendLevel >= 4) {
+    return {
+      label: '溢流确认',
+      copy: pumpStateText
+        ? `已进入${BACKEND_LEVEL_META[backendLevel].label}，当前工况：${pumpStateText}`
+        : '进入确认事件，需重点关注关井与处置节奏',
+    };
+  }
+  if (backendLevel >= 2) {
+    return {
+      label: backendLevel >= 3 ? '异常观察' : '溢流预警',
+      copy: activeCopy(conditionText || cycleLabel || '已有异常证据，保持实时跟踪'),
+    };
+  }
+  if (trippingObservation) {
+    return {
+      label: '井筒扰动观察',
+      copy: activeCopy(conditionText || cycleLabel || '当前处于起下钻/扰动观察阶段，重点关注井筒体积与返出响应'),
+    };
+  }
+  if (stopPump) {
+    return {
+      label: '停泵监测',
+      copy: activeCopy(cycleLabel || conditionText || '停泵后持续跟踪出口流量与总池体积变化'),
+    };
+  }
+  if (restart) {
+    return {
+      label: '开泵恢复',
+      copy: activeCopy(cycleLabel || conditionText || '开泵后重新建立水力与循环参照'),
+    };
+  }
+  if (circulationStable) {
+    return {
+      label: '循环稳定',
+      copy: activeCopy(cycleLabel || conditionText || '循环稳定，监测窗口持续刷新'),
+    };
+  }
+  if (drillingStable) {
+    return {
+      label: '钻进稳定',
+      copy: activeCopy(conditionText || cycleLabel || '钻进稳定，当前未见明显异常'),
+    };
+  }
+  return {
+    label: '井筒正常',
+    copy: activeCopy(conditionText || cycleLabel || '井筒工况平稳，保持连续监测'),
+  };
+}
+
+function activeCopy(text: string) {
+  return text && text.length > 0 ? text : '井筒工况平稳，保持连续监测';
+}
+
 function ReadoutCard({
   metric,
   isLight,
@@ -46,7 +193,7 @@ function ReadoutCard({
       <div className="truncate text-[11px] leading-tight opacity-70">{metric.label}</div>
       <div className="mt-1 flex min-w-0 items-end justify-between gap-2">
         <span className="truncate text-[17px] font-semibold tabular-nums leading-none">{metric.value}</span>
-        {metric.unit ? <span className="shrink-0 text-[10px] leading-none opacity-65">{metric.unit}</span> : null}
+        {metric.unit && metric.value !== '--' ? <span className="shrink-0 text-[10px] leading-none opacity-65">{metric.unit}</span> : null}
       </div>
     </div>
   );
@@ -57,22 +204,20 @@ function FlowPath({
   color,
   active,
   width = 3,
-  reverse = false,
 }: {
   d: string;
   color: string;
   active: boolean;
   width?: number;
-  reverse?: boolean;
 }) {
   return (
     <path d={d} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeDasharray="7 6" opacity={active ? 0.95 : 0.34}>
       {active && (
         <animate
           attributeName="stroke-dashoffset"
-          from={reverse ? '0' : '26'}
-          to={reverse ? '26' : '0'}
-          dur={reverse ? '0.95s' : '1.15s'}
+          from="0"
+          to="-26"
+          dur="1.05s"
           repeatCount="indefinite"
         />
       )}
@@ -83,12 +228,19 @@ function FlowPath({
 export function WellSchematic({
   flowIn,
   flowOut,
+  spm = 0,
   casingPressure,
   drillPipePressure,
   pitGain,
   returnResponse,
   backendLevel,
   activeSignals = [],
+  pumpState,
+  condition,
+  cycleInfo,
+  hasSamples = true,
+  isRecovering = false,
+  isStopped = false,
   compact = false,
   surface = 'dark',
   metrics,
@@ -103,21 +255,28 @@ export function WellSchematic({
   const cement = isLight ? '#cbd5e1' : '#475569';
   const bore = isLight ? '#f8fafc' : '#0f172a';
   const readouts = metrics || [
-    { label: '出口流量响应', value: returnResponse.toFixed(1), unit: '%', state: backendLevel >= 4 ? 'critical' as const : backendLevel >= 2 ? 'warning' as const : 'normal' as const },
-    { label: '总池体积变化', value: pitGain.toFixed(2), unit: 'm3', state: backendLevel >= 4 ? 'critical' as const : backendLevel >= 2 ? 'warning' as const : 'normal' as const },
+    { label: '出口流量响应', value: formatFinite(returnResponse, 1), unit: '%', state: backendLevel >= 4 ? 'critical' as const : backendLevel >= 2 ? 'warning' as const : 'normal' as const },
+    { label: '总池体积变化', value: formatFinite(pitGain, 2), unit: 'm3', state: backendLevel >= 4 ? 'critical' as const : backendLevel >= 2 ? 'warning' as const : 'normal' as const },
   ];
   const topReadouts = readouts.slice(0, 2);
   const bottomReadouts = compact ? [] : readouts.slice(2, 6);
-  const statusLabel = backendLevel >= 4
-    ? '井筒异常'
-    : backendLevel >= 2
-      ? '井筒关注'
-      : '井筒正常';
-  const statusCopy = backendLevel >= 4
-    ? '进入确认事件，关注关井与处置节奏'
-    : backendLevel >= 2
-      ? '已有异常证据，保持实时跟踪'
-      : '循环稳定，当前未见明显异常';
+  const flowInText = formatFiniteWithUnit(flowIn, 1, 'L/s');
+  const flowOutText = formatFiniteWithUnit(flowOut, 1, 'L/s');
+  const status = deriveWellStatus({
+    backendLevel,
+    pumpState,
+    condition,
+    cycleInfo,
+    hasSamples,
+    isRecovering,
+    isStopped,
+    flowIn,
+    flowOut,
+    spm,
+    circulationActive,
+  });
+  const statusLabel = status.label;
+  const statusCopy = status.copy;
 
   return (
     <div className={`well-schematic-card flex h-full min-h-[260px] flex-col overflow-hidden rounded-md border p-2.5 lg:min-h-0 ${isLight ? 'border-slate-200 bg-white text-slate-900' : 'border-slate-700 bg-slate-950 text-slate-100'}`}>
@@ -141,7 +300,7 @@ export function WellSchematic({
           preserveAspectRatio="xMidYMid meet"
           className="h-full w-full"
           role="img"
-          aria-label={`井筒溢流机理示意图，报警等级 L${backendLevel}`}
+          aria-label={`井筒状态示意图，报警等级 L${backendLevel}，当前状态 ${statusLabel}`}
         >
           <defs>
             <pattern id="formationDots" width="13" height="13" patternUnits="userSpaceOnUse">
@@ -196,7 +355,7 @@ export function WellSchematic({
           <path d="M164 382 L172 394 L180 385 L188 394 L196 382" fill="none" stroke={line} strokeWidth="2.2" />
 
           <FlowPath d="M180 103 V360" color="#2563eb" active={circulationActive} />
-          <FlowPath d="M157 350 C152 304 154 250 157 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} reverse />
+          <FlowPath d="M157 350 C152 304 154 250 157 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
           <FlowPath d="M203 350 C208 304 206 250 203 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
 
           {influxActive && (
@@ -216,24 +375,32 @@ export function WellSchematic({
           <circle cx="272" cy="118" r="7" fill={panel} stroke={backendLevel >= 4 ? '#dc2626' : influxActive ? visual.accent : '#0d9488'} strokeWidth="2" />
 
           <g fontFamily="sans-serif" fontSize={compact ? 9.5 : 10.5} fill={muted}>
-            <text x="12" y="82">地表</text>
-            <path d="M35 79 H90 L100 88" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="10" y="121" fill="#2563eb" fontSize={compact ? 13.5 : 15} fontWeight="800">入口流量</text>
-            <text x="10" y="140" fill="#2563eb" fontSize={compact ? 15.5 : 17} fontWeight="800"> {flowIn.toFixed(1)} L/s</text>
-            <text x="236" y="121" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 13.5 : 15} fontWeight="800">出口流量</text>
-            <text x="236" y="140" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 15.5 : 17} fontWeight="800"> {flowOut.toFixed(1)} L/s</text>
-            <text x="242" y="43">防喷器组</text>
-            <path d="M247 46 H218" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="248" y="179">套管</text>
-            <path d="M247 176 H217" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="248" y="214">水泥环</text>
-            <path d="M247 211 H226" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="12" y="246">钻柱</text>
-            <path d="M41 243 H173" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="214" y="278" fill={influxActive ? visual.accent : muted}>环空出口流量</text>
-            <path d="M239 275 H207" fill="none" stroke={influxActive ? visual.accent : muted} strokeWidth="1" />
-            <text x="246" y="350">高压地层</text>
-            <path d="M246 347 H225" fill="none" stroke={muted} strokeWidth="1" />
+            <text x="18" y="80">地表</text>
+            <path d="M45 77 H96 L105 88" fill="none" stroke={muted} strokeWidth="1" />
+
+            <g aria-label="入口流量读数">
+              <rect x="18" y="106" width="91" height="47" rx="7" fill={isLight ? '#eff6ff' : '#0b2447'} stroke="#2563eb" strokeWidth="1.2" opacity="0.96" />
+              <text x="28" y="123" fill="#2563eb" fontSize="10" fontWeight="700">入口流量</text>
+              <text x="28" y="142" fill="#2563eb" fontSize={compact ? 13 : 14.5} fontWeight="800">{flowInText}</text>
+            </g>
+            <g aria-label="出口流量读数">
+              <rect x="251" y="106" width="91" height="47" rx="7" fill={isLight ? '#ecfdf5' : '#082f2a'} stroke={influxActive ? visual.accent : '#0d9488'} strokeWidth="1.2" opacity="0.96" />
+              <text x="261" y="123" fill={influxActive ? visual.accent : '#0d9488'} fontSize="10" fontWeight="700">出口流量</text>
+              <text x="261" y="142" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 13 : 14.5} fontWeight="800">{flowOutText}</text>
+            </g>
+
+            <text x="236" y="40">防喷器组</text>
+            <path d="M235 43 H209" fill="none" stroke={muted} strokeWidth="1" />
+            <text x="252" y="183">套管</text>
+            <path d="M250 180 H219" fill="none" stroke={muted} strokeWidth="1" />
+            <text x="252" y="218">水泥环</text>
+            <path d="M250 215 H229" fill="none" stroke={muted} strokeWidth="1" />
+            <text x="22" y="222">钻杆流向向下</text>
+            <path d="M86 219 H173" fill="none" stroke="#2563eb" strokeWidth="1" />
+            <text x="218" y="276" fill={influxActive ? visual.accent : muted}>环空流向向上</text>
+            <path d="M276 273 H207" fill="none" stroke={influxActive ? visual.accent : muted} strokeWidth="1" />
+            <text x="248" y="350">高压地层</text>
+            <path d="M248 347 H226" fill="none" stroke={muted} strokeWidth="1" />
             {influxActive && (
               <>
                 <text x="12" y="410" fill={visual.accent}>地层流体侵入</text>
@@ -242,9 +409,11 @@ export function WellSchematic({
             )}
             {!compact && (
               <>
-                <text x="12" y="145" fill={muted}>立压 {drillPipePressure.toFixed(2)} MPa</text>
-                <text x="234" y="145" fill={muted}>套压 {casingPressure.toFixed(2)} MPa</text>
-                <text x="12" y="165" fill={activeSignals.includes('standpipe_pressure') ? visual.accent : muted}>活动信号 {activeSignals.length}</text>
+                <text x="12" y="145" fill={muted}>立压 {formatFiniteWithUnit(drillPipePressure, 2, 'MPa')}</text>
+                <text x="234" y="145" fill={muted}>套压 {formatFiniteWithUnit(casingPressure, 2, 'MPa')}</text>
+                <text x="12" y="165" fill={activeSignals.includes('standpipe_pressure') ? visual.accent : muted}>
+                  {cycleInfo?.shortLabel || '活动信号'} {cycleInfo?.stateLabel ? `· ${cycleInfo.stateLabel}` : activeSignals.length}
+                </text>
               </>
             )}
           </g>

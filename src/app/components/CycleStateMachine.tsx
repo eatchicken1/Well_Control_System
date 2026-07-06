@@ -17,18 +17,26 @@ function stateTone(isActive: boolean, isPast: boolean) {
 }
 
 function fmtSeconds(seconds: number) {
-  const min = Math.floor(seconds / 60);
-  const sec = Math.floor(seconds % 60);
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+  const min = Math.floor(safeSeconds / 60);
+  const sec = Math.floor(safeSeconds % 60);
   return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
 export function CycleStateMachine({ cycleInfo, compact = false }: { cycleInfo: CycleInfo; compact?: boolean }) {
+  const activeProgress = clampPercent(cycleInfo.progress);
+  const cycleIndex = Number.isFinite(cycleInfo.cycleIndex) ? cycleInfo.cycleIndex : 0;
   return (
     <section className="ops-panel cycle-machine-shell overflow-hidden p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="ops-eyebrow">实时工况状态</div>
-          <h2 className="text-base text-slate-800 dark:text-slate-100">监测阶段 #{cycleInfo.cycleIndex}</h2>
+          <h2 className="text-base text-slate-800 dark:text-slate-100">监测阶段 #{cycleIndex}</h2>
         </div>
         <div className="flex items-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-2 py-1 text-xs text-cyan-800 dark:border-cyan-900/60 dark:bg-cyan-950/25 dark:text-cyan-100">
           <TimerReset className="h-3.5 w-3.5" />
@@ -52,8 +60,15 @@ export function CycleStateMachine({ cycleInfo, compact = false }: { cycleInfo: C
               </div>
               {active && (
                 <div className="relative z-10 mt-2">
-                  <div className="h-1.5 overflow-hidden rounded-full bg-cyan-900/10 dark:bg-white/10">
-                    <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-300" style={{ width: `${cycleInfo.progress}%` }} />
+                  <div
+                    className="h-1.5 overflow-hidden rounded-full bg-cyan-900/10 dark:bg-white/10"
+                    role="progressbar"
+                    aria-label={`${item.label}阶段进度`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(activeProgress)}
+                  >
+                    <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-300" style={{ width: `${activeProgress}%` }} />
                   </div>
                 </div>
               )}
@@ -66,7 +81,7 @@ export function CycleStateMachine({ cycleInfo, compact = false }: { cycleInfo: C
         <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
           <div className="rounded-md border border-slate-200 bg-[#f6fafc] px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
             <div className="ops-muted">当前状态说明</div>
-            <div className="mt-1 text-slate-900 dark:text-slate-100">{cycleInfo.description}</div>
+            <div className="ops-break-text mt-1 text-slate-900 dark:text-slate-100">{cycleInfo.description}</div>
           </div>
           <div className="rounded-md border border-slate-200 bg-[#f6fafc] px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
             <div className="ops-muted">停泵 / 开泵锚点</div>

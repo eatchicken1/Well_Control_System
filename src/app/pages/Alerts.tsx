@@ -1,5 +1,5 @@
-import { useState, type ElementType } from 'react';
-import { AlertTriangle, Check, CheckCheck, Clock3, Filter, ShieldAlert, Siren, X } from 'lucide-react';
+import { useEffect, useState, type ElementType } from 'react';
+import { AlertTriangle, Check, CheckCheck, Clock3, Eye, Filter, ShieldAlert, Siren, X } from 'lucide-react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
@@ -34,6 +34,18 @@ const LEVEL_VISUAL: Record<2 | 3 | 4, {
   },
 };
 
+function safeBackendLevel(value: unknown): BackendLevel {
+  const level = Number(value);
+  return Number.isFinite(level) && level >= 0 && level <= 4 ? level as BackendLevel : 0;
+}
+
+function alertVisualLevel(value: unknown): 2 | 3 | 4 {
+  const level = safeBackendLevel(value);
+  if (level >= 4) return 4;
+  if (level >= 3) return 3;
+  return 2;
+}
+
 function CounterCard({
   level,
   value,
@@ -57,8 +69,9 @@ function CounterCard({
 }
 
 function responsePriority(level: BackendLevel, acknowledged: boolean) {
-  if (!acknowledged) return 10 - level;
-  return 20 - level;
+  const safeLevel = safeBackendLevel(level);
+  if (!acknowledged) return 10 - safeLevel;
+  return 20 - safeLevel;
 }
 
 function eventStateLabel(value: string) {
@@ -79,41 +92,58 @@ export default function Alerts() {
   const {
     alerts,
     acknowledgeAlert,
-    acknowledgeAll,
     backendDetection,
     wellInfo,
     selectedWellId,
-    monitoredWellIds,
-    realtimeTabWellIds,
     wells,
   } = useWellControl();
   const [levelFilter, setLevelFilter] = useState<BackendLevelFilter>('all');
   const [ackFilter, setAckFilter] = useState<AckFilter>('all');
   const [selectedAlertId, setSelectedAlertId] = useState<number | null>(null);
 
-  const activeWellIds = [...new Set([
-    ...monitoredWellIds,
-    ...realtimeTabWellIds,
-    ...(selectedWellId ? [selectedWellId] : []),
-  ])];
-  const activeWellLabel = wells.find((well) => well.wellId === selectedWellId)?.wellName || wells.find((well) => well.wellId === activeWellIds[0])?.wellName || wellInfo.wellName;
-  const wellAlerts = alerts.filter((alert) => !alert.wellId || activeWellIds.length === 0 || activeWellIds.includes(alert.wellId));
+  const currentWellId = selectedWellId || wellInfo.wellId;
+  const activeWellLabel = wells.find((well) => well.wellId === currentWellId)?.wellName || wellInfo.wellName;
+  const wellAlerts = alerts.filter((alert) => !currentWellId || !alert.wellId || alert.wellId === currentWellId);
   const filtered = wellAlerts
     .filter((alert) => {
-      if (levelFilter !== 'all' && alert.backendLevel !== Number(levelFilter)) return false;
+      if (levelFilter !== 'all' && safeBackendLevel(alert.backendLevel) !== Number(levelFilter)) return false;
       if (ackFilter === 'unacknowledged' && alert.acknowledged) return false;
       if (ackFilter === 'acknowledged' && !alert.acknowledged) return false;
       return true;
     })
-    .sort((a, b) => responsePriority(a.backendLevel, a.acknowledged) - responsePriority(b.backendLevel, b.acknowledged));
+    .sort((a, b) => responsePriority(safeBackendLevel(a.backendLevel), a.acknowledged) - responsePriority(safeBackendLevel(b.backendLevel), b.acknowledged));
 
-  const countFor = (level: BackendLevel) => wellAlerts.filter((alert) => alert.backendLevel === level && !alert.acknowledged).length;
+  const countFor = (level: BackendLevel) => wellAlerts.filter((alert) => safeBackendLevel(alert.backendLevel) === level && !alert.acknowledged).length;
   const l2Count = countFor(2);
   const l3Count = countFor(3);
   const l4Count = countFor(4);
   const unacknowledgedCount = wellAlerts.filter((alert) => !alert.acknowledged).length;
+  const visibleUnacknowledgedCount = filtered.filter((alert) => !alert.acknowledged).length;
   const acknowledgedCount = wellAlerts.length - unacknowledgedCount;
   const selectedAlert = selectedAlertId == null ? null : wellAlerts.find((alert) => alert.id === selectedAlertId) ?? null;
+  const hasActiveFilters = levelFilter !== 'all' || ackFilter !== 'all';
+  const activeScopeLabel = activeWellLabel || wellInfo.wellName;
+  const currentDetectionLevel = safeBackendLevel(backendDetection.publicLevel);
+
+  useEffect(() => {
+    setSelectedAlertId(null);
+  }, [currentWellId]);
+
+  useEffect(() => {
+    if (!selectedAlert) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedAlertId(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedAlert]);
+
+  const acknowledgeVisibleAlerts = () => {
+    filtered
+      .filter((alert) => !alert.acknowledged)
+      .forEach((alert) => acknowledgeAlert(alert.id));
+  };
+
   const queueSteps = [
     {
       code: 'L2',
@@ -148,17 +178,23 @@ export default function Alerts() {
   return (
     <div className="ops-page space-y-4">
       <MonitoringWellTabs />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="ops-eyebrow !text-slate-500">报警复核</div>
-          <h1 className="ops-title !text-slate-900">报警事件复核</h1>
-          <p className="text-sm !text-slate-600">
-            {activeWellIds.length > 0 ? `${activeWellLabel} 等 ${activeWellIds.length} 口` : wellInfo.wellName} · 当前报警等级 L{backendDetection.publicLevel} {BACKEND_LEVEL_META[backendDetection.publicLevel].label} · 事件 {wellAlerts.length} 条
+      <div className="ops-page-header">
+        <div className="ops-page-header-copy">
+          <div className="ops-eyebrow">报警复核</div>
+          <h1 className="ops-title">报警事件复核</h1>
+          <p className="text-sm ops-muted">
+            {activeScopeLabel} · 当前报警等级 L{currentDetectionLevel} {BACKEND_LEVEL_META[currentDetectionLevel].label} · 事件 {wellAlerts.length} 条
           </p>
         </div>
-        <div className="flex gap-2">
-          {unacknowledgedCount > 0 && (
-            <button onClick={acknowledgeAll} className="ops-button-primary">
+        <div className="ops-page-toolbar">
+          {visibleUnacknowledgedCount > 0 && (
+            <button
+              type="button"
+              onClick={acknowledgeVisibleAlerts}
+              className="ops-button-primary"
+              title={`确认当前井 ${visibleUnacknowledgedCount} 条未确认事件`}
+              aria-label={`确认当前井 ${visibleUnacknowledgedCount} 条未确认报警事件`}
+            >
               <CheckCheck className="h-4 w-4" />
               全部确认
             </button>
@@ -166,7 +202,7 @@ export default function Alerts() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className="ops-stat-grid">
         <CounterCard level={2} value={l2Count} />
         <CounterCard level={3} value={l3Count} />
         <CounterCard level={4} value={l4Count} />
@@ -183,12 +219,18 @@ export default function Alerts() {
 
       <OpsProcedureRail steps={queueSteps} compact />
 
-      <div className="ops-panel overflow-hidden">
+      <div className="ops-surface overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
           <Filter className="h-4 w-4 ops-muted" />
           <div className="ops-segment">
             {(['all', '2', '3', '4'] as BackendLevelFilter[]).map((level) => (
-              <button key={level} data-active={levelFilter === level} onClick={() => setLevelFilter(level)}>
+              <button
+                key={level}
+                type="button"
+                data-active={levelFilter === level}
+                aria-pressed={levelFilter === level}
+                onClick={() => setLevelFilter(level)}
+              >
                 {level === 'all' ? '全部级别' : `L${level} ${BACKEND_LEVEL_META[Number(level) as 2 | 3 | 4].shortLabel}`}
               </button>
             ))}
@@ -196,41 +238,60 @@ export default function Alerts() {
           <div className="h-5 w-px bg-slate-200 dark:bg-slate-700" />
           <div className="ops-segment">
             {(['all', 'unacknowledged', 'acknowledged'] as AckFilter[]).map((ack) => (
-              <button key={ack} data-active={ackFilter === ack} onClick={() => setAckFilter(ack)}>
+              <button
+                key={ack}
+                type="button"
+                data-active={ackFilter === ack}
+                aria-pressed={ackFilter === ack}
+                onClick={() => setAckFilter(ack)}
+              >
                 {ack === 'all' ? '全部状态' : ack === 'unacknowledged' ? '未确认' : '已确认'}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="ops-scroll max-h-[calc(100vh-340px)] divide-y divide-slate-200 overflow-y-auto dark:divide-slate-800">
+        <div className="ops-surface-body ops-scroll max-h-[calc(100vh-340px)] divide-y divide-slate-200 overflow-y-auto dark:divide-slate-800">
           {filtered.length === 0 ? (
             <div className="ops-empty-state m-3 min-h-[180px]">
               <div>
                 <Check className="mx-auto mb-2 h-5 w-5 text-emerald-500" />
-                <div className="text-sm text-slate-700 dark:text-slate-200">当前没有报警事件</div>
+                <div className="text-sm text-slate-700 dark:text-slate-200">
+                  {wellAlerts.length === 0 ? '当前没有报警事件' : '当前筛选条件下没有事件'}
+                </div>
+                {wellAlerts.length > 0 ? (
+                  <div className="mt-1 text-xs ops-muted">当前筛选未命中事件，可清空筛选或调整级别/确认状态。</div>
+                ) : null}
+                {wellAlerts.length > 0 && hasActiveFilters ? (
+                  <button
+                    type="button"
+                    className="ops-button-secondary mx-auto mt-3 px-3 py-1.5 text-xs"
+                    onClick={() => {
+                      setLevelFilter('all');
+                      setAckFilter('all');
+                    }}
+                    aria-label="清空报警事件筛选条件"
+                  >
+                    <Filter className="h-3.5 w-3.5" />
+                    清空筛选
+                  </button>
+                ) : null}
               </div>
             </div>
           ) : (
             filtered.map((alert) => {
-              const currentLevel = alert.backendLevel;
-              const peakLevel = Math.max(2, alert.peakBackendLevel ?? alert.backendLevel) as 2 | 3 | 4;
-              const visualLevel = Math.max(2, currentLevel >= 2 ? currentLevel : peakLevel) as 2 | 3 | 4;
+              const currentLevel = safeBackendLevel(alert.backendLevel);
+              const peakLevel = alertVisualLevel(alert.peakBackendLevel ?? alert.backendLevel);
+              const visualLevel = alertVisualLevel(currentLevel >= 2 ? currentLevel : peakLevel);
               const visual = LEVEL_VISUAL[visualLevel];
               const Icon = visual.icon;
               const currentBadge = currentLevel >= 2
                 ? visual.badge
                 : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-100';
               return (
-                <div
+                <article
                   key={alert.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedAlertId(alert.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') setSelectedAlertId(alert.id);
-                  }}
-                  className={`relative flex cursor-pointer items-start gap-3 border-l-4 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-900 ${alert.acknowledged ? 'border-l-slate-300 opacity-55 dark:border-l-slate-700' : `${visual.tone} ${backendLevel === 4 ? 'border-l-red-600' : backendLevel === 3 ? 'border-l-orange-500' : 'border-l-amber-500'}`}`}
+                  className={`relative flex items-start gap-3 border-l-4 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-900 ${alert.acknowledged ? 'border-l-slate-300 opacity-55 dark:border-l-slate-700' : `${visual.tone} ${visualLevel === 4 ? 'border-l-red-600' : visualLevel === 3 ? 'border-l-orange-500' : 'border-l-amber-500'}`}`}
                 >
                   <Icon className="mt-0.5 h-5 w-5 shrink-0" />
                   <div className="min-w-0 flex-1">
@@ -249,29 +310,38 @@ export default function Alerts() {
                         {alert.date} {alert.time}{alert.count && alert.count > 1 ? ` · 持续 ${alert.count} 帧` : ''}
                       </span>
                     </div>
-                    <div className="mt-2 text-sm text-slate-800 dark:text-slate-100">{alert.message}</div>
+                    <div className="ops-break-text mt-2 text-sm text-slate-800 dark:text-slate-100">{alert.message}</div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {alert.activeSignals.map((signal) => (
                         <span key={signal} className="ops-inline-tile px-2 py-1 text-[11px] text-slate-700 dark:text-slate-200">
                           {backendSignalLabel(signal)}
                         </span>
                       ))}
-                      {alert.count && alert.count > 1 ? <span className="px-1 py-1 text-[10px] ops-muted">持续 {alert.count} 帧</span> : null}
                     </div>
                   </div>
-                  {!alert.acknowledged && (
+                  <div className="flex shrink-0 flex-col gap-1.5">
                     <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        acknowledgeAlert(alert.id);
-                      }}
-                      className="ops-button-secondary shrink-0 px-2.5 py-1 text-xs"
+                      type="button"
+                      onClick={() => setSelectedAlertId(alert.id)}
+                      aria-label={`查看 ${alert.wellName || alert.wellId || '当前井'} L${currentLevel} 报警详情`}
+                      className="ops-button-secondary px-2.5 py-1 text-xs"
                     >
-                      <Check className="h-3.5 w-3.5" />
-                      确认
+                      <Eye className="h-3.5 w-3.5" />
+                      详情
                     </button>
-                  )}
-                </div>
+                    {!alert.acknowledged && (
+                      <button
+                        type="button"
+                        onClick={() => acknowledgeAlert(alert.id)}
+                        aria-label={`确认 ${alert.wellName || alert.wellId || '当前井'} L${currentLevel} 报警`}
+                        className="ops-button-secondary px-2.5 py-1 text-xs"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        确认
+                      </button>
+                    )}
+                  </div>
+                </article>
               );
             })
           )}
@@ -280,34 +350,41 @@ export default function Alerts() {
 
       {selectedAlert && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={() => setSelectedAlertId(null)}>
-          <div className="ops-panel w-full max-w-xl overflow-hidden" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="ops-panel w-full max-w-xl overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="alert-detail-title"
+            aria-describedby="alert-detail-summary"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
               <div>
                 <div className="ops-eyebrow">事件详情</div>
-                <h2 className="text-base text-slate-900 dark:text-slate-100">事件详情</h2>
+                <h2 id="alert-detail-title" className="text-base text-slate-900 dark:text-slate-100">事件详情</h2>
               </div>
-              <button className="ops-button-secondary px-2 py-1" onClick={() => setSelectedAlertId(null)} title="关闭">
+              <button type="button" className="ops-button-secondary px-2 py-1" onClick={() => setSelectedAlertId(null)} title="关闭事件详情" aria-label="关闭事件详情" autoFocus>
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-3 p-4 text-sm">
+            <div className="ops-scroll max-h-[calc(100vh-150px)] space-y-3 overflow-auto p-4 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded px-2 py-0.5 text-xs font-semibold ${
-                  selectedAlert.backendLevel >= 2
-                    ? LEVEL_VISUAL[Math.max(2, selectedAlert.backendLevel) as 2 | 3 | 4].badge
+                  safeBackendLevel(selectedAlert.backendLevel) >= 2
+                    ? LEVEL_VISUAL[alertVisualLevel(selectedAlert.backendLevel)].badge
                     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-100'
                 }`}>
-                  当前 L{selectedAlert.backendLevel} {BACKEND_LEVEL_META[selectedAlert.backendLevel].label}
+                  当前 L{safeBackendLevel(selectedAlert.backendLevel)} {BACKEND_LEVEL_META[safeBackendLevel(selectedAlert.backendLevel)].label}
                 </span>
-                {(selectedAlert.peakBackendLevel ?? selectedAlert.backendLevel) > selectedAlert.backendLevel ? (
+                {safeBackendLevel(selectedAlert.peakBackendLevel ?? selectedAlert.backendLevel) > safeBackendLevel(selectedAlert.backendLevel) ? (
                   <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/30 dark:text-red-200">
-                    峰值 L{selectedAlert.peakBackendLevel}
+                    峰值 L{safeBackendLevel(selectedAlert.peakBackendLevel)}
                   </span>
                 ) : null}
                 <span className="ops-inline-tile px-2 py-1 text-xs">{eventStateLabel(selectedAlert.eventState)}</span>
                 <span className="ops-inline-tile px-2 py-1 text-xs">{selectedAlert.pumpState}</span>
               </div>
-              <div className="rounded-md bg-slate-50 p-3 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
+              <div id="alert-detail-summary" className="ops-break-text rounded-md bg-slate-50 p-3 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
                 <div className="mb-1 flex items-center gap-2 text-xs ops-muted">
                   <Clock3 className="h-3.5 w-3.5" />
                   {selectedAlert.date} {selectedAlert.time} 至 {selectedAlert.lastDate || selectedAlert.date} {selectedAlert.lastTime || selectedAlert.time}
@@ -330,16 +407,16 @@ export default function Alerts() {
                 <div className="ops-inline-tile px-3 py-2">
                   <div className="text-[11px] ops-muted">正式评估等级</div>
                   <div className="mt-1 tabular-nums">
-                    L{selectedAlert.formalEvalLevel}
-                    {(selectedAlert.peakFormalEvalLevel ?? selectedAlert.formalEvalLevel) > selectedAlert.formalEvalLevel
-                      ? ` / 峰值 L${selectedAlert.peakFormalEvalLevel}`
+                    L{safeBackendLevel(selectedAlert.formalEvalLevel)}
+                    {safeBackendLevel(selectedAlert.peakFormalEvalLevel ?? selectedAlert.formalEvalLevel) > safeBackendLevel(selectedAlert.formalEvalLevel)
+                      ? ` / 峰值 L${safeBackendLevel(selectedAlert.peakFormalEvalLevel)}`
                       : ''}
                   </div>
                 </div>
               </div>
-              <div className="rounded-md border border-slate-200 bg-white p-3">
+              <div className="rounded-md border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
                 <div className="text-[11px] ops-muted">证据摘要</div>
-                <div className="mt-1 text-sm text-slate-900">{evidenceTitle(selectedAlert)}</div>
+                <div className="ops-break-text mt-1 text-sm text-slate-900 dark:text-slate-100">{evidenceTitle(selectedAlert)}</div>
               </div>
               <div>
                 <div className="mb-2 text-[11px] ops-muted">活动信号</div>
