@@ -187,7 +187,7 @@ function WellSelector() {
 
   return (
     <section className="ops-panel multiwell-selector p-3">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="multiwell-selector-head">
         <div>
           <div className="ops-eyebrow">井选择</div>
           <h1 className="ops-title">多井监控总览</h1>
@@ -373,8 +373,8 @@ function MonitoredWellCard({
         </button>
       </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <div className="multiwell-card-metric">
+      <div className="multiwell-card-metrics">
+        <div className="multiwell-card-metric multiwell-card-metric-wide">
           <span>最新样本</span>
           <strong>{latestTime || '--'}</strong>
         </div>

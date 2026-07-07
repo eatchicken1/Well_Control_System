@@ -9,6 +9,7 @@ interface WellSchematicProps {
   drillPipePressure: number;
   pitGain: number;
   returnResponse: number;
+  totalGas?: number;
   backendLevel: BackendLevel;
   activeSignals?: string[];
   pumpState?: string;
@@ -26,6 +27,8 @@ interface WellSchematicProps {
     state?: 'normal' | 'warning' | 'critical';
   }>;
 }
+
+type WellMetric = NonNullable<WellSchematicProps['metrics']>[number];
 
 function metricTone(isLight: boolean, state: 'normal' | 'warning' | 'critical' = 'normal') {
   if (state === 'critical') return isLight ? 'border-red-200 bg-red-50 text-red-700' : 'border-red-500/40 bg-red-500/12 text-red-200';
@@ -185,11 +188,11 @@ function ReadoutCard({
   metric,
   isLight,
 }: {
-  metric: NonNullable<WellSchematicProps['metrics']>[number];
+  metric: WellMetric;
   isLight: boolean;
 }) {
   return (
-    <div className={`flex min-h-[58px] min-w-0 flex-col justify-between rounded-md border px-2.5 py-2 ${metricTone(isLight, metric.state)}`}>
+    <div className={`well-schematic-readout flex min-h-[58px] min-w-0 flex-col justify-between rounded-md border px-2.5 py-2 ${metricTone(isLight, metric.state)}`}>
       <div className="truncate text-[11px] leading-tight opacity-70">{metric.label}</div>
       <div className="mt-1 flex min-w-0 items-end justify-between gap-2">
         <span className="truncate text-[17px] font-semibold tabular-nums leading-none">{metric.value}</span>
@@ -225,6 +228,42 @@ function FlowPath({
   );
 }
 
+function SvgMetricCallout({
+  x,
+  y,
+  width,
+  label,
+  value,
+  unit,
+  stroke,
+  fill,
+  textColor,
+  anchorD,
+}: {
+  x: number;
+  y: number;
+  width: number;
+  label: string;
+  value: string;
+  unit: string;
+  stroke: string;
+  fill: string;
+  textColor: string;
+  anchorD?: string;
+}) {
+  return (
+    <g aria-label={`${label}${value}${unit}`}>
+      {anchorD ? <path d={anchorD} fill="none" stroke={stroke} strokeWidth="1.1" strokeLinecap="round" opacity="0.72" /> : null}
+      <rect x={x} y={y} width={width} height="28" rx="4" fill={fill} stroke={stroke} strokeWidth="1" opacity="0.96" />
+      <text x={x + 6} y={y + 11} fill={textColor} fontSize="7.8" fontWeight="700">{label}</text>
+      <text x={x + 6} y={y + 22} fill={textColor} fontSize="10.6" fontWeight="800">
+        {value}
+        {unit && value !== '--' ? <tspan fontSize="7.4" fontWeight="700"> {unit}</tspan> : null}
+      </text>
+    </g>
+  );
+}
+
 export function WellSchematic({
   flowIn,
   flowOut,
@@ -233,6 +272,7 @@ export function WellSchematic({
   drillPipePressure,
   pitGain,
   returnResponse,
+  totalGas = 0,
   backendLevel,
   activeSignals = [],
   pumpState,
@@ -258,7 +298,11 @@ export function WellSchematic({
     { label: '出口流量响应', value: formatFinite(returnResponse, 1), unit: '%', state: backendLevel >= 4 ? 'critical' as const : backendLevel >= 2 ? 'warning' as const : 'normal' as const },
     { label: '总池体积变化', value: formatFinite(pitGain, 2), unit: 'm3', state: backendLevel >= 4 ? 'critical' as const : backendLevel >= 2 ? 'warning' as const : 'normal' as const },
   ];
-  const topReadouts = readouts.slice(0, 2);
+  const responseMetric = readouts.find((metric) => metric.label.includes('响应'));
+  const sppMetric = readouts.find((metric) => metric.label.includes('立压'));
+  const pitMetric = readouts.find((metric) => metric.label.includes('总池'));
+  const gasMetric = readouts.find((metric) => metric.label.includes('全烃'));
+  const topReadouts = compact ? [] : readouts.slice(0, 2);
   const bottomReadouts = compact ? [] : readouts.slice(2, 6);
   const flowInText = formatFiniteWithUnit(flowIn, 1, 'L/s');
   const flowOutText = formatFiniteWithUnit(flowOut, 1, 'L/s');
@@ -279,20 +323,25 @@ export function WellSchematic({
   const statusCopy = status.copy;
 
   return (
-    <div className={`well-schematic-card flex h-full min-h-[260px] flex-col overflow-hidden rounded-md border p-2.5 lg:min-h-0 ${isLight ? 'border-slate-200 bg-white text-slate-900' : 'border-slate-700 bg-slate-950 text-slate-100'}`}>
-      <div className="mb-2 flex items-start justify-between gap-2">
+    <div className={`well-schematic-card ${compact ? 'well-schematic-card-compact' : ''} flex h-full min-h-[260px] flex-col overflow-hidden rounded-md border p-2.5 lg:min-h-0 ${isLight ? 'border-slate-200 bg-white text-slate-900' : 'border-slate-700 bg-slate-950 text-slate-100'}`}>
+      <div className="well-schematic-status-head mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="truncate text-base font-semibold">井筒状态</h3>
-          {!compact && <p className="mt-0.5 truncate text-[11px] ops-muted">{statusCopy}</p>}
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="well-schematic-status-dot" style={{ backgroundColor: visual.accent }} />
+            <h3 className="truncate text-base font-semibold">井筒状态</h3>
+          </div>
+          <p className="well-schematic-status-copy mt-0.5 text-[11px] ops-muted">{statusCopy}</p>
         </div>
-        <div className={`shrink-0 rounded-md border px-2 py-1 text-[10px] font-semibold ${visual.badge}`}>
+        <div className={`well-schematic-status-badge shrink-0 rounded-md border px-2 py-1 text-[10px] font-semibold ${visual.badge}`}>
           {statusLabel}
         </div>
       </div>
 
-      <div className="mb-2 grid grid-cols-2 gap-2">
-        {topReadouts.map((metric) => <ReadoutCard key={metric.label} metric={metric} isLight={isLight} />)}
-      </div>
+      {topReadouts.length > 0 && (
+        <div className="well-schematic-readouts mb-2 grid grid-cols-2 gap-2">
+          {topReadouts.map((metric) => <ReadoutCard key={metric.label} metric={metric} isLight={isLight} />)}
+        </div>
+      )}
 
       <div className={`well-schematic-figure min-h-0 flex-1 overflow-hidden rounded-md border ${isLight ? 'border-slate-200 bg-white' : 'border-slate-700 bg-slate-950'}`}>
         <svg
@@ -321,7 +370,7 @@ export function WellSchematic({
           </defs>
 
           <rect width="360" height="430" fill={panel} />
-          <rect x="8" y="8" width="344" height="414" rx="12" fill={isLight ? '#fffdf8' : '#08111f'} stroke={line} strokeWidth="1.2" opacity="0.96" />
+          <rect x="8" y="8" width="344" height="414" rx="10" fill={isLight ? '#fffdf8' : '#08111f'} stroke={compact ? 'none' : line} strokeWidth="1.2" opacity="0.96" />
           <rect y="88" width="360" height="72" fill={isLight ? '#f1eadc' : '#29251d'} />
           <rect y="88" width="360" height="72" fill="url(#formationDots)" />
           <rect y="160" width="360" height="82" fill={isLight ? '#e7edf1' : '#17212d'} />
@@ -375,9 +424,6 @@ export function WellSchematic({
           <circle cx="272" cy="118" r="7" fill={panel} stroke={backendLevel >= 4 ? '#dc2626' : influxActive ? visual.accent : '#0d9488'} strokeWidth="2" />
 
           <g fontFamily="sans-serif" fontSize={compact ? 9.5 : 10.5} fill={muted}>
-            <text x="18" y="80">地表</text>
-            <path d="M45 77 H96 L105 88" fill="none" stroke={muted} strokeWidth="1" />
-
             <g aria-label="入口流量读数">
               <rect x="18" y="106" width="91" height="47" rx="7" fill={isLight ? '#eff6ff' : '#0b2447'} stroke="#2563eb" strokeWidth="1.2" opacity="0.96" />
               <text x="28" y="123" fill="#2563eb" fontSize="10" fontWeight="700">入口流量</text>
@@ -389,22 +435,73 @@ export function WellSchematic({
               <text x="261" y="142" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 13 : 14.5} fontWeight="800">{flowOutText}</text>
             </g>
 
-            <text x="236" y="40">防喷器组</text>
-            <path d="M235 43 H209" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="252" y="183">套管</text>
-            <path d="M250 180 H219" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="252" y="218">水泥环</text>
-            <path d="M250 215 H229" fill="none" stroke={muted} strokeWidth="1" />
-            <text x="22" y="222">钻杆流向向下</text>
-            <path d="M86 219 H173" fill="none" stroke="#2563eb" strokeWidth="1" />
-            <text x="218" y="276" fill={influxActive ? visual.accent : muted}>环空流向向上</text>
-            <path d="M276 273 H207" fill="none" stroke={influxActive ? visual.accent : muted} strokeWidth="1" />
-            <text x="248" y="350">高压地层</text>
-            <path d="M248 347 H226" fill="none" stroke={muted} strokeWidth="1" />
+            {compact ? (
+              <>
+                <SvgMetricCallout
+                  x={18}
+                  y={164}
+                  width={72}
+                  label="立压"
+                  value={sppMetric?.value ?? formatFinite(drillPipePressure, 2)}
+                  unit={sppMetric?.unit ?? 'MPa'}
+                  stroke={activeSignals.includes('standpipe_pressure') ? visual.accent : '#2563eb'}
+                  fill={isLight ? '#eff6ff' : '#0b2447'}
+                  textColor={activeSignals.includes('standpipe_pressure') ? visual.accent : '#2563eb'}
+                  anchorD="M90 178 C116 178 138 178 164 178"
+                />
+                <SvgMetricCallout
+                  x={18}
+                  y={24}
+                  width={76}
+                  label="池体积"
+                  value={pitMetric?.value ?? formatFinite(pitGain, 2)}
+                  unit={pitMetric?.unit ?? 'm3'}
+                  stroke={pitMetric?.state === 'critical' ? '#dc2626' : pitMetric?.state === 'warning' ? '#d97706' : '#0d9488'}
+                  fill={pitMetric?.state === 'critical' ? '#fef2f2' : pitMetric?.state === 'warning' ? '#fffbeb' : '#ecfdf5'}
+                  textColor={pitMetric?.state === 'critical' ? '#b91c1c' : pitMetric?.state === 'warning' ? '#b45309' : '#0f766e'}
+                  anchorD="M94 38 C118 38 134 50 148 68"
+                />
+                <SvgMetricCallout
+                  x={256}
+                  y={164}
+                  width={78}
+                  label="返出响应"
+                  value={responseMetric?.value ?? formatFinite(returnResponse, 1)}
+                  unit={responseMetric?.unit ?? '%'}
+                  stroke={responseMetric?.state === 'critical' ? '#dc2626' : responseMetric?.state === 'warning' ? '#d97706' : '#0d9488'}
+                  fill={responseMetric?.state === 'critical' ? '#fef2f2' : responseMetric?.state === 'warning' ? '#fffbeb' : '#ecfdf5'}
+                  textColor={responseMetric?.state === 'critical' ? '#b91c1c' : responseMetric?.state === 'warning' ? '#b45309' : '#0f766e'}
+                  anchorD="M256 178 H224"
+                />
+                <SvgMetricCallout
+                  x={260}
+                  y={210}
+                  width={66}
+                  label="全烃"
+                  value={gasMetric?.value ?? formatFinite(totalGas, 2)}
+                  unit={gasMetric?.unit ?? '%'}
+                  stroke={gasMetric?.state === 'critical' ? '#dc2626' : gasMetric?.state === 'warning' ? '#d97706' : '#16a34a'}
+                  fill={gasMetric?.state === 'critical' ? '#fef2f2' : gasMetric?.state === 'warning' ? '#fffbeb' : '#f0fdf4'}
+                  textColor={gasMetric?.state === 'critical' ? '#b91c1c' : gasMetric?.state === 'warning' ? '#b45309' : '#15803d'}
+                  anchorD="M260 224 H224"
+                />
+              </>
+            ) : null}
+
+            {!compact && (
+              <>
+                <text x="236" y="40">防喷器</text>
+                <path d="M232 43 H209" fill="none" stroke={muted} strokeWidth="1" />
+                <text x="258" y="183">套管</text>
+                <path d="M256 180 H219" fill="none" stroke={muted} strokeWidth="1" />
+                <text x="248" y="350">地层</text>
+                <path d="M248 347 H226" fill="none" stroke={muted} strokeWidth="1" />
+              </>
+            )}
             {influxActive && (
               <>
-                <text x="12" y="410" fill={visual.accent}>地层流体侵入</text>
-                <path d="M92 411 H126" fill="none" stroke={visual.accent} strokeWidth="1" />
+                <text x={compact ? 24 : 12} y={compact ? 398 : 410} fill={visual.accent}>地层流体侵入</text>
+                <path d={compact ? 'M98 397 H126' : 'M92 411 H126'} fill="none" stroke={visual.accent} strokeWidth="1" />
               </>
             )}
             {!compact && (
