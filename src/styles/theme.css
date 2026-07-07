@@ -3422,7 +3422,13 @@ body {
 .multiwell-card-metrics {
   margin-top: 12px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgba(203, 213, 225, 0.86);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.82)),
+    rgba(255, 255, 255, 0.88);
 }
 
 .multiwell-card-metric,
@@ -3432,18 +3438,24 @@ body {
 
 .multiwell-card-metric {
   min-height: 58px;
-  border-color: rgba(203, 213, 225, 0.86);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  padding: 8px 9px;
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.025);
+  border: 0;
+  border-left: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 10px;
+  box-shadow: none;
 }
 
 .multiwell-card-metric[data-emphasis='true'] {
-  border-color: rgba(20, 184, 166, 0.28);
-  background:
-    radial-gradient(circle at 78% 18%, rgba(20, 184, 166, 0.12), transparent 34%),
-    rgba(248, 255, 252, 0.94);
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.72), rgba(255, 255, 255, 0.28));
+}
+
+.multiwell-card-metric:not(.multiwell-card-time-pair) {
+  border-top: 1px solid rgba(226, 232, 240, 0.92);
+}
+
+.multiwell-card-metric:nth-child(4n + 2) {
+  border-left: 0;
 }
 
 .multiwell-card-metric-head {
@@ -3480,25 +3492,30 @@ body {
 
 .multiwell-card-time-pair {
   display: grid;
-  grid-column: span 2;
+  grid-column: 1 / -1;
   grid-template-columns: minmax(0, 1fr);
-  gap: 3px;
-  align-content: center;
+  gap: 0;
+  align-content: stretch;
+  min-height: 0;
+  padding: 0;
+  border-left: 0;
+  background:
+    radial-gradient(circle at 92% 20%, rgba(20, 184, 166, 0.11), transparent 28%),
+    linear-gradient(90deg, rgba(240, 253, 250, 0.86), rgba(248, 250, 252, 0.54));
 }
 
 .multiwell-time-item {
   display: grid;
   min-width: 0;
-  grid-template-columns: 48px minmax(0, 1fr) 14px;
+  grid-template-columns: 58px 14px minmax(0, 1fr);
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   border-bottom: 1px solid rgba(226, 232, 240, 0.9);
-  padding-bottom: 3px;
+  padding: 7px 10px;
 }
 
 .multiwell-time-item:last-child {
   border-bottom: 0;
-  padding-bottom: 0;
 }
 
 .multiwell-time-item .multiwell-card-metric-head {
@@ -3518,10 +3535,10 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   overflow: hidden;
   margin-top: 0;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 800;
-  letter-spacing: -0.065em;
-  line-height: 1.15;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3699,10 +3716,40 @@ body {
     linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(8, 13, 24, 0.96));
 }
 
+.dark .multiwell-card-metrics {
+  border-color: rgba(51, 65, 85, 0.9);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(8, 13, 24, 0.74)),
+    rgba(15, 23, 42, 0.72);
+}
+
 .dark .multiwell-card-metric,
 .dark .multiwell-mode-panel {
   border-color: rgba(51, 65, 85, 0.9);
   background: rgba(15, 23, 42, 0.72);
+}
+
+.dark .multiwell-card-metric {
+  border-left-color: rgba(51, 65, 85, 0.86);
+  background: transparent;
+}
+
+.dark .multiwell-card-metric:not(.multiwell-card-time-pair) {
+  border-top-color: rgba(51, 65, 85, 0.86);
+}
+
+.dark .multiwell-card-metric[data-emphasis='true'] {
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.13), rgba(15, 23, 42, 0.16));
+}
+
+.dark .multiwell-card-time-pair {
+  background:
+    radial-gradient(circle at 92% 20%, rgba(20, 184, 166, 0.15), transparent 28%),
+    linear-gradient(90deg, rgba(19, 78, 74, 0.38), rgba(15, 23, 42, 0.2));
+}
+
+.dark .multiwell-time-item {
+  border-bottom-color: rgba(51, 65, 85, 0.86);
 }
 
 .dark .multiwell-mode-control {
@@ -4026,6 +4073,18 @@ body {
 @media (max-width: 1320px) {
   .multiwell-card-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .multiwell-card-metric:nth-child(4n + 2) {
+    border-left: 1px solid rgba(226, 232, 240, 0.92);
+  }
+
+  .multiwell-card-metric:nth-child(even) {
+    border-left: 0;
+  }
+
+  .dark .multiwell-card-metric:nth-child(4n + 2) {
+    border-left-color: rgba(51, 65, 85, 0.86);
   }
 
   .multiwell-card-metric-wide {
