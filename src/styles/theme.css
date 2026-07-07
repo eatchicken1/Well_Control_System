@@ -3481,28 +3481,49 @@ body {
 .multiwell-card-time-pair {
   display: grid;
   grid-column: span 2;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  align-content: center;
 }
 
 .multiwell-time-item {
+  display: grid;
   min-width: 0;
-  border-right: 1px solid rgba(226, 232, 240, 0.9);
-  padding-right: 6px;
+  grid-template-columns: 48px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  padding-bottom: 3px;
 }
 
 .multiwell-time-item:last-child {
-  border-right: 0;
-  padding-right: 0;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.multiwell-time-item .multiwell-card-metric-head {
+  display: contents;
+}
+
+.multiwell-time-item .multiwell-card-metric-head span {
+  font-size: 9.5px;
+}
+
+.multiwell-time-item .multiwell-card-metric-head svg {
+  width: 12px;
+  height: 12px;
 }
 
 .multiwell-time-item strong {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 8.8px;
+  overflow: hidden;
+  margin-top: 0;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: -0.065em;
   line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .multiwell-card-metric[data-emphasis='true'] strong {
