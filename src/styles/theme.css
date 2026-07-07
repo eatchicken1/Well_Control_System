@@ -2753,6 +2753,19 @@ body {
 .wellbore-detail-main { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
 .wellbore-detail-figure { width: 100%; height: 100%; min-height: 620px; border-radius: 12px; overflow: hidden; background: #fff; }
 .wellbore-detail-figure img { object-fit: contain; }
+.wellbore-hifi-figure { position: relative; width: 100%; height: 100%; min-height: 620px; border-radius: 12px; overflow: hidden; background: #fff; }
+.wellbore-hifi-base { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+.wellbore-hifi-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.wellbore-flow-path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 8; animation: wellboreDashFlow 1.8s linear infinite; }
+.wellbore-flow-path-normal { stroke: rgba(20, 184, 166, 0.6); stroke-width: 2; }
+.wellbore-flow-path-warning { stroke: #f97316; stroke-width: 2.4; }
+.wellbore-flow-path-critical { stroke: #dc2626; stroke-width: 2.6; }
+.wellbore-flow-path-warning-level { stroke: #ef4444; opacity: 0.9; }
+.wellbore-flow-path-subtle { opacity: 0.42; animation-duration: 2.6s; }
+.wellbore-kick-pulse { transform-box: fill-box; transform-origin: center; animation: wellborePulse 1.6s ease-in-out infinite; }
+.wellbore-bit-pulse { transform-box: fill-box; transform-origin: center; animation: wellboreBitPulse 2.4s ease-in-out infinite; }
+.wellbore-status-breathe { animation: wellboreStatusBreathe 3s ease-in-out infinite; }
+.wellbore-evidence-callout { filter: drop-shadow(0 5px 12px rgba(127, 29, 29, 0.12)); }
 .well-schematic-card-detail { min-height: 0; flex: 1 1 auto; box-shadow: none; }
 .well-schematic-card-detail .well-schematic-status-head { min-height: 46px; flex: 0 0 auto; }
 .well-schematic-summary-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin: 0 0 7px; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; padding: 6px; }
@@ -2806,6 +2819,26 @@ body {
 .wellbore-event-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .wellbore-event-list span { min-width: 0; overflow: hidden; border: 1px solid #e2e8f0; border-left: 3px solid #0f766e; border-radius: 6px; background: #f8fafc; padding: 6px 7px; color: #334155; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .wellbore-detail-note { padding: 7px 10px; color: #64748b; font-size: 9px; line-height: 1.35; }
+
+@keyframes wellboreDashFlow {
+  from { stroke-dashoffset: 36; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes wellborePulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.9); }
+  50% { opacity: 0.9; transform: scale(1.18); }
+}
+
+@keyframes wellboreBitPulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.95); }
+  50% { opacity: 0.85; transform: scale(1.08); }
+}
+
+@keyframes wellboreStatusBreathe {
+  0%, 100% { opacity: 0.82; }
+  50% { opacity: 1; }
+}
 
 @media (min-width: 1024px) {
   body .monitoring-main-grid { grid-template-columns: minmax(0, 1fr) 360px !important; gap: 10px; }
