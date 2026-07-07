@@ -390,8 +390,8 @@ function MonitoredWellCard({
     };
   const PrimaryActionIcon = primaryAction.Icon;
   const metricItems = [
-    { label: '最新样本', value: latestTime || '--', Icon: SlidersHorizontal },
-    { label: '监测起点', value: monitorStartText, Icon: Clock3 },
+    { label: '最新样本', value: latestTime || '--', Icon: SlidersHorizontal, kind: 'time' },
+    { label: '监测起点', value: monitorStartText, Icon: Clock3, kind: 'time' },
     { label: '井深', value: formatNumber(wellDepth, ' m'), Icon: Activity, emphasis: true },
     { label: '钻头位置', value: formatNumber(bitDepth, ' m'), Icon: MapPin },
     { label: '层位', value: latestLayer, Icon: Layers3 },
@@ -440,8 +440,8 @@ function MonitoredWellCard({
       </div>
 
       <div className="multiwell-card-metrics">
-        {metricItems.map(({ label, value, Icon, emphasis, tone }) => (
-          <div key={label} className="multiwell-card-metric" data-emphasis={emphasis ? 'true' : undefined} data-tone={tone}>
+        {metricItems.map(({ label, value, Icon, emphasis, tone, kind }) => (
+          <div key={label} className="multiwell-card-metric" data-emphasis={emphasis ? 'true' : undefined} data-tone={tone} data-kind={kind}>
             <div className="multiwell-card-metric-head">
               <span>{label}</span>
               <Icon className="h-4 w-4" />
@@ -488,7 +488,10 @@ function MonitoredWellCard({
             <small>范围：{replayRangeText}</small>
           </label>
         ) : (
-          <div className="multiwell-mode-realtime-copy">实时监测不选择历史时间；启动后从最新点接入。</div>
+          <div className="multiwell-mode-field multiwell-mode-field-note">
+            <span>接入说明</span>
+            <small>启动后从数据库最新点接入。</small>
+          </div>
         )}
       </div>
 
@@ -517,8 +520,9 @@ function MonitoredWellCard({
         </button>
       </div>
 
-      {(showPauseButton || showStopButton || showRestartButton) ? (
-        <div className="multiwell-card-run-actions">
+      <div className="multiwell-card-run-actions" data-empty={showPauseButton || showStopButton || showRestartButton ? undefined : 'true'}>
+        {(showPauseButton || showStopButton || showRestartButton) ? (
+          <>
           {showPauseButton ? (
             <button
               type="button"
@@ -558,8 +562,9 @@ function MonitoredWellCard({
               重新监测
             </button>
           ) : null}
-        </div>
-      ) : null}
+          </>
+        ) : null}
+      </div>
     </article>
   );
 }
