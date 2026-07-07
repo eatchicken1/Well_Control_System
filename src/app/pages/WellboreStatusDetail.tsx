@@ -1,7 +1,7 @@
 import { Activity, ArrowLeft, CircleDot, Database, Flame, Gauge, RadioTower, ShieldAlert, TrendingUp } from 'lucide-react';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { WellSchematic } from '../components/WellSchematic';
+import WellboreHifiFigure from '@/components/WellboreHifiFigure';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
 
@@ -84,7 +84,6 @@ export default function WellboreStatusDetail() {
   const delay = dataDelaySeconds(dataSourceState.lastRecordAt || selectedWellView.currentSampleTime || runtime?.lastRecordAt || null);
   const baselineReady = !baselineInfo.isColdStart && baselineInfo.qualityScore >= 60;
   const wellDepth = selectedWellView.latestWellDepth ?? data.wellDepth ?? well.depth;
-  const bitDepth = selectedWellView.latestBitDepth ?? data.bitDepth;
   const openHoleLength = Math.max(0, Math.round(wellDepth - CASING_SHOE_DEPTH));
   const stateDescription = abnormal ? meta.description : '关键参数处于基线范围内，未触发预警证据。';
 
@@ -155,28 +154,7 @@ export default function WellboreStatusDetail() {
 
       <div className="wellbore-detail-grid">
         <section className="wellbore-detail-main">
-          <WellSchematic
-            mode="detail"
-            wellDepth={wellDepth}
-            bitDepth={bitDepth}
-            flowIn={data.flowIn}
-            flowOut={data.flowOut}
-            spm={data.spm}
-            casingPressure={data.casingPressure}
-            drillPipePressure={data.spp}
-            pitGain={data.pitGain}
-            returnResponse={data.returnResponse}
-            totalGas={data.totalGas}
-            backendLevel={level}
-            activeSignals={detection.activeSignals}
-            pumpState={data.pumpState}
-            condition={data.condition}
-            cycleInfo={cycle}
-            hasSamples={hasSamples}
-            isRecovering={isRecovering}
-            isStopped={selectedWellManuallyStopped}
-            surface="light"
-          />
+          <WellboreHifiFigure backendLevel={level} className="wellbore-detail-figure" />
         </section>
 
         <aside className="wellbore-detail-side">
