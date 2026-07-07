@@ -3030,7 +3030,7 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(340px, 430px));
   gap: 12px;
   justify-content: start;
-  align-items: start;
+  align-items: stretch;
 }
 
 .multiwell-card {
@@ -3367,6 +3367,9 @@ body {
 }
 
 .multiwell-card {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
   border-top-width: 1px;
   border-radius: 12px;
   background:
@@ -3475,11 +3478,30 @@ body {
   font-weight: 800;
 }
 
-.multiwell-card-metric[data-kind='time'] strong {
+.multiwell-card-time-pair {
+  display: grid;
+  grid-column: span 2;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
+}
+
+.multiwell-time-item {
+  min-width: 0;
+  border-right: 1px solid rgba(226, 232, 240, 0.9);
+  padding-right: 6px;
+}
+
+.multiwell-time-item:last-child {
+  border-right: 0;
+  padding-right: 0;
+}
+
+.multiwell-time-item strong {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9.5px;
+  font-size: 8.8px;
   font-weight: 800;
-  letter-spacing: -0.055em;
+  letter-spacing: -0.065em;
   line-height: 1.15;
 }
 
@@ -3512,6 +3534,13 @@ body {
   height: 13px;
 }
 
+.multiwell-card-notice span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .multiwell-card-notice[data-tone='realtime'] {
   border-color: rgba(20, 184, 166, 0.26);
   background: rgba(240, 253, 250, 0.76);
@@ -3526,6 +3555,7 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 8px;
+  min-height: 68px;
   border: 1px solid rgba(203, 213, 225, 0.86);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.72);
@@ -3582,10 +3612,15 @@ body {
 
 .multiwell-mode-field small,
 .multiwell-mode-realtime-copy {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
   color: #64748b;
   font-size: 10px;
   font-weight: 500;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .multiwell-mode-realtime-copy {

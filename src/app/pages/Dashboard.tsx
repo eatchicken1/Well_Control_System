@@ -390,8 +390,6 @@ function MonitoredWellCard({
     };
   const PrimaryActionIcon = primaryAction.Icon;
   const metricItems = [
-    { label: '最新样本', value: latestTime || '--', Icon: SlidersHorizontal, kind: 'time' },
-    { label: '监测起点', value: monitorStartText, Icon: Clock3, kind: 'time' },
     { label: '井深', value: formatNumber(wellDepth, ' m'), Icon: Activity, emphasis: true },
     { label: '钻头位置', value: formatNumber(bitDepth, ' m'), Icon: MapPin },
     { label: '层位', value: latestLayer, Icon: Layers3 },
@@ -440,8 +438,24 @@ function MonitoredWellCard({
       </div>
 
       <div className="multiwell-card-metrics">
-        {metricItems.map(({ label, value, Icon, emphasis, tone, kind }) => (
-          <div key={label} className="multiwell-card-metric" data-emphasis={emphasis ? 'true' : undefined} data-tone={tone} data-kind={kind}>
+        <div className="multiwell-card-metric multiwell-card-time-pair">
+          <div className="multiwell-time-item">
+            <div className="multiwell-card-metric-head">
+              <span>最新样本</span>
+              <SlidersHorizontal className="h-4 w-4" />
+            </div>
+            <strong>{latestTime || '--'}</strong>
+          </div>
+          <div className="multiwell-time-item">
+            <div className="multiwell-card-metric-head">
+              <span>监测起点</span>
+              <Clock3 className="h-4 w-4" />
+            </div>
+            <strong>{monitorStartText}</strong>
+          </div>
+        </div>
+        {metricItems.map(({ label, value, Icon, emphasis, tone }) => (
+          <div key={label} className="multiwell-card-metric" data-emphasis={emphasis ? 'true' : undefined} data-tone={tone}>
             <div className="multiwell-card-metric-head">
               <span>{label}</span>
               <Icon className="h-4 w-4" />
