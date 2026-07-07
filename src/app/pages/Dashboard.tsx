@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Pause,
   Play,
   PlayCircle,
   RadioTower,
@@ -12,7 +13,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { useWellControl, type Alert, type BackendLevel, type WellInfo, type WellRuntimeState } from '../context/WellControlContext';
+import { useWellControl, type Alert, type BackendLevel, type MonitoringMode, type WellInfo, type WellRuntimeState } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
 
 function safeBackendLevel(value: unknown): BackendLevel {
@@ -30,6 +31,12 @@ function levelTone(level: unknown) {
 function levelLabel(level: unknown) {
   const safeLevel = safeBackendLevel(level);
   return `L${safeLevel} ${BACKEND_LEVEL_META[safeLevel].shortLabel}`;
+}
+
+function toDatetimeLocalValue(value?: string | null) {
+  if (!value) return '';
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6] || '00'}` : '';
 }
 
 function statusLabel(runtime?: WellRuntimeState) {
@@ -259,8 +266,11 @@ function MonitoredWellCard({
     openRealtimeWell,
     startWellMonitoring,
     stopWellMonitoring,
+    pauseWellMonitoring,
     resumeWellMonitoring,
     removeMonitoredWell,
+    updateWellMonitoringMode,
+    updateWellReplayStartTime,
     isWellManuallyStopped,
   } = useWellControl();
   const [now, setNow] = useState(() => Date.now());
@@ -281,7 +291,12 @@ function MonitoredWellCard({
   const isRunning = Boolean(runtime?.isRunning || (isActiveWell && runtime?.status === 'connected'));
   const isConnecting = runtime?.status === 'connecting';
   const isStopped = isWellManuallyStopped(well.wellId);
+  const monitoringMode = runtime?.monitoringMode || 'realtime';
+  const replayStartValue = toDatetimeLocalValue(runtime?.selectedReplayStartTime || runtime?.startedSampleTime || well.discoveryTime || well.startTime);
+  const replayMin = toDatetimeLocalValue(well.sampleStartTime || well.startTime);
+  const replayMax = toDatetimeLocalValue(well.sampleEndTime || well.endTime);
   const canStop = isRunning || isConnecting;
+  const canPause = isRunning || isConnecting;
   const canStart = !isRunning && !isConnecting;
   const canRemove = !isRunning && !isConnecting;
   const hasStarted = Boolean(runtime?.monitoringStartedAt || runtime?.startedSampleTime || runtime?.recordCount);
@@ -319,7 +334,13 @@ function MonitoredWellCard({
   const stopButtonText = isStopped ? '监测已停' : canStop ? '停止监测' : '无监测可停';
   const stopButtonTitle = isStopped ? '当前井已停止监测并保留历史点位' : canStop ? '停止当前井监测并记录会话状态' : '当前井未接入监测流';
   const stopButtonLabel = isStopped ? `${well.wellName}已停止监测` : `${well.wellName}${canStop ? '停止监测' : '未接入监测流'}`;
-  const startButtonText = isConnecting ? '接入中' : isRunning ? '监测中' : hasStarted ? '重新监测' : '自动监测';
+  const startButtonText = isConnecting
+    ? '接入中'
+    : isRunning
+      ? '监测中'
+      : monitoringMode === 'historyReplay'
+        ? (hasStarted ? '重新回放' : '开始回放')
+        : (hasStarted ? '重新监测' : '实时监测');
   const startButtonTitle = isConnecting
     ? '正在接入检测流，请等待连接完成'
     : isRunning
@@ -330,11 +351,12 @@ function MonitoredWellCard({
   const startButtonLabel = `${well.wellName}${isConnecting ? '正在接入' : isRunning ? '已在监测中' : hasStarted ? '重新监测' : '开始自动监测'}`;
   const sampleCountText = sampleCountLabel(runtime, well.recordCount || 0);
   const resumeButtonText = isStopped ? '继续监测' : '继续';
-  const showRestartButton = !isRunning && !isConnecting && hasStarted;
-  const showResumeButton = !isRunning && !isConnecting && hasStarted;
-  const showAutoStartButton = !isRunning && !isConnecting && !hasStarted;
+  const showRestartButton = !isStopped && !isRunning && !isConnecting && hasStarted;
+  const showResumeButton = !isStopped && !isRunning && !isConnecting && hasStarted;
+  const showAutoStartButton = !isRunning && !isConnecting && (!hasStarted || isStopped);
+  const showPauseButton = canPause;
   const showStopButton = canStop;
-  const actionCount = (showResumeButton ? 1 : 0) + (showRestartButton ? 1 : 0) + (showAutoStartButton ? 1 : 0) + (showStopButton ? 1 : 0) + 1;
+  const actionCount = (showResumeButton ? 1 : 0) + (showRestartButton ? 1 : 0) + (showAutoStartButton ? 1 : 0) + (showPauseButton ? 1 : 0) + (showStopButton ? 1 : 0) + 1;
   const monitorStartText = runtime?.startedSampleTime || '--';
   const durationAnchor = isRunning ? null : (runtime?.updatedAt || null);
 
@@ -345,6 +367,10 @@ function MonitoredWellCard({
 
   const startOrResume = () => {
     startWellMonitoring(well.wellId);
+  };
+
+  const changeMode = (value: string) => {
+    updateWellMonitoringMode(well.wellId, value as MonitoringMode);
   };
 
   return (
@@ -413,6 +439,39 @@ function MonitoredWellCard({
         <span className="truncate">{hintText}</span>
       </div>
 
+      <div className="grid gap-2 rounded-2xl border border-slate-200/70 bg-white/65 p-2 text-xs dark:border-slate-700/70 dark:bg-slate-900/45">
+        <label className="grid gap-1">
+          <span className="ops-muted">监测模式</span>
+          <select
+            value={monitoringMode}
+            disabled={isRunning || isConnecting}
+            onChange={(event) => changeMode(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <option value="realtime">实时监测（最新点）</option>
+            <option value="historyReplay">历史回放（可选时间）</option>
+          </select>
+        </label>
+        {monitoringMode === 'historyReplay' ? (
+          <label className="grid gap-1">
+            <span className="ops-muted">回放起点</span>
+            <input
+              type="datetime-local"
+              step="1"
+              min={replayMin || undefined}
+              max={replayMax || undefined}
+              value={replayStartValue}
+              disabled={isRunning || isConnecting}
+              onChange={(event) => updateWellReplayStartTime(well.wellId, event.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+            <span className="ops-muted">范围：{well.startTime || '--'} 至 {well.endTime || '--'}</span>
+          </label>
+        ) : (
+          <div className="ops-muted">实时监测不选择历史时间；启动时从数据库最新点接入，恢复时补齐暂停期间的新点。</div>
+        )}
+      </div>
+
       <div className="multiwell-card-toolbar" data-count={actionCount}>
         {showResumeButton ? (
           <button
@@ -438,6 +497,19 @@ function MonitoredWellCard({
           >
             <PlayCircle className="h-4 w-4" />
             {startButtonText}
+          </button>
+        ) : null}
+        {showPauseButton ? (
+          <button
+            type="button"
+            onClick={() => pauseWellMonitoring(well.wellId)}
+            disabled={!canPause}
+            className="ops-button-secondary multiwell-card-action"
+            title="暂停当前监测，保留游标和曲线"
+            aria-label={`${well.wellName}暂停监测`}
+          >
+            <Pause className="h-4 w-4" />
+            暂停
           </button>
         ) : null}
         {showStopButton ? (
