@@ -3364,6 +3364,254 @@ body {
   flex: 0 0 auto;
 }
 
+.multiwell-card {
+  border-top-width: 1px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 58% 23%, rgba(20, 184, 166, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.995), rgba(248, 250, 252, 0.98));
+  padding: 22px 24px 24px;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.10);
+}
+
+.multiwell-card-top {
+  grid-template-columns: minmax(0, 1fr) auto 44px;
+  gap: 16px;
+}
+
+.multiwell-card-led {
+  position: relative;
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.14), inset 0 0 0 2px rgba(255, 255, 255, 0.78);
+}
+
+.multiwell-card h2 {
+  font-size: 26px;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.multiwell-card-status {
+  gap: 10px;
+}
+
+.multiwell-card .dashboard-chip {
+  min-height: 34px;
+  padding: 0 15px;
+  border-radius: 18px;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.multiwell-icon-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.multiwell-card-metrics {
+  margin-top: 26px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.multiwell-card-metric,
+.multiwell-card-metric-wide {
+  grid-column: auto;
+}
+
+.multiwell-card-metric {
+  min-height: 104px;
+  border-color: rgba(203, 213, 225, 0.86);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 17px 16px 15px;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.035);
+}
+
+.multiwell-card-metric[data-emphasis='true'] {
+  border-color: rgba(20, 184, 166, 0.28);
+  background:
+    radial-gradient(circle at 78% 18%, rgba(20, 184, 166, 0.12), transparent 34%),
+    rgba(248, 255, 252, 0.94);
+}
+
+.multiwell-card-metric-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #64748b;
+}
+
+.multiwell-card-metric-head span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 15px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiwell-card-metric-head svg {
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+.multiwell-card-metric strong {
+  margin-top: 22px;
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.multiwell-card-metric[data-emphasis='true'] strong {
+  color: #0f766e;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+
+.multiwell-card-metric[data-tone='normal'] strong { color: #0f172a; }
+.multiwell-card-metric[data-tone='warning'] strong { color: #b45309; }
+.multiwell-card-metric[data-tone='critical'] strong { color: #b91c1c; }
+
+.multiwell-card-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  border: 1px solid rgba(147, 197, 253, 0.8);
+  border-radius: 10px;
+  background: rgba(239, 246, 255, 0.72);
+  padding: 13px 16px;
+  color: #475569;
+  font-size: 14px;
+}
+
+.multiwell-card-notice svg {
+  color: #2563eb;
+}
+
+.multiwell-card-notice[data-tone='realtime'] {
+  border-color: rgba(20, 184, 166, 0.26);
+  background: rgba(240, 253, 250, 0.76);
+}
+
+.multiwell-card-notice[data-tone='realtime'] svg {
+  color: #0f766e;
+}
+
+.multiwell-mode-panel {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  border: 1px solid rgba(203, 213, 225, 0.86);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 16px 18px;
+}
+
+.multiwell-mode-field {
+  display: grid;
+  gap: 8px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.multiwell-mode-control {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(203, 213, 225, 0.96);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0 14px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 600;
+  outline: none;
+}
+
+.multiwell-date-control {
+  position: relative;
+}
+
+.multiwell-date-control .multiwell-mode-control {
+  padding-right: 42px;
+}
+
+.multiwell-date-control svg {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  color: #475569;
+  pointer-events: none;
+}
+
+.multiwell-mode-field small,
+.multiwell-mode-realtime-copy {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.multiwell-card-toolbar {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.multiwell-card-action {
+  min-height: 56px;
+  border-radius: 12px;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.multiwell-card-action-primary {
+  min-height: 56px;
+  background: linear-gradient(135deg, #15906f, #0f766e);
+  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.22);
+}
+
+.multiwell-card-run-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.multiwell-card-run-actions .multiwell-card-action {
+  min-height: 38px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.dark .multiwell-card {
+  background:
+    radial-gradient(circle at 58% 23%, rgba(20, 184, 166, 0.12), transparent 24%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(8, 13, 24, 0.96));
+}
+
+.dark .multiwell-card-metric,
+.dark .multiwell-mode-panel {
+  border-color: rgba(51, 65, 85, 0.9);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.dark .multiwell-mode-control {
+  border-color: rgba(51, 65, 85, 0.95);
+  background: rgba(15, 23, 42, 0.94);
+  color: #e2e8f0;
+}
+
 .multiwell-event-panel {
   display: flex;
   min-height: 0;

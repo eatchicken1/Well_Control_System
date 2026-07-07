@@ -4,12 +4,19 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  Bell,
+  CalendarDays,
   CheckCircle2,
+  Clock3,
+  Database,
+  Layers3,
+  MapPin,
   Pause,
   Play,
   PlayCircle,
   RadioTower,
   Search,
+  SlidersHorizontal,
   Square,
   X,
 } from 'lucide-react';
@@ -356,9 +363,42 @@ function MonitoredWellCard({
   const showAutoStartButton = !isRunning && !isConnecting && (!hasStarted || isStopped);
   const showPauseButton = canPause;
   const showStopButton = canStop;
-  const actionCount = (showResumeButton ? 1 : 0) + (showRestartButton ? 1 : 0) + (showAutoStartButton ? 1 : 0) + (showPauseButton ? 1 : 0) + (showStopButton ? 1 : 0) + 1;
   const monitorStartText = runtime?.startedSampleTime || '--';
   const durationAnchor = isRunning ? null : (runtime?.updatedAt || null);
+  const isHistoryMode = monitoringMode === 'historyReplay';
+  const replayRangeText = (well.sampleStartTime || well.startTime || '--') + ' 至 ' + (well.sampleEndTime || well.endTime || '--');
+  const modeNotice = isHistoryMode
+    ? '已切换为历史回放，可选择历史时间'
+    : '实时监测将从数据库最新点接入，恢复时补齐暂停期间的新点';
+  const modeNoticeTone = isHistoryMode ? 'history' : 'realtime';
+  const primaryAction = showResumeButton
+    ? {
+      text: resumeButtonText,
+      Icon: Play,
+      onClick: () => resumeWellMonitoring(well.wellId),
+      disabled: !hasStarted,
+      title: hasStarted ? '按上次起点继续监测' : '当前井还没有可继续的监测起点',
+      ariaLabel: well.wellName + (hasStarted ? '按上次起点继续监测' : '没有可继续的监测起点'),
+    }
+    : {
+      text: startButtonText,
+      Icon: PlayCircle,
+      onClick: () => startWellMonitoring(well.wellId),
+      disabled: !canStart || isRunning || isConnecting,
+      title: startButtonTitle,
+      ariaLabel: startButtonLabel,
+    };
+  const PrimaryActionIcon = primaryAction.Icon;
+  const metricItems = [
+    { label: '最新样本', value: latestTime || '--', Icon: SlidersHorizontal },
+    { label: '监测起点', value: monitorStartText, Icon: Clock3 },
+    { label: '井深', value: formatNumber(wellDepth, ' m'), Icon: Activity, emphasis: true },
+    { label: '钻头位置', value: formatNumber(bitDepth, ' m'), Icon: MapPin },
+    { label: '层位', value: latestLayer, Icon: Layers3 },
+    { label: dataVolumeLabel(runtime), value: sampleCountText, Icon: Database, emphasis: true },
+    { label: '监测时长', value: formatDuration(runtime?.monitoringStartedAt, isRunning, now, durationAnchor), Icon: Clock3 },
+    { label: '报警状态', value: warningText, Icon: Bell, tone: level >= 4 ? 'critical' : level >= 2 ? 'warning' : 'normal' },
+  ];
 
   const enterRealtime = () => {
     openRealtimeWell(well.wellId);
@@ -378,7 +418,7 @@ function MonitoredWellCard({
       <div className="multiwell-card-top">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <span className={`ops-led h-2.5 w-2.5 shrink-0 rounded-full ${runtimeDot(runtime)}`} />
+            <span className={`multiwell-card-led ${runtimeDot(runtime)}`} />
             <h2 className="truncate text-lg font-semibold text-slate-950 dark:text-slate-100">{well.wellName}</h2>
           </div>
           <div className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{well.wellId} · {wellLayer(well)}</div>
@@ -400,38 +440,56 @@ function MonitoredWellCard({
       </div>
 
       <div className="multiwell-card-metrics">
-        <div className="multiwell-card-metric multiwell-card-metric-wide">
-          <span>最新样本</span>
-          <strong>{latestTime || '--'}</strong>
-        </div>
-        <div className="multiwell-card-metric">
-          <span>监测起点</span>
-          <strong>{monitorStartText}</strong>
-        </div>
-        <div className="multiwell-card-metric">
-          <span>井深</span>
-          <strong>{formatNumber(wellDepth, ' m')}</strong>
-        </div>
-        <div className="multiwell-card-metric">
-          <span>钻头位置</span>
-          <strong>{formatNumber(bitDepth, ' m')}</strong>
-        </div>
-        <div className="multiwell-card-metric">
-          <span>层位</span>
-          <strong>{latestLayer}</strong>
-        </div>
-        <div className="multiwell-card-metric">
-          <span>{dataVolumeLabel(runtime)}</span>
-          <strong>{sampleCountText}</strong>
-        </div>
-        <div className="multiwell-card-metric">
-          <span>监测时长</span>
-          <strong>{formatDuration(runtime?.monitoringStartedAt, isRunning, now, durationAnchor)}</strong>
-        </div>
-        <div className="multiwell-card-metric">
-          <span>报警状态</span>
-          <strong className={level >= 4 ? 'text-red-700' : level >= 2 ? 'text-amber-700' : 'text-emerald-700'}>{warningText}</strong>
-        </div>
+        {metricItems.map(({ label, value, Icon, emphasis, tone }) => (
+          <div key={label} className="multiwell-card-metric" data-emphasis={emphasis ? 'true' : undefined} data-tone={tone}>
+            <div className="multiwell-card-metric-head">
+              <span>{label}</span>
+              <Icon className="h-4 w-4" />
+            </div>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="multiwell-card-notice" data-tone={modeNoticeTone}>
+        <CheckCircle2 className="h-4 w-4" />
+        <span>{modeNotice}</span>
+      </div>
+
+      <div className="multiwell-mode-panel">
+        <label className="multiwell-mode-field">
+          <span>监测模式</span>
+          <select
+            value={monitoringMode}
+            disabled={isRunning || isConnecting}
+            onChange={(event) => changeMode(event.target.value)}
+            className="multiwell-mode-control"
+          >
+            <option value="realtime">实时监测（最新点）</option>
+            <option value="historyReplay">历史回放（可选时间）</option>
+          </select>
+        </label>
+        {isHistoryMode ? (
+          <label className="multiwell-mode-field">
+            <span>回放起点</span>
+            <div className="multiwell-date-control">
+              <input
+                type="datetime-local"
+                step="1"
+                min={replayMin || undefined}
+                max={replayMax || undefined}
+                value={replayStartValue}
+                disabled={isRunning || isConnecting}
+                onChange={(event) => updateWellReplayStartTime(well.wellId, event.target.value)}
+                className="multiwell-mode-control"
+              />
+              <CalendarDays className="h-4 w-4" />
+            </div>
+            <small>范围：{replayRangeText}</small>
+          </label>
+        ) : (
+          <div className="multiwell-mode-realtime-copy">实时监测不选择历史时间；启动后从最新点接入。</div>
+        )}
       </div>
 
       <div className={`multiwell-card-progress ${progressTone}`}>
@@ -439,110 +497,69 @@ function MonitoredWellCard({
         <span className="truncate">{hintText}</span>
       </div>
 
-      <div className="grid gap-2 rounded-2xl border border-slate-200/70 bg-white/65 p-2 text-xs dark:border-slate-700/70 dark:bg-slate-900/45">
-        <label className="grid gap-1">
-          <span className="ops-muted">监测模式</span>
-          <select
-            value={monitoringMode}
-            disabled={isRunning || isConnecting}
-            onChange={(event) => changeMode(event.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          >
-            <option value="realtime">实时监测（最新点）</option>
-            <option value="historyReplay">历史回放（可选时间）</option>
-          </select>
-        </label>
-        {monitoringMode === 'historyReplay' ? (
-          <label className="grid gap-1">
-            <span className="ops-muted">回放起点</span>
-            <input
-              type="datetime-local"
-              step="1"
-              min={replayMin || undefined}
-              max={replayMax || undefined}
-              value={replayStartValue}
-              disabled={isRunning || isConnecting}
-              onChange={(event) => updateWellReplayStartTime(well.wellId, event.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            />
-            <span className="ops-muted">范围：{well.startTime || '--'} 至 {well.endTime || '--'}</span>
-          </label>
-        ) : (
-          <div className="ops-muted">实时监测不选择历史时间；启动时从数据库最新点接入，恢复时补齐暂停期间的新点。</div>
-        )}
-      </div>
-
-      <div className="multiwell-card-toolbar" data-count={actionCount}>
-        {showResumeButton ? (
+      <div className="multiwell-card-toolbar">
+        {(showResumeButton || showAutoStartButton || isRunning || isConnecting) ? (
           <button
             type="button"
-            onClick={() => resumeWellMonitoring(well.wellId)}
-            disabled={!hasStarted}
+            onClick={primaryAction.onClick}
+            disabled={primaryAction.disabled}
             className="ops-button-primary multiwell-card-action multiwell-card-action-primary"
-            title={hasStarted ? '按上次起点继续监测' : '当前井还没有可继续的监测起点'}
-            aria-label={`${well.wellName}${hasStarted ? '按上次起点继续监测' : '没有可继续的监测起点'}`}
+            title={primaryAction.title}
+            aria-label={primaryAction.ariaLabel}
           >
-            <Play className="h-4 w-4" />
-            {resumeButtonText}
+            <PrimaryActionIcon className="h-5 w-5" />
+            {primaryAction.text}
           </button>
         ) : null}
-        {showAutoStartButton ? (
-          <button
-            type="button"
-            onClick={startOrResume}
-            disabled={!canStart}
-            className="ops-button-primary multiwell-card-action multiwell-card-action-primary"
-            title={startButtonTitle}
-            aria-label={startButtonLabel}
-          >
-            <PlayCircle className="h-4 w-4" />
-            {startButtonText}
-          </button>
-        ) : null}
-        {showPauseButton ? (
-          <button
-            type="button"
-            onClick={() => pauseWellMonitoring(well.wellId)}
-            disabled={!canPause}
-            className="ops-button-secondary multiwell-card-action"
-            title="暂停当前监测，保留游标和曲线"
-            aria-label={`${well.wellName}暂停监测`}
-          >
-            <Pause className="h-4 w-4" />
-            暂停
-          </button>
-        ) : null}
-        {showStopButton ? (
-          <button
-            type="button"
-            onClick={() => stopWellMonitoring(well.wellId)}
-            disabled={!canStop}
-            className={`multiwell-card-action multiwell-stop-action ${canStop ? 'multiwell-stop-action-live' : ''}`}
-            title={stopButtonTitle}
-            aria-label={stopButtonLabel}
-          >
-            <Square className="h-4 w-4" />
-            {stopButtonText}
-          </button>
-        ) : null}
-        {showRestartButton && (
-          <button
-            type="button"
-            onClick={startOrResume}
-            disabled={!canStart}
-            className="ops-button-secondary multiwell-card-action"
-            title="从新的自动起点重新建立监测会话"
-            aria-label={`${well.wellName}重新监测`}
-          >
-            <PlayCircle className="h-4 w-4" />
-            重新监测
-          </button>
-        )}
         <button type="button" onClick={enterRealtime} className="ops-button-secondary multiwell-card-action" aria-label={`进入 ${well.wellName} 实时监测`}>
-          <ArrowRight className="h-4 w-4" />
+          <ArrowRight className="h-5 w-5" />
           实时监测
         </button>
       </div>
+
+      {(showPauseButton || showStopButton || showRestartButton) ? (
+        <div className="multiwell-card-run-actions">
+          {showPauseButton ? (
+            <button
+              type="button"
+              onClick={() => pauseWellMonitoring(well.wellId)}
+              disabled={!canPause}
+              className="ops-button-secondary multiwell-card-action"
+              title="暂停当前监测，保留游标和曲线"
+              aria-label={`${well.wellName}暂停监测`}
+            >
+              <Pause className="h-4 w-4" />
+              暂停
+            </button>
+          ) : null}
+          {showStopButton ? (
+            <button
+              type="button"
+              onClick={() => stopWellMonitoring(well.wellId)}
+              disabled={!canStop}
+              className={`multiwell-card-action multiwell-stop-action ${canStop ? 'multiwell-stop-action-live' : ''}`}
+              title={stopButtonTitle}
+              aria-label={stopButtonLabel}
+            >
+              <Square className="h-4 w-4" />
+              {stopButtonText}
+            </button>
+          ) : null}
+          {showRestartButton ? (
+            <button
+              type="button"
+              onClick={startOrResume}
+              disabled={!canStart}
+              className="ops-button-secondary multiwell-card-action"
+              title="从新的自动起点重新建立监测会话"
+              aria-label={`${well.wellName}重新监测`}
+            >
+              <PlayCircle className="h-4 w-4" />
+              重新监测
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   );
 }
