@@ -3027,8 +3027,8 @@ body {
 
 .multiwell-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 12px;
 }
 
 .multiwell-card {
@@ -3366,17 +3366,17 @@ body {
 
 .multiwell-card {
   border-top-width: 1px;
-  border-radius: 18px;
+  border-radius: 14px;
   background:
     radial-gradient(circle at 58% 23%, rgba(20, 184, 166, 0.08), transparent 24%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.995), rgba(248, 250, 252, 0.98));
-  padding: 22px 24px 24px;
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.10);
+  padding: 17px 18px 18px;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
 }
 
 .multiwell-card-top {
-  grid-template-columns: minmax(0, 1fr) auto 44px;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto 36px;
+  gap: 12px;
 }
 
 .multiwell-card-led {
@@ -3390,7 +3390,7 @@ body {
 }
 
 .multiwell-card h2 {
-  font-size: 26px;
+  font-size: 22px;
   line-height: 1.1;
   letter-spacing: -0.03em;
 }
@@ -3400,24 +3400,24 @@ body {
 }
 
 .multiwell-card .dashboard-chip {
-  min-height: 34px;
-  padding: 0 15px;
-  border-radius: 18px;
-  font-size: 14px;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  font-size: 12px;
   font-weight: 700;
   box-shadow: none;
 }
 
 .multiwell-icon-button {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
 }
 
 .multiwell-card-metrics {
-  margin-top: 26px;
+  margin-top: 18px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px 18px;
+  gap: 10px 12px;
 }
 
 .multiwell-card-metric,
@@ -3426,12 +3426,12 @@ body {
 }
 
 .multiwell-card-metric {
-  min-height: 104px;
+  min-height: 76px;
   border-color: rgba(203, 213, 225, 0.86);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.92);
-  padding: 17px 16px 15px;
-  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.035);
+  padding: 11px 12px 10px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.03);
 }
 
 .multiwell-card-metric[data-emphasis='true'] {
@@ -3445,7 +3445,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   color: #64748b;
 }
 
@@ -3454,7 +3454,7 @@ body {
   min-width: 0;
   overflow: hidden;
   color: #64748b;
-  font-size: 15px;
+  font-size: 12px;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3466,14 +3466,14 @@ body {
 }
 
 .multiwell-card-metric strong {
-  margin-top: 22px;
-  font-size: 19px;
+  margin-top: 14px;
+  font-size: 16px;
   font-weight: 800;
 }
 
 .multiwell-card-metric[data-emphasis='true'] strong {
   color: #0f766e;
-  font-size: 28px;
+  font-size: 24px;
   letter-spacing: -0.03em;
 }
 
@@ -3484,14 +3484,14 @@ body {
 .multiwell-card-notice {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 20px;
+  gap: 9px;
+  margin-top: 12px;
   border: 1px solid rgba(147, 197, 253, 0.8);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(239, 246, 255, 0.72);
-  padding: 13px 16px;
+  padding: 9px 12px;
   color: #475569;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .multiwell-card-notice svg {
@@ -3509,31 +3509,32 @@ body {
 
 .multiwell-mode-panel {
   display: grid;
-  gap: 16px;
-  margin-top: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 10px;
   border: 1px solid rgba(203, 213, 225, 0.86);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.72);
-  padding: 16px 18px;
+  padding: 12px 14px;
 }
 
 .multiwell-mode-field {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   color: #0f172a;
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .multiwell-mode-control {
   width: 100%;
-  min-height: 42px;
+  min-height: 36px;
   border: 1px solid rgba(203, 213, 225, 0.96);
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.96);
-  padding: 0 14px;
+  padding: 0 11px;
   color: #0f172a;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   outline: none;
 }
@@ -3558,34 +3559,45 @@ body {
 .multiwell-mode-field small,
 .multiwell-mode-realtime-copy {
   color: #64748b;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
+}
+
+.multiwell-mode-realtime-copy {
+  align-self: end;
+  padding: 0 2px 8px;
+}
+
+.multiwell-card-progress {
+  margin-top: 9px;
+  padding: 6px 9px;
+  font-size: 11px;
 }
 
 .multiwell-card-toolbar {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 18px;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .multiwell-card-action {
-  min-height: 56px;
-  border-radius: 12px;
-  font-size: 18px;
+  min-height: 44px;
+  border-radius: 9px;
+  font-size: 15px;
   font-weight: 800;
 }
 
 .multiwell-card-action-primary {
-  min-height: 56px;
+  min-height: 44px;
   background: linear-gradient(135deg, #15906f, #0f766e);
-  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.22);
+  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.18);
 }
 
 .multiwell-card-run-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .multiwell-card-run-actions .multiwell-card-action {
@@ -3931,6 +3943,14 @@ body {
 
   .multiwell-card-metric-wide {
     grid-column: auto;
+  }
+
+  .multiwell-mode-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .multiwell-mode-realtime-copy {
+    padding-bottom: 0;
   }
 }
 
