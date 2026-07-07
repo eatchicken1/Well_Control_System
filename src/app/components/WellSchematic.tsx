@@ -1,7 +1,11 @@
 import type { BackendLevel, CycleInfo } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
+import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
 
 interface WellSchematicProps {
+  mode?: 'thumbnail' | 'detail';
+  wellDepth?: number;
+  bitDepth?: number;
   flowIn: number;
   flowOut: number;
   spm?: number;
@@ -29,6 +33,8 @@ interface WellSchematicProps {
 }
 
 type WellMetric = NonNullable<WellSchematicProps['metrics']>[number];
+
+const DEFAULT_CASING_SHOE_DEPTH = 3200;
 
 function metricTone(isLight: boolean, state: 'normal' | 'warning' | 'critical' = 'normal') {
   if (state === 'critical') return isLight ? 'border-red-200 bg-red-50 text-red-700' : 'border-red-500/40 bg-red-500/12 text-red-200';
@@ -77,6 +83,7 @@ function deriveWellStatus({
   cycleInfo?: CycleInfo;
   hasSamples?: boolean;
   isRecovering?: boolean;
+  isStopped?: boolean;
   flowIn: number;
   flowOut: number;
   spm: number;
@@ -140,7 +147,7 @@ function deriveWellStatus({
   }
   if (backendLevel >= 2) {
     return {
-      label: backendLevel >= 3 ? '异常观察' : '溢流预警',
+      label: backendLevel >= 3 ? '疑似溢流' : '溢流预警',
       copy: activeCopy(conditionText || cycleLabel || '已有异常证据，保持实时跟踪'),
     };
   }
@@ -265,6 +272,9 @@ function SvgMetricCallout({
 }
 
 export function WellSchematic({
+  mode = 'thumbnail',
+  wellDepth = 4200,
+  bitDepth = 3860,
   flowIn,
   flowOut,
   spm = 0,
@@ -294,6 +304,10 @@ export function WellSchematic({
   const muted = isLight ? '#64748b' : '#94a3b8';
   const cement = isLight ? '#cbd5e1' : '#475569';
   const bore = isLight ? '#f8fafc' : '#0f172a';
+  const bopFill = isLight
+    ? (backendLevel >= 2 ? visual.accent : '#e2e8f0')
+    : (backendLevel >= 2 ? visual.accent : '#334155');
+  const bopStroke = backendLevel >= 2 ? '#991b1b' : line;
   const readouts = metrics || [
     { label: '出口流量响应', value: formatFinite(returnResponse, 1), unit: '%', state: backendLevel >= 4 ? 'critical' as const : backendLevel >= 2 ? 'warning' as const : 'normal' as const },
     { label: '总池体积变化', value: formatFinite(pitGain, 2), unit: 'm3', state: backendLevel >= 4 ? 'critical' as const : backendLevel >= 2 ? 'warning' as const : 'normal' as const },
@@ -302,33 +316,66 @@ export function WellSchematic({
   const sppMetric = readouts.find((metric) => metric.label.includes('立压'));
   const pitMetric = readouts.find((metric) => metric.label.includes('总池'));
   const gasMetric = readouts.find((metric) => metric.label.includes('全烃'));
-  const topReadouts = compact ? [] : readouts.slice(0, 2);
-  const bottomReadouts = compact ? [] : readouts.slice(2, 6);
+  const topReadouts = compact || mode === 'detail' ? [] : readouts.slice(0, 2);
+  const bottomReadouts = compact || mode === 'detail' ? [] : readouts.slice(2, 6);
   const flowInText = formatFiniteWithUnit(flowIn, 1, 'L/s');
   const flowOutText = formatFiniteWithUnit(flowOut, 1, 'L/s');
-  const status = deriveWellStatus({
+  const wellboreState = deriveWellboreState({
     backendLevel,
     pumpState,
     condition,
-    cycleInfo,
+    cycleState: cycleInfo?.state,
     hasSamples,
     isRecovering,
     isStopped,
     flowIn,
     flowOut,
     spm,
-    circulationActive,
   });
+  const status = getWellboreStateMeta(wellboreState);
   const statusLabel = status.label;
-  const statusCopy = status.copy;
+  const isDetail = mode === 'detail';
+  const conditionLabel = formatWellboreConditionLabel(condition, cycleInfo?.stateLabel || status.label);
+  const statusCopy = isDetail ? status.description : (conditionLabel || status.description);
+  const safeWellDepth = Math.max(wellDepth || 4200, 4200);
+  const safeBitDepth = Math.min(Math.max(bitDepth || safeWellDepth - 5, 0), safeWellDepth);
+  const openHoleLength = Math.max(0, Math.round(safeWellDepth - DEFAULT_CASING_SHOE_DEPTH));
+  const currentFormation = safeWellDepth >= 5200 ? '目的层' : safeWellDepth >= 3200 ? '砂岩层' : '泥岩层';
+  const depthToY = (depth: number) => 88 + (Math.min(Math.max(depth, 0), safeWellDepth) / safeWellDepth) * 326;
+  const bitY = depthToY(safeBitDepth);
+  const wellBottomY = depthToY(safeWellDepth);
+  const casingShoeY = depthToY(DEFAULT_CASING_SHOE_DEPTH);
+  const overlayTone = backendLevel >= 3 ? '#dc2626' : backendLevel === 2 ? '#d97706' : backendLevel === 1 ? '#f59e0b' : '#0f766e';
+  const casingDisplayBottomY = isDetail ? Math.min(Math.max(casingShoeY, 150), wellBottomY - 20) : 304;
+  const cementDisplayBottomY = isDetail ? Math.max(casingDisplayBottomY - 16, 112) : 288;
+  const openHoleStartY = casingDisplayBottomY;
+  const openHoleMiddleY = openHoleStartY + (wellBottomY - openHoleStartY) * 0.45;
+  const openHoleBottomY = isDetail ? Math.min(wellBottomY + 16, 430) : 430;
+  const drillStringBottomY = isDetail ? Math.max(bitY - 12, 112) : 373;
+  const bitTopY = isDetail ? Math.max(bitY - 12, 112) : 373;
+  const bitBodyBottomY = isDetail ? bitY : 385;
+  const bitCrownY = isDetail ? Math.min(bitY + 10, 430) : 394;
+  const flowBottomY = isDetail ? Math.max(bitY - 24, 120) : 360;
+  const returnBottomY = isDetail ? Math.max(bitY - 18, openHoleStartY + 18) : 350;
+  const returnTopY = isDetail ? Math.max(126, Math.min(casingDisplayBottomY - 18, 180)) : 126;
+  const influxEntryY = isDetail ? Math.max(Math.min(bitY - 18, 405), openHoleStartY + 20) : 358;
+  const influxLowerY = isDetail ? Math.min(influxEntryY + 20, 420) : 378;
+  const influxTailY = Math.min(influxLowerY + 28, 428);
+  const openHoleLabelY = Math.min(Math.max((openHoleStartY + wellBottomY) / 2, openHoleStartY + 20), wellBottomY - 10);
+  const cementPath = 'M127 94 H233 V' + cementDisplayBottomY + ' H217 V111 H143 V' + cementDisplayBottomY + ' H127 Z';
+  const openHolePath = 'M143 ' + openHoleStartY
+    + ' C142 ' + (openHoleStartY + 18).toFixed(1) + ' 132 ' + (openHoleMiddleY - 16).toFixed(1) + ' 136 ' + openHoleMiddleY.toFixed(1)
+    + ' C140 ' + (openHoleMiddleY + 28).toFixed(1) + ' 128 ' + (openHoleBottomY - 28).toFixed(1) + ' 130 ' + openHoleBottomY.toFixed(1)
+    + ' H230 C232 ' + (openHoleBottomY - 28).toFixed(1) + ' 220 ' + (openHoleMiddleY + 28).toFixed(1) + ' 224 ' + openHoleMiddleY.toFixed(1)
+    + ' C228 ' + (openHoleMiddleY - 16).toFixed(1) + ' 218 ' + (openHoleStartY + 18).toFixed(1) + ' 217 ' + openHoleStartY + ' Z';
 
   return (
-    <div className={`well-schematic-card ${compact ? 'well-schematic-card-compact' : ''} flex h-full min-h-[260px] flex-col overflow-hidden rounded-md border p-2.5 lg:min-h-0 ${isLight ? 'border-slate-200 bg-white text-slate-900' : 'border-slate-700 bg-slate-950 text-slate-100'}`}>
+    <div className={`well-schematic-card well-schematic-card-${mode} ${compact ? 'well-schematic-card-compact' : ''} flex h-full min-h-[260px] flex-col overflow-hidden rounded-md border p-2.5 lg:min-h-0 ${isLight ? 'border-slate-200 bg-white text-slate-900' : 'border-slate-700 bg-slate-950 text-slate-100'}`}>
       <div className="well-schematic-status-head mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <span className="well-schematic-status-dot" style={{ backgroundColor: visual.accent }} />
-            <h3 className="truncate text-base font-semibold">井筒状态</h3>
+            <h3 className="truncate text-base font-semibold">{isDetail ? '井筒状态剖面' : '井筒状态'}</h3>
           </div>
           <p className="well-schematic-status-copy mt-0.5 text-[11px] ops-muted">{statusCopy}</p>
         </div>
@@ -336,6 +383,17 @@ export function WellSchematic({
           {statusLabel}
         </div>
       </div>
+
+      {isDetail ? (
+        <div className="well-schematic-summary-strip">
+          <span>井深 <strong>{Math.round(safeWellDepth)} m</strong></span>
+          <span>钻头 <strong>{Math.round(safeBitDepth)} m</strong></span>
+          <span>套管鞋 <strong>{DEFAULT_CASING_SHOE_DEPTH} m</strong></span>
+          <span>裸眼段 <strong>{openHoleLength} m</strong></span>
+          <span>当前层位 <strong>{currentFormation}</strong></span>
+          <span>工况 <strong>{conditionLabel}</strong></span>
+        </div>
+      ) : null}
 
       {topReadouts.length > 0 && (
         <div className="well-schematic-readouts mb-2 grid grid-cols-2 gap-2">
@@ -345,7 +403,7 @@ export function WellSchematic({
 
       <div className={`well-schematic-figure min-h-0 flex-1 overflow-hidden rounded-md border ${isLight ? 'border-slate-200 bg-white' : 'border-slate-700 bg-slate-950'}`}>
         <svg
-          viewBox="0 0 360 430"
+          viewBox={isDetail ? '-80 0 520 430' : '0 0 360 430'}
           preserveAspectRatio="xMidYMid meet"
           className="h-full w-full"
           role="img"
@@ -363,27 +421,80 @@ export function WellSchematic({
             <pattern id="shaleLines" width="18" height="9" patternUnits="userSpaceOnUse">
               <path d="M0 5 Q4 2 9 5 T18 5" fill="none" stroke="#64748b" strokeWidth="0.55" opacity="0.4" />
             </pattern>
+            <pattern id="surfaceHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(62)">
+              <line x1="0" y1="0" x2="0" y2="5" stroke="#64748b" strokeWidth="0.45" opacity="0.36" />
+            </pattern>
             <filter id="influxGlow" x="-50%" y="-50%" width="200%" height="200%">
               <feGaussianBlur stdDeviation="2.2" result="blur" />
               <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
             </filter>
+            <marker id="returnArrow" markerWidth="7" markerHeight="7" refX="5.6" refY="3.5" orient="auto" markerUnits="strokeWidth">
+              <path d="M0 0 L7 3.5 L0 7 Z" fill={visual.accent} />
+            </marker>
+            <marker id="flowArrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0 0 L6 3 L0 6 Z" fill="#2563eb" />
+            </marker>
           </defs>
 
-          <rect width="360" height="430" fill={panel} />
-          <rect x="8" y="8" width="344" height="414" rx="10" fill={isLight ? '#fffdf8' : '#08111f'} stroke={compact ? 'none' : line} strokeWidth="1.2" opacity="0.96" />
-          <rect y="88" width="360" height="72" fill={isLight ? '#f1eadc' : '#29251d'} />
-          <rect y="88" width="360" height="72" fill="url(#formationDots)" />
-          <rect y="160" width="360" height="82" fill={isLight ? '#e7edf1' : '#17212d'} />
-          <rect y="160" width="360" height="82" fill="url(#shaleLines)" />
-          <rect y="242" width="360" height="88" fill={isLight ? '#eee5d5' : '#29251d'} />
-          <rect y="242" width="360" height="88" fill="url(#formationDots)" />
-          <rect y="330" width="360" height="100" fill={influxActive ? visual.soft : isLight ? '#f7e6a9' : '#342d18'} opacity={isLight ? 1 : 0.82} />
-          <rect y="330" width="360" height="100" fill="url(#formationDots)" />
+          <rect x={isDetail ? -80 : 0} width={isDetail ? 520 : 360} height="430" fill={panel} />
+          <rect x="8" y="8" width="344" height="414" rx="10" fill={isLight ? '#fffdf8' : '#08111f'} stroke={compact || isDetail ? 'none' : line} strokeWidth="1.2" opacity="0.96" />
+          <rect y="88" width="360" height="47" fill={isLight ? '#f3eee4' : '#29251d'} />
+          <rect y="88" width="360" height="47" fill="url(#formationDots)" />
+          <rect y="135" width="360" height="70" fill={isLight ? '#ebe4d5' : '#30291e'} />
+          <rect y="135" width="360" height="70" fill="url(#formationDots)" />
+          <rect y="205" width="360" height="70" fill={isLight ? '#e7edf1' : '#17212d'} />
+          <rect y="205" width="360" height="70" fill="url(#shaleLines)" />
+          <rect y="275" width="360" height="93" fill={isLight ? '#eee5d5' : '#29251d'} />
+          <rect y="275" width="360" height="93" fill="url(#formationDots)" />
+          <rect y="368" width="360" height="47" fill={influxActive ? visual.soft : isLight ? '#dcfce7' : '#16352b'} opacity="0.9" />
+          <rect y="368" width="360" height="47" fill="url(#formationDots)" />
+          <rect y="415" width="360" height="15" fill={isLight ? '#d8dee5' : '#202a36'} />
           <line x1="0" y1="88" x2="360" y2="88" stroke={line} strokeWidth="2" />
+          {isDetail ? (
+            <>
+              <rect x="40" y="83" width="280" height="5" fill="url(#surfaceHatch)" opacity="0.78" />
+              {[1000, 2000, 3000, 4000].map((depth) => {
+                const y = depthToY(depth);
+                return <line key={'guide-' + depth} x1="56" y1={y} x2="320" y2={y} stroke="#94a3b8" strokeWidth="0.85" strokeDasharray="4 4" opacity="0.72" />;
+              })}
+            </>
+          ) : null}
+
+          {isDetail ? (
+            <g fill={muted} fontSize="8.5" fontFamily="sans-serif" aria-label="深度刻度">
+              <text x="-64" y="77" fill={line} fontSize="9" fontWeight="700">深度 (m)</text>
+              <line x1="-58" y1="88" x2="-58" y2="414" stroke={line} strokeWidth="1" />
+              {[500, 1500, 2500, 3500, 5000].map((depth) => {
+                const y = depthToY(depth);
+                return <line key={'minor-' + depth} x1="-61" y1={y} x2="-55" y2={y} stroke={muted} strokeWidth="0.75" opacity="0.72" />;
+              })}
+              {[0, 1000, 2000, 3000, 4000, safeWellDepth].map((depth, index) => {
+                const y = Math.min(414, depthToY(depth));
+                return <g key={`${depth}-${index}`}><line x1="-63" y1={y} x2="-53" y2={y} stroke={line} strokeWidth="1" /><text x="-48" y={y + 3}>{Math.round(depth)}</text></g>;
+              })}
+              <g fontSize="7.8" textAnchor="middle">
+                <rect x="-18" y="88" width="74" height="47" fill="#f3eee4" stroke="#cbd5e1" /><text x="19" y="114">第四系</text>
+                <rect x="-18" y="135" width="74" height="70" fill="#ebe4d5" stroke="#cbd5e1" /><text x="19" y="172">上部砂岩层</text>
+                <rect x="-18" y="205" width="74" height="70" fill="#e7edf1" stroke="#cbd5e1" /><text x="19" y="242">泥岩层</text>
+                <rect x="-18" y="275" width="74" height="93" fill="#eee5d5" stroke="#cbd5e1" /><text x="19" y="324">砂岩层</text>
+                <rect x="-18" y="368" width="74" height="47" fill="#dcfce7" stroke="#86b89a" /><text x="19" y="394" fill="#047857" fontWeight="700">目的层</text>
+                <rect x="-18" y="415" width="74" height="15" fill="#d8dee5" stroke="#cbd5e1" /><text x="19" y="426">基岩层</text>
+              </g>
+              <g fill={line} fontSize="8.5">
+                <path d="M215 88 H355" fill="none" stroke={muted} /><circle cx="355" cy="88" r="1.5" fill={line} /><text x="365" y="91">地面</text>
+                <path d="M212 76 H355" fill="none" stroke={muted} /><circle cx="355" cy="76" r="1.5" fill={line} /><text x="365" y="79">井口 / 转盘</text>
+                <path d="M217 62 H355" fill="none" stroke={muted} /><circle cx="355" cy="62" r="1.5" fill={line} /><text x="365" y="65">BOP / 防喷器</text>
+                <path d={'M217 ' + casingShoeY + ' H355'} fill="none" stroke={muted} /><circle cx="355" cy={casingShoeY} r="1.5" fill={line} /><text x="365" y={casingShoeY + 3}>套管鞋 {DEFAULT_CASING_SHOE_DEPTH} m</text>
+                <path d={'M224 ' + openHoleLabelY + ' H355'} fill="none" stroke={muted} /><circle cx="355" cy={openHoleLabelY} r="1.5" fill={line} /><text x="365" y={openHoleLabelY + 3}>裸眼段 {openHoleLength} m</text>
+                <path d={'M196 ' + bitY + ' H355'} fill="none" stroke={muted} /><circle cx="355" cy={bitY} r="1.5" fill={line} /><text x="365" y={bitY + 3}>钻头位置 {Math.round(safeBitDepth)} m</text>
+                <path d={'M230 ' + wellBottomY + ' H355'} fill="none" stroke={muted} /><circle cx="355" cy={wellBottomY} r="1.5" fill={line} /><text x="365" y={wellBottomY + 3}>井深 {Math.round(safeWellDepth)} m</text>
+              </g>
+            </g>
+          ) : null}
 
           <g aria-label="井口与防喷器组">
             <rect x="143" y="72" width="74" height="16" fill={bore} stroke={line} strokeWidth="2" />
-            <rect x="151" y="54" width="58" height="18" fill={bore} stroke={line} strokeWidth="2" />
+            <rect x="151" y="54" width="58" height="18" fill={bopFill} stroke={bopStroke} strokeWidth="2" opacity={backendLevel >= 2 ? 0.94 : 1} />
             <rect x="158" y="37" width="44" height="17" fill={bore} stroke={line} strokeWidth="2" />
             <rect x="168" y="22" width="24" height="15" fill={bore} stroke={line} strokeWidth="2" />
             <line x1="180" y1="10" x2="180" y2="22" stroke={line} strokeWidth="3" />
@@ -392,29 +503,52 @@ export function WellSchematic({
             <line x1="217" y1="62" x2="244" y2="62" stroke={line} strokeWidth="3" />
             <circle cx="112" cy="62" r="6" fill={bore} stroke={line} strokeWidth="2" />
             <circle cx="248" cy="62" r="6" fill={bore} stroke={line} strokeWidth="2" />
+            {isDetail ? (
+              <>
+                <rect x="151" y="56" width="58" height="4" fill={backendLevel >= 2 ? '#fecaca' : '#f8fafc'} opacity="0.45" />
+                <rect x="151" y="66" width="58" height="4" fill={backendLevel >= 2 ? '#7f1d1d' : '#94a3b8'} opacity="0.22" />
+                {[144, 216].map((x) => (
+                  <g key={'bop-bolts-' + x} fill={line}>
+                    <circle cx={x} cy="57" r="1.8" />
+                    <circle cx={x} cy="69" r="1.8" />
+                  </g>
+                ))}
+              </>
+            ) : null}
           </g>
 
-          <path d="M127 94 H233 V288 H217 V111 H143 V288 H127 Z" fill={cement} opacity="0.72" />
-          <path d="M127 94 H233 V288 H217 V111 H143 V288 H127 Z" fill="url(#cementSpeckle)" />
-          <rect x="143" y="94" width="74" height="210" fill={bore} stroke={line} strokeWidth="2" />
-          <path d="M143 304 C142 324 132 341 136 361 C140 383 128 403 130 430 H230 C232 403 220 383 224 361 C228 341 218 324 217 304 Z" fill={bore} stroke={line} strokeWidth="2" />
+          <path d={cementPath} fill={cement} opacity="0.72" />
+          <path d={cementPath} fill="url(#cementSpeckle)" />
+          <rect x="143" y="94" width="74" height={Math.max(24, casingDisplayBottomY - 94)} fill={bore} stroke={line} strokeWidth="2" />
+          <path d={openHolePath} fill={bore} stroke={line} strokeWidth="2" />
 
-          <rect x="173" y="88" width="14" height="285" fill={isLight ? '#e2e8f0' : '#334155'} stroke={line} strokeWidth="1.8" />
-          <path d="M165 373 H195 L188 385 H172 Z" fill={isLight ? '#64748b' : '#cbd5e1'} stroke={line} strokeWidth="1.5" />
-          <path d="M164 382 L172 394 L180 385 L188 394 L196 382" fill="none" stroke={line} strokeWidth="2.2" />
+          <rect x="173" y="88" width="14" height={Math.max(24, drillStringBottomY - 88)} fill={isLight ? '#e2e8f0' : '#334155'} stroke={line} strokeWidth="1.8" />
+          <path d={'M165 ' + bitTopY + ' H195 L188 ' + bitBodyBottomY + ' H172 Z'} fill={isLight ? '#64748b' : '#cbd5e1'} stroke={line} strokeWidth="1.5" />
+          <path d={'M164 ' + bitBodyBottomY + ' L172 ' + bitCrownY + ' L180 ' + bitBodyBottomY + ' L188 ' + bitCrownY + ' L196 ' + bitBodyBottomY} fill="none" stroke={line} strokeWidth="2.2" />
 
-          <FlowPath d="M180 103 V360" color="#2563eb" active={circulationActive} />
-          <FlowPath d="M157 350 C152 304 154 250 157 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
-          <FlowPath d="M203 350 C208 304 206 250 203 126" color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
+          <FlowPath d={'M180 103 V' + flowBottomY} color="#2563eb" active={circulationActive} />
+          <FlowPath d={'M157 ' + returnBottomY + ' C152 ' + ((returnBottomY + returnTopY) / 2).toFixed(1) + ' 154 250 157 ' + returnTopY} color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
+          <FlowPath d={'M203 ' + returnBottomY + ' C208 ' + ((returnBottomY + returnTopY) / 2).toFixed(1) + ' 206 250 203 ' + returnTopY} color={influxActive ? visual.accent : '#0d9488'} active={circulationActive || influxActive} />
+
+          {isDetail ? (
+            <g aria-label="环空回返路径" opacity={influxActive ? 0.96 : 0.48}>
+              <path d={'M126 ' + (returnBottomY + 30) + ' C109 ' + ((returnBottomY + returnTopY) / 2).toFixed(1) + ' 108 212 129 132'} fill="none" stroke={influxActive ? visual.accent : '#0d9488'} strokeWidth="2.1" strokeLinecap="round" strokeDasharray="6 5" markerEnd={influxActive ? 'url(#returnArrow)' : undefined} />
+              <path d={'M234 ' + (returnBottomY + 30) + ' C251 ' + ((returnBottomY + returnTopY) / 2).toFixed(1) + ' 252 212 231 132'} fill="none" stroke={influxActive ? visual.accent : '#0d9488'} strokeWidth="2.1" strokeLinecap="round" strokeDasharray="6 5" markerEnd={influxActive ? 'url(#returnArrow)' : undefined} />
+              {influxActive ? (
+                <>
+                  <path d={'M126 ' + (returnBottomY + 12) + ' V' + Math.max(openHoleStartY + 12, returnBottomY - 18)} fill="none" stroke={visual.accent} strokeWidth="1.5" strokeLinecap="round" markerEnd="url(#returnArrow)" />
+                  <path d={'M234 ' + (returnBottomY + 12) + ' V' + Math.max(openHoleStartY + 12, returnBottomY - 18)} fill="none" stroke={visual.accent} strokeWidth="1.5" strokeLinecap="round" markerEnd="url(#returnArrow)" />
+                </>
+              ) : null}
+            </g>
+          ) : null}
 
           {influxActive && (
-            <g opacity={1} filter="url(#influxGlow)">
-              <path d="M82 382 C104 379 116 369 140 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
-              <path d="M278 382 C256 379 244 369 220 358" fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
-              <path d="M94 406 C114 401 125 389 144 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
-              <path d="M266 406 C246 401 235 389 216 378" fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
-              <circle r="3.5" fill={visual.accent}><animateMotion dur="1.4s" repeatCount="indefinite" path="M82 382 C104 379 116 369 140 358" /></circle>
-              <circle r="3.5" fill={visual.accent}><animateMotion dur="1.55s" repeatCount="indefinite" path="M278 382 C256 379 244 369 220 358" /></circle>
+            <g opacity={1}>
+              <path d={'M82 ' + (influxLowerY + 4) + ' C104 ' + influxLowerY + ' 116 ' + (influxEntryY + 10) + ' 140 ' + influxEntryY} fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
+              <path d={'M278 ' + (influxLowerY + 4) + ' C256 ' + influxLowerY + ' 244 ' + (influxEntryY + 10) + ' 220 ' + influxEntryY} fill="none" stroke={visual.accent} strokeWidth="3.6" strokeLinecap="round" />
+              <path d={'M94 ' + influxTailY + ' C114 ' + (influxLowerY + 23) + ' 125 ' + (influxLowerY + 12) + ' 144 ' + (influxEntryY + 20)} fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
+              <path d={'M266 ' + influxTailY + ' C246 ' + (influxLowerY + 23) + ' 235 ' + (influxLowerY + 12) + ' 216 ' + (influxEntryY + 20)} fill="none" stroke={visual.accent} strokeWidth="3.2" strokeLinecap="round" />
             </g>
           )}
 
@@ -424,16 +558,20 @@ export function WellSchematic({
           <circle cx="272" cy="118" r="7" fill={panel} stroke={backendLevel >= 4 ? '#dc2626' : influxActive ? visual.accent : '#0d9488'} strokeWidth="2" />
 
           <g fontFamily="sans-serif" fontSize={compact ? 9.5 : 10.5} fill={muted}>
-            <g aria-label="入口流量读数">
-              <rect x="18" y="106" width="91" height="47" rx="7" fill={isLight ? '#eff6ff' : '#0b2447'} stroke="#2563eb" strokeWidth="1.2" opacity="0.96" />
-              <text x="28" y="123" fill="#2563eb" fontSize="10" fontWeight="700">入口流量</text>
-              <text x="28" y="142" fill="#2563eb" fontSize={compact ? 13 : 14.5} fontWeight="800">{flowInText}</text>
-            </g>
-            <g aria-label="出口流量读数">
-              <rect x="251" y="106" width="91" height="47" rx="7" fill={isLight ? '#ecfdf5' : '#082f2a'} stroke={influxActive ? visual.accent : '#0d9488'} strokeWidth="1.2" opacity="0.96" />
-              <text x="261" y="123" fill={influxActive ? visual.accent : '#0d9488'} fontSize="10" fontWeight="700">出口流量</text>
-              <text x="261" y="142" fill={influxActive ? visual.accent : '#0d9488'} fontSize={compact ? 13 : 14.5} fontWeight="800">{flowOutText}</text>
-            </g>
+            {compact ? (
+              <>
+                <g aria-label="入口流量读数">
+                  <rect x="18" y="106" width="91" height="47" rx="7" fill={isLight ? '#eff6ff' : '#0b2447'} stroke="#2563eb" strokeWidth="1.2" opacity="0.96" />
+                  <text x="28" y="123" fill="#2563eb" fontSize="10" fontWeight="700">入口流量</text>
+                  <text x="28" y="142" fill="#2563eb" fontSize="13">{flowInText}</text>
+                </g>
+                <g aria-label="出口流量读数">
+                  <rect x="251" y="106" width="91" height="47" rx="7" fill={isLight ? '#ecfdf5' : '#082f2a'} stroke={influxActive ? visual.accent : '#0d9488'} strokeWidth="1.2" opacity="0.96" />
+                  <text x="261" y="123" fill={influxActive ? visual.accent : '#0d9488'} fontSize="10" fontWeight="700">出口流量</text>
+                  <text x="261" y="142" fill={influxActive ? visual.accent : '#0d9488'} fontSize="13">{flowOutText}</text>
+                </g>
+              </>
+            ) : null}
 
             {compact ? (
               <>
@@ -488,7 +626,7 @@ export function WellSchematic({
               </>
             ) : null}
 
-            {!compact && (
+            {!compact && !isDetail && (
               <>
                 <text x="236" y="40">防喷器</text>
                 <path d="M232 43 H209" fill="none" stroke={muted} strokeWidth="1" />
@@ -500,11 +638,21 @@ export function WellSchematic({
             )}
             {influxActive && (
               <>
-                <text x={compact ? 24 : 12} y={compact ? 398 : 410} fill={visual.accent}>地层流体侵入</text>
-                <path d={compact ? 'M98 397 H126' : 'M92 411 H126'} fill="none" stroke={visual.accent} strokeWidth="1" />
+                {isDetail ? (
+                  <>
+                    <circle cx="232" cy={influxEntryY} r="3.3" fill={overlayTone} />
+                    <path d={'M235 ' + influxEntryY + ' H300'} fill="none" stroke={overlayTone} strokeWidth="1.2" />
+                    <text x="304" y={influxEntryY + 3} fill={overlayTone} fontWeight="700">异常侵入点</text>
+                  </>
+                ) : (
+                  <>
+                    <text x={compact ? 24 : 12} y={compact ? 398 : 410} fill={visual.accent}>地层流体侵入</text>
+                    <path d={compact ? 'M98 397 H126' : 'M92 411 H126'} fill="none" stroke={visual.accent} strokeWidth="1" />
+                  </>
+                )}
               </>
             )}
-            {!compact && (
+            {!compact && !isDetail && (
               <>
                 <text x="12" y="145" fill={muted}>立压 {formatFiniteWithUnit(drillPipePressure, 2, 'MPa')}</text>
                 <text x="234" y="145" fill={muted}>套压 {formatFiniteWithUnit(casingPressure, 2, 'MPa')}</text>
@@ -516,6 +664,14 @@ export function WellSchematic({
           </g>
         </svg>
       </div>
+
+      {isDetail ? (
+        <div className="well-schematic-legend">
+          <span><i className="legend-return" />环空回返路径</span>
+          <span><i className="legend-influx" />异常侵入点</span>
+          <span>深度单位 m · 压力单位 MPa</span>
+        </div>
+      ) : null}
 
       {bottomReadouts.length > 0 && (
         <div className="mt-2 grid shrink-0 grid-cols-2 gap-1.5">

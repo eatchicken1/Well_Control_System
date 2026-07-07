@@ -7,7 +7,7 @@ import {
   refreshToken as refreshTokenApi,
   type AuthUser,
 } from '../api/authApi';
-import { clearAuthTokens, getAccessToken } from '../api/authToken';
+import { clearAuthTokens, getAccessToken, getRefreshToken } from '../api/authToken';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -25,7 +25,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    if (!getAccessToken()) {
+    const accessToken = getAccessToken();
+    const refreshToken = getRefreshToken();
+    if (!accessToken && !refreshToken) {
       if (active) {
         setUser(null);
         setLoading(false);
@@ -34,16 +36,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         active = false;
       };
     }
-    fetchMe()
+    const restoreSession = accessToken
+      ? fetchMe().catch(() => refreshTokenApi().then(() => fetchMe()))
+      : refreshTokenApi().then(() => fetchMe());
+
+    restoreSession
       .then((nextUser) => {
         if (active) setUser(nextUser);
       })
-      .catch(() => refreshTokenApi().then((nextUser) => {
-        if (active) setUser(nextUser);
-      }).catch(() => {
+      .catch(() => {
         clearAuthTokens();
         if (active) setUser(null);
-      }))
+      })
       .finally(() => {
         if (active) setLoading(false);
       });

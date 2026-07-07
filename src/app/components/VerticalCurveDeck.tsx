@@ -9,7 +9,6 @@ interface VerticalCurveDeckProps {
   thresholds: ThresholdSettings;
   wellDepth?: number;
   currentDepth?: number;
-  pitGain?: number;
   isStopped?: boolean;
   compact?: boolean;
   fillViewport?: boolean;
@@ -132,35 +131,34 @@ function rangeTicks(range?: [number, number]) {
   return [min, (min + max) / 2, max];
 }
 
-function TrackHeader({ config, isAxis }: { config: TrackConfig; isAxis?: boolean }) {
+function TrackHeader({ config, isAxis, latest }: { config: TrackConfig; isAxis?: boolean; latest?: CurvePoint }) {
   const primaryCurve = config.curves[0];
   const accentColor = isAxis ? '#0f766e' : primaryCurve?.color || '#64748b';
-  const ticks = rangeTicks(primaryCurve?.range);
 
   return (
     <div className={`vertical-lane-header ${isAxis ? 'vertical-lane-header-axis' : ''}`} style={{ borderTopColor: accentColor }}>
-      <div className="flex min-w-0 items-start justify-between gap-1.5">
-        <div className="min-w-0">
-          <div className="vertical-lane-title" title={config.title}>{config.title}</div>
+      <div className="vertical-lane-title" title={config.title}>{config.title}</div>
+      {isAxis ? (
+        <div className="vertical-axis-caption">时间向下 · 井深 / 钻头深度</div>
+      ) : (
+        <div className="vertical-curve-key-list">
+          {config.curves.map((curve) => {
+            const ticks = rangeTicks(curve.range);
+            return (
+              <div className="vertical-curve-key" key={curve.key} style={{ borderLeftColor: curve.color }}>
+                <div className="vertical-curve-key-main">
+                  <span className="vertical-curve-key-name" title={curve.label}>{curve.label}</span>
+                  <strong style={{ color: curve.color }}>{latest ? fmt(latest.values[curve.key]) : '--'}</strong>
+                  <span className="vertical-curve-key-unit" style={{ color: curve.color }}>{curve.unit}</span>
+                </div>
+                <div className="vertical-lane-scale" aria-hidden="true">
+                  {ticks.map((tick, index) => <span key={index}>{fmt(tick)}</span>)}
+                </div>
+              </div>
+            );
+          })}
         </div>
-        {!isAxis ? (
-          <div
-            className="vertical-lane-unit"
-            style={{ color: accentColor, borderColor: `${accentColor}33`, backgroundColor: `${accentColor}10` }}
-          >
-            {primaryCurve?.unit || ' '}
-          </div>
-        ) : null}
-      </div>
-      {!isAxis && ticks.length > 0 ? (
-        <div className="vertical-lane-scale" aria-hidden="true">
-          {ticks.map((tick, index) => (
-            <span key={index} style={{ color: accentColor, opacity: index === 1 ? 0.72 : 0.9 }}>
-              {fmt(tick)}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -191,32 +189,27 @@ function useNarrowViewport() {
   return isNarrow;
 }
 
-function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoint[], wellDepth = 3200, currentDepth = 3200, currentPitGain = 0): CurvePoint[] {
+function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoint[], wellDepth = 3200, currentDepth = 3200): CurvePoint[] {
   const maxLength = Math.max(flowData.length, pressureData.length);
   if (maxLength === 0) return [];
   const startDepth = Math.max(0, wellDepth - maxLength * 0.6);
   const currentBitDepth = Number.isFinite(currentDepth) ? currentDepth : wellDepth;
-  const firstPressure = pressureData.find((point) => Number.isFinite(point.spp ?? point.drillPipePressure));
-  const sppBase = finite(firstPressure?.spp ?? firstPressure?.drillPipePressure, 0);
-
   return Array.from({ length: maxLength }).map((_, index) => {
     const flow = flowData[Math.max(0, index - (maxLength - flowData.length))];
     const pressure = pressureData[Math.max(0, index - (maxLength - pressureData.length))];
-    const flowIn = finite(flow?.flowIn, 150);
+    const flowIn = finite(flow?.flowIn, 0);
     const flowOut = finite(flow?.flowOut, flowIn);
-    const returnResponse = finite(flow?.returnResponse, flowIn > 0 ? Math.max(0, ((flowOut - flowIn) / flowIn) * 100) : 0);
     const pitVolume = finite(flow?.pitVolume, Number.NaN);
-    const pitGain = Number.isFinite(flow?.pitGain)
-      ? finite(flow?.pitGain, currentPitGain)
-      : Math.max(0, currentPitGain - (maxLength - index - 1) * Math.max(returnResponse, 0) * 0.01);
     const casingPressure = finite(pressure?.casingPressure, 0);
     const drillPipePressure = finite(pressure?.drillPipePressure, 0);
     const spp = finite(pressure?.spp, drillPipePressure);
-    const sppPredicted = finite(pressure?.sppPredicted, spp + 0.05);
-    const sppChange = spp - sppBase;
-    const spm = finite(flow?.spm, flowIn > 20 ? 88 : 0);
-    const totalGas = finite(flow?.totalGas, 0.65);
-    const hookLoad = finite(flow?.hookLoad, 314);
+    const spm = finite(flow?.spm, 0);
+    const totalGas = finite(flow?.totalGas, 0);
+    const hookLoad = finite(flow?.hookLoad, 0);
+    const wob = finite(flow?.wob, 0);
+    const drillTime = finite(flow?.drillTime, 0);
+    const rpm = finite(flow?.rpm, 0);
+    const torque = finite(flow?.torque, 0);
     const bitDepth = finite(flow?.bitDepth, Math.max(0, currentBitDepth - (maxLength - index - 1) * 0.6));
     const level = (flow?.backendLevel ?? pressure?.backendLevel ?? 0) as BackendLevel;
 
@@ -229,17 +222,17 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
       values: {
         flowIn,
         flowOut,
-        returnResponse,
-        pitGain,
-        pitVolume: Number.isFinite(pitVolume) ? pitVolume : 121 + pitGain,
+        pitVolume: Number.isFinite(pitVolume) ? pitVolume : 0,
         casingPressure,
         drillPipePressure,
         spp,
-        sppPredicted,
-        sppChange,
         spm,
         totalGas,
         hookLoad,
+        wob,
+        drillTime,
+        rpm,
+        torque,
       },
     };
   });
@@ -572,7 +565,7 @@ function VerticalTrack({
       data-axis={isAxis ? 'true' : undefined}
       style={{ flex: flexValue, minWidth: `${laneMinWidth}px` }}
     >
-      <TrackHeader config={config} isAxis={isAxis} />
+      <TrackHeader config={config} isAxis={isAxis} latest={latest} />
       <div className="vertical-lane-canvas relative">
         <canvas
           ref={canvasRef}
@@ -629,7 +622,6 @@ export function VerticalCurveDeck({
   thresholds,
   wellDepth,
   currentDepth,
-  pitGain = 0,
   isStopped = false,
   compact = false,
   fillViewport = false,
@@ -637,7 +629,7 @@ export function VerticalCurveDeck({
   const isDark = useIsDarkMode();
   const mobileDense = useNarrowViewport() && compact;
   const fillTracks = fillViewport && !mobileDense;
-  const points = useMemo(() => buildTrackData(flowData, pressureData, wellDepth ?? currentDepth ?? 3200, currentDepth, pitGain), [flowData, pressureData, wellDepth, currentDepth, pitGain]);
+  const points = useMemo(() => buildTrackData(flowData, pressureData, wellDepth ?? currentDepth ?? 3200, currentDepth), [flowData, pressureData, wellDepth, currentDepth]);
   const renderPoints = useMemo(() => downsampleCurvePoints(points), [points]);
   const latestPoint = points.at(-1);
   const isDownsampled = renderPoints.length < points.length;
@@ -653,58 +645,68 @@ export function VerticalCurveDeck({
       criticalCount: levels.filter((level) => level >= 4).length,
     };
   }, [points]);
-  const pitGainValues = points.map((point) => point.values.pitGain);
   const pitVolumeValues = points.map((point) => point.values.pitVolume);
   const flowValues = points.flatMap((point) => [point.values.flowIn, point.values.flowOut]);
-  const returnValues = points.map((point) => point.values.returnResponse || 0);
   const casingValues = points.map((point) => point.values.casingPressure);
-  const sppChangeValues = points.map((point) => point.values.sppChange);
+  const sppValues = points.map((point) => point.values.spp);
   const spmValues = points.map((point) => point.values.spm);
   const gasValues = points.map((point) => point.values.totalGas);
   const hookValues = points.map((point) => point.values.hookLoad);
+  const wobValues = points.map((point) => point.values.wob);
+  const drillTimeValues = points.map((point) => point.values.drillTime);
+  const rpmValues = points.map((point) => point.values.rpm);
+  const torqueValues = points.map((point) => point.values.torque);
 
   const tracks: TrackConfig[] = [
     {
-      title: '出口/入口流量',
+      title: '流量',
       width: '1.15 1 150px',
       curves: [
-        { key: 'flowOut', label: '出口', unit: 'L/s', color: '#2563eb', range: niceRange(flowValues, [0, 100]) },
-        { key: 'flowIn', label: '入口', unit: 'L/s', color: '#64748b', range: niceRange(flowValues, [0, 100]) },
-        { key: 'returnResponse', label: '出口流量响应', unit: '%', color: '#ef4444', range: niceRange(returnValues, [0, thresholds.returnResponseCritical + 10]), warning: thresholds.returnResponseWarning, critical: thresholds.returnResponseCritical },
+        { key: 'flowOut', label: '出口流量', unit: 'L/s', color: '#dc2626', range: niceRange(flowValues, [0, 100]) },
+        { key: 'flowIn', label: '入口流量', unit: 'L/s', color: '#2563eb', range: niceRange(flowValues, [0, 100]) },
       ],
     },
     {
-      title: '总池体积',
+      title: '池体积',
       width: '1 1 136px',
       curves: [
-        { key: 'pitVolume', label: '总池体积', unit: 'm3', color: '#0891b2', range: niceRange(pitVolumeValues, [118, 124], 0.08) },
-        { key: 'pitGain', label: '总池体积变化', unit: 'm3', color: '#f59e0b', range: niceRange(pitGainValues, [-1, thresholds.pitGainCritical + 1], 0.12), baseline: 0, warning: thresholds.pitGainWarning, critical: thresholds.pitGainCritical },
+        { key: 'pitVolume', label: '总池体积', unit: 'm3', color: '#0891b2', range: niceRange(pitVolumeValues, [0, 160], 0.08) },
       ],
     },
     {
-      title: '立压变化量',
-      width: '1 1 134px',
+      title: '压力',
+      width: '1 1 142px',
       curves: [
-        { key: 'sppChange', label: '变化量', unit: 'MPa', color: '#0f766e', range: niceRange(sppChangeValues, [-1, 1], 0.18), baseline: 0 },
-      ],
-    },
-    {
-      title: '套压',
-      width: '0.86 1 112px',
-      curves: [
+        { key: 'spp', label: '立压', unit: 'MPa', color: '#0f766e', range: niceRange(sppValues, [0, 25]) },
         { key: 'casingPressure', label: '套压', unit: 'MPa', color: '#ea580c', range: niceRange(casingValues, [0, thresholds.casingPressureWarning + 0.8]), warning: thresholds.casingPressureWarning },
       ],
     },
     {
-      title: '泵冲 / 钩载',
-      width: '1 1 132px',
+      title: '钻进载荷',
+      width: '1.08 1 148px',
       curves: [
-        { key: 'spm', label: '泵冲', unit: 'spm', color: '#7c3aed', range: niceRange(spmValues, [0, 96]) },
-        { key: 'hookLoad', label: '钩载', unit: 'kN', color: '#475569', range: niceRange(hookValues, [180, 340]) },
+        { key: 'hookLoad', label: '大钩负荷', unit: 'kN', color: '#475569', range: niceRange(hookValues, [180, 340]) },
+        { key: 'wob', label: '钻压', unit: 'kN', color: '#16a34a', range: niceRange(wobValues, [0, 180]) },
       ],
     },
     {
-      title: '全烃',
+      title: '钻进参数',
+      width: '1.12 1 154px',
+      curves: [
+        { key: 'drillTime', label: '钻时', unit: 'min/m', color: '#65a30d', range: niceRange(drillTimeValues, [0, 5]) },
+        { key: 'rpm', label: '转盘转速', unit: 'rpm', color: '#ca8a04', range: niceRange(rpmValues, [0, 120]) },
+        { key: 'torque', label: '扭矩', unit: 'kN·m', color: '#d97706', range: niceRange(torqueValues, [0, 40]) },
+      ],
+    },
+    {
+      title: '泵冲',
+      width: '0.78 1 104px',
+      curves: [
+        { key: 'spm', label: '总泵冲', unit: 'spm', color: '#7c3aed', range: niceRange(spmValues, [0, 96]) },
+      ],
+    },
+    {
+      title: '气测',
       width: '0.84 1 108px',
       curves: [
         { key: 'totalGas', label: '全烃', unit: '%', color: '#16a34a', range: niceRange(gasValues, [0, 3.6]), warning: 1.5, critical: 2.8 },
@@ -714,7 +716,7 @@ export function VerticalCurveDeck({
 
   const displayTracks = mobileDense
     ? tracks
-      .filter((track) => ['出口/入口流量', '总池体积', '立压变化量', '套压', '泵冲 / 钩载', '全烃'].includes(track.title))
+      .filter((track) => ['流量', '池体积', '压力', '钻进载荷', '钻进参数', '泵冲', '气测'].includes(track.title))
       .map((track) => ({ ...track, width: '0 0 128px' }))
     : tracks.map((track) => (fillViewport ? { ...track, width: '1 1 0px' } : track));
 

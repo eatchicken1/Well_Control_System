@@ -47,7 +47,9 @@ export interface MonitoringData {
   mudWeight: number;
   mudTemp: number;
   rop: number;
+  drillTime: number;
   hookLoad: number;
+  wob: number;
   totalGas: number;
   torque: number;
   wellDepth?: number;
@@ -157,6 +159,10 @@ export interface FlowDataPoint {
   spm?: number;
   totalGas?: number;
   hookLoad?: number;
+  wob?: number;
+  drillTime?: number;
+  rpm?: number;
+  torque?: number;
 }
 
 export interface PressureDataPoint {
@@ -502,116 +508,15 @@ export const DEFAULT_THRESHOLDS: ThresholdSettings = {
   covariancePenaltyThreshold: 0.3,
 };
 
-const WELLS: WellInfo[] = [
-  {
-    wellId: '大页1H2-4',
-    wellName: '大页1H2-4',
-    block: '实时监测井 · MySQL',
-    depth: 4200,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '威231',
-    wellName: '威231',
-    block: '实时监测井 · MySQL',
-    depth: 3900,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '中江2',
-    wellName: '中江2',
-    block: '实时监测井 · MySQL',
-    depth: 4100,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '磨溪022-H21',
-    wellName: '磨溪022-H21',
-    block: '实时监测井 · MySQL',
-    depth: 4300,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '中深103',
-    wellName: '中深103',
-    block: '实时监测井 · MySQL',
-    depth: 4450,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '乐山1',
-    wellName: '乐山1',
-    block: '实时监测井 · MySQL',
-    depth: 3720,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '五宝浅20',
-    wellName: '五宝浅20',
-    block: '实时监测井 · MySQL',
-    depth: 3560,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '天府2',
-    wellName: '天府2',
-    block: '实时监测井 · MySQL',
-    depth: 4080,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '威213',
-    wellName: '威213',
-    block: '实时监测井 · MySQL',
-    depth: 3980,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '宁225',
-    wellName: '宁225',
-    block: '实时监测井 · MySQL',
-    depth: 4020,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '蓬兴101',
-    wellName: '蓬兴101',
-    block: '实时监测井 · MySQL',
-    depth: 4320,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-  {
-    wellId: '顺探1',
-    wellName: '顺探1',
-    block: '实时监测井 · MySQL',
-    depth: 4180,
-    crew: '现场队伍',
-    dataSource: 'realtime',
-    baselineVersion: 'realtime-v7',
-  },
-];
+const EMPTY_WELL_INFO: WellInfo = {
+  wellId: '',
+  wellName: '等待数据库井列表',
+  block: 'MySQL',
+  depth: 0,
+  crew: '',
+  dataSource: 'realtime',
+  baselineVersion: 'realtime-v7',
+};
 
 const ALGORITHM_INTERFACE: AlgorithmInterfaceInfo = {
   rootPath: 'D:\\Study\\research\\wall_control\\V7.0\\kick_detection_system\\src\\KickDetectionSystem.Api',
@@ -970,7 +875,7 @@ function getInitialWellRuntimeStates() {
 
 
 function sanitizeStoredMonitoringData(value: unknown): MonitoringData {
-  const fallback = makeInitialData(WELLS[0]);
+  const fallback = makeInitialData(EMPTY_WELL_INFO);
   if (!value || typeof value !== 'object') return fallback;
   const row = value as Record<string, unknown>;
   return {
@@ -989,7 +894,9 @@ function sanitizeStoredMonitoringData(value: unknown): MonitoringData {
     mudWeight: finite(row.mudWeight, fallback.mudWeight),
     mudTemp: finite(row.mudTemp, fallback.mudTemp),
     rop: finite(row.rop, fallback.rop),
+    drillTime: finite(row.drillTime, fallback.drillTime),
     hookLoad: finite(row.hookLoad, fallback.hookLoad),
+    wob: finite(row.wob, fallback.wob),
     totalGas: finite(row.totalGas, fallback.totalGas),
     torque: finite(row.torque, fallback.torque),
     wellDepth: Number.isFinite(Number(row.wellDepth)) ? Number(row.wellDepth) : fallback.wellDepth,
@@ -1282,7 +1189,7 @@ interface InitialSelectedViewState {
 function createInitialSelectedViewState(selectedWellId: string): InitialSelectedViewState {
   const snapshots = getInitialWellSnapshots();
   const snapshot = snapshots[selectedWellId];
-  const fallbackWell = WELLS.find((well) => well.wellId === selectedWellId) || WELLS[0];
+  const fallbackWell = EMPTY_WELL_INFO;
   return {
     currentData: snapshot?.currentData || makeInitialData(fallbackWell),
     currentSampleTime: snapshot?.currentSampleTime || '',
@@ -1311,7 +1218,9 @@ function makeInitialData(well: WellInfo): MonitoringData {
     mudWeight: 0,
     mudTemp: 0,
     rop: 0,
+    drillTime: 0,
     hookLoad: 0,
+    wob: 0,
     totalGas: 0,
     torque: 0,
     wellDepth: well.depth,
@@ -1346,15 +1255,15 @@ function createWellMonitoringSnapshot(well: WellInfo): WellMonitoringSnapshot {
 }
 
 function normalizeRealTimeRecord(record: RealTimeRecord, previous: MonitoringData): MonitoringData {
-  const flowIn = readNumber(record, ['flowIn', 'inlet_smooth', 'inlet_raw', 'inlet_flow_raw', 'inletFlow', 'inlet_flow', 'pump_flow_in'], previous.flowIn);
-  const flowOut = readNumber(record, ['flowOut', 'outlet_smooth', 'outlet_raw', 'outlet_flow_raw', 'outletFlow', 'outlet_flow', 'return_flow'], previous.flowOut);
+  const flowIn = readNumber(record, ['flowIn', 'inletSmooth', 'inletRaw', 'InletSmooth', 'InletRaw', 'inlet_smooth', 'inlet_raw', 'inlet_flow_raw', 'inletFlow', 'inlet_flow', 'pump_flow_in'], previous.flowIn);
+  const flowOut = readNumber(record, ['flowOut', 'outletSmooth', 'outletRaw', 'OutletSmooth', 'OutletRaw', 'outlet_smooth', 'outlet_raw', 'outlet_flow_raw', 'outletFlow', 'outlet_flow', 'return_flow'], previous.flowOut);
   const spp = readNumber(record, ['spp', 'standpipe_pressure_mpa', 'spp_mpa', 'standpipePressureMpa'], previous.spp);
   const sppPredicted = readNumber(record, ['sppPredicted', 'spp_predicted_mpa', 'spp_model_mpa', 'predicted_spp_mpa'], previous.sppPredicted || spp);
-  const pitVolume = readNumber(record, ['pitVolume', 'pool_smooth', 'pool_raw', 'total_pit_volume_m3', 'pit_volume', 'totalPitVolumeM3'], previous.pitVolume);
+  const pitVolume = readNumber(record, ['pitVolume', 'poolSmooth', 'poolRaw', 'PoolSmooth', 'PoolRaw', 'pool_smooth', 'pool_raw', 'total_pit_volume_m3', 'pit_volume', 'totalPitVolumeM3'], previous.pitVolume);
   const derivedPitGain = Number.isFinite(pitVolume) && Number.isFinite(previous.pitVolume) ? pitVolume - previous.pitVolume : previous.pitGain;
-  const pitGain = readNumber(record, ['pitGain', 'pool_delta_abs', 'gain_loss_raw', 'pit_gain_m3', 'pitGainM3'], derivedPitGain);
+  const pitGain = readNumber(record, ['pitGain', 'pitGainM3', 'PitGainM3', 'pool_delta_abs', 'gain_loss_raw', 'pit_gain_m3'], derivedPitGain);
   const derivedReturnResponse = flowOut > 0 && flowIn > 0 ? ((flowOut - flowIn) / Math.max(flowIn, 1)) * 100 : 0;
-  const returnResponse = Math.max(0, readNumber(record, ['returnResponse', 'outlet_delta_pct', 'return_response_pct'], derivedReturnResponse));
+  const returnResponse = Math.max(0, readNumber(record, ['returnResponse', 'returnResponsePct', 'ReturnResponsePct', 'outletDeltaPct', 'OutletDeltaPct', 'outlet_delta_pct', 'return_response_pct'], derivedReturnResponse));
   const casingPressure = readNumber(
     record,
     ['casingPressure', 'cp', 'casing_pressure_mpa', 'casingPressureMpa', 'logging_casing_pressure_mpa', 'measured_casing_pressure_mpa'],
@@ -1375,12 +1284,14 @@ function normalizeRealTimeRecord(record: RealTimeRecord, previous: MonitoringDat
     mudWeight: readNumber(record, ['mudWeight', 'inlet_density_g_cm3', 'mud_weight'], previous.mudWeight),
     mudTemp: readNumber(record, ['mudTemp', 'inlet_temperature_c', 'outlet_temperature_c'], previous.mudTemp),
     rop: readNumber(record, ['rop', 'rate_of_penetration', 'rop_m_h'], previous.rop),
+    drillTime: readNumber(record, ['drillTime', 'drill_time', 'drilling_time_1', 'drill_time_min_m', 'ROPA'], previous.drillTime),
     hookLoad: readNumber(record, ['hookLoad', 'hookLoadKn', 'hook_load_kn'], previous.hookLoad),
+    wob: readNumber(record, ['wob', 'wobKn', 'wob_kn', 'weightOnBit', 'weight_on_bit_kn', 'WOBX'], previous.wob),
     totalGas: readNumber(record, ['totalGas', 'gas', 'total_gas_pct', 'gas_pct'], previous.totalGas),
     torque: readNumber(record, ['torque', 'torque_knm'], previous.torque),
     wellDepth: readNumber(record, ['wellDepth', 'well_depth', 'well_depth_m', 'holeDepth', 'hole_depth', 'hole_depth_m', 'measuredDepth', 'measured_depth', 'measured_depth_m', 'currentDepth', 'current_depth', 'depth', '井深'], previous.wellDepth ?? previous.bitDepth),
     bitDepth: readNumber(record, ['bitDepth', 'bit_depth', 'bit_depth_m', 'bitPosition', 'bit_position', 'bit_position_m', '钻头位置'], previous.bitDepth),
-    rpm: readNumber(record, ['rpm', 'rotary_rpm'], previous.rpm),
+    rpm: readNumber(record, ['rpm', 'rotaryRpm', 'rotary_rpm', 'rotary_speed_rpm'], previous.rpm),
     confidenceLevel: readNumber(record, ['confidenceLevel', 'formal_eval_level', 'public_level', 'confidence_level'], previous.confidenceLevel),
     pumpState: String(record.pumpState || record.pump_state || previous.pumpState || 'Normal'),
     condition: String(record.condition || previous.condition || '实时检测'),
@@ -2211,12 +2122,12 @@ function getCycleInfo(totalSeconds: number): CycleInfo {
 export function WellControlProvider({ children }: { children: ReactNode }) {
   const [isRunning, setIsRunning] = useState(false);
   const [thresholds, setThresholds] = useState<ThresholdSettings>(DEFAULT_THRESHOLDS);
-  const [wells, setWells] = useState<WellInfo[]>(WELLS);
-  const { user } = useAuth();
-  const hasAccessToken = Boolean(getAccessToken());
+  const [wells, setWells] = useState<WellInfo[]>([]);
+  const { user, loading: authLoading } = useAuth();
+  const hasAccessToken = Boolean(user && getAccessToken());
   const [selectedWellId, setSelectedWellId] = useState(() => {
-    if (typeof window === 'undefined') return WELLS[0].wellId;
-    return window.localStorage.getItem(STORAGE_SELECTED_WELL) || WELLS[0].wellId;
+    if (typeof window === 'undefined') return '';
+    return window.localStorage.getItem(STORAGE_SELECTED_WELL) || '';
   });
   const [monitoredWellIds, setMonitoredWellIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -2255,7 +2166,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const [wellRuntimeStates, setWellRuntimeStates] = useState<Record<string, WellRuntimeState>>(getInitialWellRuntimeStates);
   const [realtimeWellsLoaded, setRealtimeWellsLoaded] = useState(false);
   const wellSnapshotsRef = useRef<Record<string, WellMonitoringSnapshot>>(getInitialWellSnapshots());
-  const wellInfo = wells.find((well) => well.wellId === selectedWellId) || wells[0] || WELLS[0];
+  const wellInfo = wells.find((well) => well.wellId === selectedWellId) || wells[0] || EMPTY_WELL_INFO;
   const selectedWellRuntime = wellRuntimeStates[wellInfo?.wellId];
   const [currentData, setCurrentData] = useState<MonitoringData>(() => createInitialSelectedViewState(selectedWellId).currentData);
   const currentDataRef = useRef<MonitoringData>(currentData);
@@ -2833,6 +2744,10 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           spm: lastData.spm,
           totalGas: lastData.totalGas,
           hookLoad: lastData.hookLoad,
+          wob: lastData.wob,
+          drillTime: lastData.drillTime,
+          rpm: lastData.rpm,
+          torque: lastData.torque,
         },
       ])));
       pressureItems = keepMonitoringWindow(dedupeMonitoringPoints(sortMonitoringPoints([
@@ -2905,6 +2820,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!realtimeWellsLoaded) return;
     const validIds = new Set(wells.map((well) => well.wellId));
     setMonitoredWellIds((current) => current.filter((wellId) => validIds.has(wellId)));
     setRealtimeTabWellIds((current) => current.filter((wellId) => validIds.has(wellId)));
@@ -2920,12 +2836,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       acknowledgedEventsRef.current = next;
       return next;
     });
-  }, [wells]);
+  }, [realtimeWellsLoaded, wells]);
 
   useEffect(() => {
-    if (!user) return;
-    const selected = selectedWellIdsFromUser;
-    const running = runningWellIdsFromUser;
+    if (!user || !realtimeWellsLoaded) return;
+    const validIds = new Set(wells.map((well) => well.wellId));
+    const selected = selectedWellIdsFromUser.filter((wellId) => validIds.has(wellId));
+    const running = runningWellIdsFromUser.filter((wellId) => validIds.has(wellId));
     running.forEach((wellId) => {
       const runtime = wellRuntimeStatesRef.current[wellId];
       const snapshot = wellSnapshotsRef.current[wellId];
@@ -2972,7 +2889,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         return next;
       });
     }
-  }, [runningWellIdsFromUser, selectedWellIdsFromUser, updateWellRuntime, user]);
+  }, [realtimeWellsLoaded, runningWellIdsFromUser, selectedWellIdsFromUser, updateWellRuntime, user, wells]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -3030,7 +2947,10 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   }, [alerts]);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!hasAccessToken) {
+      setWells([]);
+      setSelectedWellId('');
       setRealtimeWellsLoaded(false);
       setRawDataSourceState((prev) => ({
         ...prev,
@@ -3040,6 +2960,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       return;
     }
     const controller = new AbortController();
+    setWells([]);
     setRealtimeWellsLoaded(false);
     setRawDataSourceState((prev) => ({
       ...prev,
@@ -3055,21 +2976,36 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         if (controller.signal.aborted) return;
         const nextWells = (payload.wells || []).map(normalizeRealtimeWell).filter(Boolean) as WellInfo[];
         setRealtimeWellsLoaded(true);
-        if (!nextWells.length) return;
         setWells(nextWells);
+        const validWellIds = new Set(nextWells.map((well) => well.wellId));
+        setMonitoredWellIds((current) => {
+          const next = current.filter((wellId) => validWellIds.has(wellId));
+          saveWellListSelection(STORAGE_MONITORED_WELLS, next);
+          return next;
+        });
+        setRealtimeTabWellIds((current) => {
+          const next = current.filter((wellId) => validWellIds.has(wellId));
+          saveWellListSelection(STORAGE_REALTIME_TABS, next);
+          return next;
+        });
         setSelectedWellId((current) => {
-          const nextSelected = nextWells.some((well) => well.wellId === current) ? current : nextWells[0].wellId;
-          saveWellSelection(STORAGE_SELECTED_WELL, nextSelected);
+          const nextSelected = validWellIds.has(current) ? current : (nextWells[0]?.wellId || '');
+          if (nextSelected) saveWellSelection(STORAGE_SELECTED_WELL, nextSelected);
+          else window.localStorage.removeItem(STORAGE_SELECTED_WELL);
           return nextSelected;
         });
         setRawDataSourceState((prev) => ({
           ...prev,
-          status: 'connecting',
-          message: `已读取 ${nextWells.length} 口实时井，等待选择起始时间`,
+          status: nextWells.length > 0 ? 'connecting' : 'paused',
+          message: nextWells.length > 0
+            ? `已读取 ${nextWells.length} 口实时井，等待选择起始时间`
+            : '数据库中未读取到可监测井',
         }));
       })
       .catch((error: Error) => {
         if (controller.signal.aborted || error.name === 'AbortError') return;
+        setWells([]);
+        setSelectedWellId('');
         setRealtimeWellsLoaded(true);
         setRawDataSourceState((prev) => ({
           ...prev,
@@ -3080,7 +3016,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     return () => {
       controller.abort();
     };
-  }, [hasAccessToken, realtimeEndpoint]);
+  }, [authLoading, hasAccessToken, realtimeEndpoint, user?.id]);
 
   useEffect(() => {
     if (!hasAccessToken) return;
@@ -3232,6 +3168,10 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           spm: nextData.spm,
           totalGas: nextData.totalGas,
           hookLoad: nextData.hookLoad,
+          wob: nextData.wob,
+          drillTime: nextData.drillTime,
+          rpm: nextData.rpm,
+          torque: nextData.torque,
         },
       ])));
       const nextPressureHistory = dedupeMonitoringPoints(sortMonitoringPoints(keepMonitoringWindow([

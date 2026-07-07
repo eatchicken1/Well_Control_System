@@ -3,6 +3,7 @@ import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import Dashboard from './pages/Dashboard';
 import Monitoring from './pages/Monitoring';
+import WellboreStatusDetail from './pages/WellboreStatusDetail';
 import History from './pages/History';
 import Alerts from './pages/Alerts';
 import Settings from './pages/Settings';
@@ -28,6 +29,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, Component: Dashboard },
           { path: 'monitoring', Component: Monitoring },
+          { path: 'monitoring/wellbore-status', Component: WellboreStatusDetail },
           { path: 'baseline', Component: Baseline },
           { path: 'history', Component: History },
           { path: 'alerts', Component: Alerts },

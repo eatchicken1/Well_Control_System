@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { VerticalCurveDeck } from '../components/VerticalCurveDeck';
-import { WellSchematic } from '../components/WellSchematic';
+import { WellboreStatusThumbnail } from '../components/WellboreStatusThumbnail';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 
@@ -39,12 +39,8 @@ function AlertQueueMini({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedAlert]);
 
-  useEffect(() => {
-    setSelectedAlertId(null);
-  }, [wellName]);
-
   return (
-    <div className="ops-panel-soft flex min-h-0 flex-col p-2.5">
+    <div className="monitoring-alert-queue ops-panel-soft flex h-full min-h-0 flex-col p-2.5">
       <div className="mb-2 flex items-center gap-2">
         <Bell className={`h-4 w-4 ${criticalCount > 0 ? 'text-red-600' : 'text-slate-500'}`} />
         <div className="min-w-0 flex-1">
@@ -151,11 +147,6 @@ function AlertQueueMini({
   );
 }
 
-function signalState(signal: string, level: BackendLevel, activeSignals: string[]) {
-  if (!activeSignals.includes(signal) || level < 2) return 'normal' as const;
-  return level >= 4 ? 'critical' as const : 'warning' as const;
-}
-
 function formatMetric(value: number, digits: number) {
   return Number.isFinite(value) ? value.toFixed(digits) : '--';
 }
@@ -220,11 +211,6 @@ export default function Monitoring() {
     : canStopMonitoring
       ? `停止 ${activeWell?.wellName || selectedWellId} 监测`
       : '当前没有运行中的监测井';
-  const returnResponse = viewCurrentData.returnResponse;
-  const returnState = signalState('return_response', viewBackendDetection.publicLevel, viewBackendDetection.activeSignals);
-  const pitState = signalState('pit_volume', viewBackendDetection.publicLevel, viewBackendDetection.activeSignals);
-  const gasState = signalState('total_gas', viewBackendDetection.publicLevel, viewBackendDetection.activeSignals);
-  const sppState = signalState('standpipe_pressure', viewBackendDetection.publicLevel, viewBackendDetection.activeSignals);
   const currentWellAlerts = alerts.filter((alert) => !alert.wellId || alert.wellId === selectedWellId);
   const isRecovering = !hasSamples && Boolean(
     !selectedWellManuallyStopped && (
@@ -259,8 +245,16 @@ export default function Monitoring() {
           </div>
         </div>
       ) : (
-        <div className="monitoring-main-grid grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-visible lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.52fr)] lg:overflow-hidden 2xl:grid-cols-[minmax(0,2.08fr)_minmax(280px,0.54fr)]">
-          <section className="ops-panel monitoring-lane-panel flex min-h-0 flex-col overflow-hidden">
+        <div className="monitoring-main-grid grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-visible lg:overflow-hidden">
+          <section className="ops-panel monitoring-primary-panel monitoring-lane-panel flex min-h-0 flex-col overflow-hidden">
+            <div className="realtime-kpi-strip">
+              <div><span>当前井深</span><strong>{formatMetricOrPlaceholder(selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? activeWell.depth, 0, hasSamples)} m</strong></div>
+              <div><span>钻头深度</span><strong>{formatMetricOrPlaceholder(viewCurrentData.bitDepth, 0, hasSamples)} m</strong></div>
+              <div><span>地层</span><strong>{selectedWellView.latestFormation || viewCurrentData.formation || activeWell.targetLayer || '--'}</strong></div>
+              <div><span>总池体积</span><strong>{formatMetricOrPlaceholder(viewCurrentData.pitVolume, 2, hasSamples)} m³</strong></div>
+              <div><span>立压</span><strong>{formatMetricOrPlaceholder(viewCurrentData.spp, 2, hasSamples)} MPa</strong></div>
+              <div><span>套压</span><strong>{formatMetricOrPlaceholder(viewCurrentData.casingPressure, 2, hasSamples)} MPa</strong></div>
+            </div>
             <div className="min-h-0 flex-1 p-1.5">
               <VerticalCurveDeck
                 flowData={trackFlowData}
@@ -268,7 +262,6 @@ export default function Monitoring() {
                 thresholds={thresholds}
                 wellDepth={selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? activeWell.depth}
                 currentDepth={viewCurrentData.bitDepth}
-                pitGain={viewCurrentData.pitGain}
                 isStopped={selectedWellManuallyStopped}
                 compact
                 fillViewport
@@ -276,16 +269,20 @@ export default function Monitoring() {
             </div>
           </section>
 
-          <aside className="monitoring-side-stack grid min-h-0 min-w-0 grid-rows-[minmax(288px,1fr)_minmax(170px,0.46fr)] gap-2 overflow-hidden lg:grid-rows-[minmax(0,0.58fr)_minmax(0,0.42fr)]">
+          <aside className="monitoring-side-panel monitoring-side-stack min-h-0 min-w-0 gap-2 overflow-hidden">
             <div className="min-h-0 overflow-hidden">
-              <WellSchematic
+              <WellboreStatusThumbnail
+                wellName={activeWell.wellName}
+                wellDepth={selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? activeWell.depth}
+                bitDepth={selectedWellView.latestBitDepth ?? viewCurrentData.bitDepth}
+                formation={selectedWellView.latestFormation || viewCurrentData.formation || activeWell.targetLayer}
                 flowIn={viewCurrentData.flowIn}
                 flowOut={viewCurrentData.flowOut}
                 spm={viewCurrentData.spm}
                 casingPressure={viewCurrentData.casingPressure}
-                drillPipePressure={viewCurrentData.drillPipePressure}
-                pitGain={viewCurrentData.pitGain}
-                returnResponse={viewCurrentData.returnResponse}
+                spp={viewCurrentData.spp}
+                pitVolume={viewCurrentData.pitVolume}
+                totalGas={viewCurrentData.totalGas}
                 backendLevel={viewBackendDetection.publicLevel}
                 activeSignals={viewBackendDetection.activeSignals}
                 pumpState={viewCurrentData.pumpState}
@@ -294,14 +291,6 @@ export default function Monitoring() {
                 hasSamples={hasSamples}
                 isRecovering={isRecovering}
                 isStopped={selectedWellManuallyStopped}
-                compact
-                surface="light"
-                metrics={[
-                  { label: '出口流量响应', value: formatMetricOrPlaceholder(returnResponse, 1, hasSamples), unit: '%', state: returnState },
-                  { label: '总池体积变化', value: formatMetricOrPlaceholder(viewCurrentData.pitGain, 2, hasSamples), unit: 'm3', state: pitState },
-                  { label: '立压', value: formatMetricOrPlaceholder(viewCurrentData.spp, 2, hasSamples), unit: 'MPa', state: sppState },
-                  { label: '全烃', value: formatMetricOrPlaceholder(viewCurrentData.totalGas, 2, hasSamples), unit: '%', state: gasState },
-                ]}
               />
             </div>
             <div className="min-h-0 overflow-hidden">
