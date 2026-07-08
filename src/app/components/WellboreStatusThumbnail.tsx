@@ -16,6 +16,7 @@ export interface WellboreStatusViewProps {
   cycleInfo?: CycleInfo;
   flowIn: number;
   flowOut: number;
+  pitGain: number;
   pitVolume: number;
   spp: number;
   casingPressure: number;
@@ -64,7 +65,8 @@ export function WellboreStatusThumbnail(props: WellboreStatusViewProps) {
           spm={props.spm}
           casingPressure={props.casingPressure}
           drillPipePressure={props.spp}
-          pitGain={props.pitVolume}
+          pitGain={props.pitGain}
+          pitVolume={props.pitVolume}
           returnResponse={0}
           totalGas={props.totalGas}
           backendLevel={props.backendLevel}

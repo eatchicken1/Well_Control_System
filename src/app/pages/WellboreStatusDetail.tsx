@@ -1,7 +1,7 @@
-import { Activity, ArrowLeft, CircleDot, Database, Flame, Gauge, RadioTower, ShieldAlert, TrendingUp } from 'lucide-react';
+﻿import { Activity, ArrowLeft, Database, Flame, Gauge, RadioTower, ShieldAlert, TrendingUp } from 'lucide-react';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import WellboreHifiFigure from '@/components/WellboreHifiFigure';
+import WellboreHifiFigure from '../../components/WellboreHifiFigure';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
 
@@ -34,6 +34,7 @@ function Sparkline({ values, color = '#0f766e' }: { values: number[]; color?: st
     const y = 24 - ((value - min) / range) * 18;
     return (index === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1);
   }).join(' ');
+
   return (
     <svg className="wellbore-mini-sparkline" viewBox="0 0 86 28" role="img" aria-label="最近窗口趋势">
       <path d="M0 24 H86" stroke="#e2e8f0" strokeWidth="1" />
@@ -55,6 +56,7 @@ export default function WellboreStatusDetail() {
     dataSourceState,
     alerts,
   } = useWellControl();
+
   const well = wells.find((item) => item.wellId === selectedWellId) || wellInfo;
   const data = selectedWellView.currentData;
   const detection = selectedWellView.backendDetection;
@@ -64,6 +66,7 @@ export default function WellboreStatusDetail() {
   const isRecovering = !hasSamples && Boolean(runtime?.isRunning || runtime?.status === 'connecting');
   const level = detection.publicLevel as BackendLevel;
   const abnormal = level > 0;
+
   const state = deriveWellboreState({
     backendLevel: level,
     pumpState: data.pumpState,
@@ -76,6 +79,7 @@ export default function WellboreStatusDetail() {
     isRecovering,
     isStopped: selectedWellManuallyStopped,
   });
+
   const meta = getWellboreStateMeta(state);
   const conditionLabel = formatWellboreConditionLabel(data.condition, cycle.stateLabel || meta.label);
   const englishConditionCode = data.condition?.trim() || 'RealtimeMonitoring';
@@ -89,7 +93,7 @@ export default function WellboreStatusDetail() {
 
   const evidence = [
     {
-      label: abnormal ? '出口流量' : '出口/入口差',
+      label: abnormal ? '出口流量' : '出口/入口差值',
       value: abnormal ? format(data.flowOut, 1) : format(data.flowOut - data.flowIn, 1),
       unit: 'L/s',
       status: abnormal && detection.activeSignals.includes('return_response') ? '超过阈值' : '正常',
@@ -100,16 +104,16 @@ export default function WellboreStatusDetail() {
       label: abnormal ? '总池体积' : '池体积漂移',
       value: format(abnormal ? data.pitVolume : data.pitGain, 2),
       unit: 'm³',
-      status: abnormal && detection.activeSignals.includes('pit_volume') ? '超过阈值' : '正常',
-      tone: abnormal && detection.activeSignals.includes('pit_volume') ? 'warning' : 'normal',
+      status: abnormal && (detection.activeSignals.includes('pit_volume') || detection.activeSignals.includes('pit_gain')) ? '超过阈值' : '正常',
+      tone: abnormal && (detection.activeSignals.includes('pit_volume') || detection.activeSignals.includes('pit_gain')) ? 'warning' : 'normal',
       Icon: Database,
     },
     {
       label: abnormal ? '立压' : '立压残差',
       value: format(data.spp, 2),
       unit: 'MPa',
-      status: abnormal && detection.activeSignals.includes('standpipe_pressure') ? '持续跟踪' : '正常',
-      tone: abnormal && detection.activeSignals.includes('standpipe_pressure') ? 'warning' : 'normal',
+      status: abnormal && (detection.activeSignals.includes('standpipe_pressure') || detection.activeSignals.includes('spp_drop')) ? '持续跟踪' : '正常',
+      tone: abnormal && (detection.activeSignals.includes('standpipe_pressure') || detection.activeSignals.includes('spp_drop')) ? 'warning' : 'normal',
       Icon: Gauge,
     },
     {
@@ -120,15 +124,16 @@ export default function WellboreStatusDetail() {
       tone: abnormal && detection.activeSignals.includes('total_gas') ? 'critical' : 'normal',
       Icon: Flame,
     },
-  ];
+  ] as const;
 
   const timeline = useMemo(() => {
     const alertEvents = currentWellAlerts.slice(0, 4).map((alert) => ({ time: alert.time, text: alert.message }));
     if (alertEvents.length > 0) return alertEvents;
+
     return [
-      { time: selectedWellView.currentSampleTime?.slice(11, 16) || '--:--', text: level >= 2 ? '返出响应未完全衰减' : '进入稳定监测窗口' },
+      { time: selectedWellView.currentSampleTime?.slice(11, 16) || '--:--', text: level >= 2 ? '返出响应未完全回落' : '进入稳定监测窗口' },
       { time: cycle.tStopPump || cycle.tStable || '--:--', text: level >= 2 ? '池体积开始偏离' : '基线状态保持有效' },
-      { time: cycle.tStartPump || '--:--', text: level >= 2 ? conditionLabel + '窗口持续跟踪' : '无未确认报警' },
+      { time: cycle.tStartPump || '--:--', text: level >= 2 ? `${conditionLabel}窗口持续跟踪` : '无未确认报警' },
     ];
   }, [conditionLabel, currentWellAlerts, cycle.tStable, cycle.tStartPump, cycle.tStopPump, level, selectedWellView.currentSampleTime]);
 
@@ -142,19 +147,21 @@ export default function WellboreStatusDetail() {
   return (
     <div className="wellbore-detail-page">
       <header className="wellbore-detail-toolbar">
-        <button type="button" className="wellbore-back-button" onClick={() => navigate('/monitoring')}><ArrowLeft size={16} />返回实时监测</button>
+        <button type="button" className="wellbore-back-button" onClick={() => navigate('/monitoring')}>
+          <ArrowLeft size={16} />返回实时监测
+        </button>
         <div className="wellbore-detail-title">
           <strong>井筒状态监测</strong>
           <span>当前井号：{well.wellName}</span>
           <b className="wellbore-state-badge" data-tone={meta.tone}>L{level} {LEVEL_LABELS[level]}</b>
-          <b className="wellbore-mode-badge">{conditionLabel}</b>
         </div>
-        <div className="wellbore-online"><CircleDot size={14} />{selectedWellView.currentSampleTime || '等待更新时间'} · 在线</div>
       </header>
 
       <div className="wellbore-detail-grid">
         <section className="wellbore-detail-main">
-          <WellboreHifiFigure backendLevel={level} className="wellbore-detail-figure" />
+          <div className="wellbore-detail-figure">
+            <WellboreHifiFigure backendLevel={level} />
+          </div>
         </section>
 
         <aside className="wellbore-detail-side">
@@ -162,7 +169,7 @@ export default function WellboreStatusDetail() {
             <h2>当前状态</h2>
             <div className="wellbore-status-hero"><span>L{level}</span><strong>{LEVEL_LABELS[level]}</strong></div>
             <dl>
-              <div><dt>状态评估</dt><dd>{LEVEL_LABELS[level]}</dd></div>
+              <div><dt>状态评级</dt><dd>{LEVEL_LABELS[level]}</dd></div>
               <div><dt>当前工况</dt><dd>{conditionLabel}</dd></div>
               <div><dt>英文工况码</dt><dd className="wellbore-code-text">{englishConditionCode}</dd></div>
             </dl>
@@ -202,7 +209,11 @@ export default function WellboreStatusDetail() {
           {abnormal ? (
             <section className="wellbore-detail-card">
               <h2><ShieldAlert size={16} />处置建议</h2>
-              <ul><li>持续复核出口流量与入口流量差异。</li><li>关注池体积、立压和套压的恢复趋势。</li><li>必要时按现场规程人工复核报警并准备处置。</li></ul>
+              <ul>
+                <li>持续复核出口流量与入口流量差异。</li>
+                <li>关注池体积、立压和套压的恢复趋势。</li>
+                <li>必要时按现场规程人工复核报警并准备处置。</li>
+              </ul>
             </section>
           ) : (
             <section className="wellbore-detail-card">
@@ -227,9 +238,10 @@ export default function WellboreStatusDetail() {
             </dl>
           </section>
 
-          {!abnormal ? <section className="wellbore-detail-note">监测建议：保持实时监测，定期复核基线状态，关注工况切换后的参数恢复。裸眼段约 {openHoleLength} m。</section> : null}
+          {!abnormal ? <section className="wellbore-detail-note">监测建议：保持实时监测，定期复核基线状态，并关注工况切换后的参数恢复。当前裸眼段长度约 {openHoleLength} m。</section> : null}
         </aside>
       </div>
     </div>
   );
 }
+

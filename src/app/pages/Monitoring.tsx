@@ -281,6 +281,7 @@ export default function Monitoring() {
                 spm={viewCurrentData.spm}
                 casingPressure={viewCurrentData.casingPressure}
                 spp={viewCurrentData.spp}
+                pitGain={viewCurrentData.pitGain}
                 pitVolume={viewCurrentData.pitVolume}
                 totalGas={viewCurrentData.totalGas}
                 backendLevel={viewBackendDetection.publicLevel}

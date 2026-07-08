@@ -49,6 +49,14 @@ interface TrackHover {
   clientY: number;
 }
 
+interface AdaptiveRangeOptions {
+  paddingRatio?: number;
+  minSpan?: number;
+  clampMin?: number;
+  clampMax?: number;
+  referenceValues?: Array<number | undefined>;
+}
+
 const AXIS_WIDTH = 108;
 const MOBILE_AXIS_WIDTH = 94;
 const MAX_RENDER_POINTS = 1800;
@@ -163,17 +171,63 @@ function TrackHeader({ config, isAxis, latest }: { config: TrackConfig; isAxis?:
   );
 }
 
-function niceRange(values: number[], fallback: [number, number], paddingRatio = 0.18): [number, number] {
+function niceStep(roughStep: number) {
+  if (!Number.isFinite(roughStep) || roughStep <= 0) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const normalized = roughStep / magnitude;
+
+  if (normalized <= 1) return magnitude;
+  if (normalized <= 2) return 2 * magnitude;
+  if (normalized <= 2.5) return 2.5 * magnitude;
+  if (normalized <= 5) return 5 * magnitude;
+  return 10 * magnitude;
+}
+
+function niceRange(values: number[], fallback: [number, number], options: AdaptiveRangeOptions = {}): [number, number] {
   const finiteValues = values.filter(Number.isFinite);
   if (finiteValues.length === 0) return fallback;
-  let min = Math.min(...finiteValues, fallback[0]);
-  let max = Math.max(...finiteValues, fallback[1]);
-  if (Math.abs(max - min) < 0.001) {
-    min -= 1;
-    max += 1;
+
+  let min = Math.min(...finiteValues);
+  let max = Math.max(...finiteValues);
+  let span = max - min;
+  const midpoint = (min + max) / 2;
+  const baseMinSpan = options.minSpan ?? Math.max(Math.abs(midpoint) * 0.15, (fallback[1] - fallback[0]) * 0.05, 1);
+
+  if (span < baseMinSpan) {
+    const halfSpan = baseMinSpan / 2;
+    min = midpoint - halfSpan;
+    max = midpoint + halfSpan;
+    span = max - min;
   }
-  const pad = (max - min) * paddingRatio;
-  return [min - pad, max + pad];
+
+  const referenceWindow = Math.max(span, baseMinSpan);
+  (options.referenceValues ?? []).forEach((value) => {
+    if (!Number.isFinite(value)) return;
+    if (value < min - referenceWindow || value > max + referenceWindow) return;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  });
+
+  span = Math.max(max - min, baseMinSpan);
+  const pad = span * (options.paddingRatio ?? 0.18);
+  let paddedMin = min - pad;
+  let paddedMax = max + pad;
+
+  if (Number.isFinite(options.clampMin)) paddedMin = Math.max(options.clampMin as number, paddedMin);
+  if (Number.isFinite(options.clampMax)) paddedMax = Math.min(options.clampMax as number, paddedMax);
+  if (paddedMax - paddedMin < baseMinSpan) {
+    const center = (paddedMin + paddedMax) / 2;
+    const halfSpan = baseMinSpan / 2;
+    paddedMin = center - halfSpan;
+    paddedMax = center + halfSpan;
+    if (Number.isFinite(options.clampMin)) paddedMin = Math.max(options.clampMin as number, paddedMin);
+    if (Number.isFinite(options.clampMax)) paddedMax = Math.min(options.clampMax as number, paddedMax);
+  }
+
+  const step = niceStep((paddedMax - paddedMin) / 2);
+  const niceMin = Math.floor(paddedMin / step) * step;
+  const niceMax = Math.ceil(paddedMax / step) * step;
+  return niceMax > niceMin ? [niceMin, niceMax] : fallback;
 }
 
 function useNarrowViewport() {
@@ -404,12 +458,13 @@ function VerticalTrack({
 
     config.curves.forEach((curve, curveIndex) => {
       const [min, max] = curve.range;
+      const inRange = (value?: number) => Number.isFinite(value) && (value as number) >= min && (value as number) <= max;
       const xForValue = (value: number) => {
         const clamped = Math.max(min, Math.min(max, value));
         return plotX + ((clamped - min) / (max - min)) * plotW;
       };
 
-      if (Number.isFinite(curve.baseline)) {
+      if (inRange(curve.baseline)) {
         const baseX = xForValue(curve.baseline as number);
         ctx.strokeStyle = curve.color;
         ctx.globalAlpha = 0.3;
@@ -422,7 +477,7 @@ function VerticalTrack({
         ctx.globalAlpha = 1;
       }
 
-      if (Number.isFinite(curve.warning)) {
+      if (inRange(curve.warning)) {
         const warnX = xForValue(curve.warning as number);
         ctx.strokeStyle = '#f59e0b';
         ctx.globalAlpha = 0.5;
@@ -435,7 +490,7 @@ function VerticalTrack({
         ctx.globalAlpha = 1;
       }
 
-      if (Number.isFinite(curve.critical)) {
+      if (inRange(curve.critical)) {
         const critX = xForValue(curve.critical as number);
         ctx.strokeStyle = '#dc2626';
         ctx.globalAlpha = 0.56;
@@ -662,54 +717,54 @@ export function VerticalCurveDeck({
       title: '流量',
       width: '1.15 1 150px',
       curves: [
-        { key: 'flowOut', label: '出口流量', unit: 'L/s', color: '#dc2626', range: niceRange(flowValues, [0, 100]) },
-        { key: 'flowIn', label: '入口流量', unit: 'L/s', color: '#2563eb', range: niceRange(flowValues, [0, 100]) },
+        { key: 'flowOut', label: '出口流量', unit: 'L/s', color: '#dc2626', range: niceRange(flowValues, [0, 100], { clampMin: 0 }) },
+        { key: 'flowIn', label: '入口流量', unit: 'L/s', color: '#2563eb', range: niceRange(flowValues, [0, 100], { clampMin: 0 }) },
       ],
     },
     {
       title: '池体积',
       width: '1 1 136px',
       curves: [
-        { key: 'pitVolume', label: '总池体积', unit: 'm3', color: '#0891b2', range: niceRange(pitVolumeValues, [0, 160], 0.08) },
+        { key: 'pitVolume', label: '总池体积', unit: 'm3', color: '#0891b2', range: niceRange(pitVolumeValues, [0, 160], { paddingRatio: 0.08, minSpan: 2, clampMin: 0 }) },
       ],
     },
     {
       title: '压力',
       width: '1 1 142px',
       curves: [
-        { key: 'spp', label: '立压', unit: 'MPa', color: '#0f766e', range: niceRange(sppValues, [0, 25]) },
-        { key: 'casingPressure', label: '套压', unit: 'MPa', color: '#ea580c', range: niceRange(casingValues, [0, thresholds.casingPressureWarning + 0.8]), warning: thresholds.casingPressureWarning },
+        { key: 'spp', label: '立压', unit: 'MPa', color: '#0f766e', range: niceRange(sppValues, [0, 25], { clampMin: 0 }) },
+        { key: 'casingPressure', label: '套压', unit: 'MPa', color: '#ea580c', range: niceRange(casingValues, [0, thresholds.casingPressureWarning + 0.8], { clampMin: 0, referenceValues: [thresholds.casingPressureWarning] }), warning: thresholds.casingPressureWarning },
       ],
     },
     {
       title: '钻进载荷',
       width: '1.08 1 148px',
       curves: [
-        { key: 'hookLoad', label: '大钩负荷', unit: 'kN', color: '#475569', range: niceRange(hookValues, [180, 340]) },
-        { key: 'wob', label: '钻压', unit: 'kN', color: '#16a34a', range: niceRange(wobValues, [0, 180]) },
+        { key: 'hookLoad', label: '大钩负荷', unit: 'kN', color: '#475569', range: niceRange(hookValues, [180, 340], { clampMin: 0 }) },
+        { key: 'wob', label: '钻压', unit: 'kN', color: '#16a34a', range: niceRange(wobValues, [0, 180], { clampMin: 0 }) },
       ],
     },
     {
       title: '钻进参数',
       width: '1.12 1 154px',
       curves: [
-        { key: 'drillTime', label: '钻时', unit: 'min/m', color: '#65a30d', range: niceRange(drillTimeValues, [0, 5]) },
-        { key: 'rpm', label: '转盘转速', unit: 'rpm', color: '#ca8a04', range: niceRange(rpmValues, [0, 120]) },
-        { key: 'torque', label: '扭矩', unit: 'kN·m', color: '#d97706', range: niceRange(torqueValues, [0, 40]) },
+        { key: 'drillTime', label: '钻时', unit: 'min/m', color: '#65a30d', range: niceRange(drillTimeValues, [0, 5], { clampMin: 0, minSpan: 0.5 }) },
+        { key: 'rpm', label: '转盘转速', unit: 'rpm', color: '#ca8a04', range: niceRange(rpmValues, [0, 120], { clampMin: 0, minSpan: 5 }) },
+        { key: 'torque', label: '扭矩', unit: 'kN·m', color: '#d97706', range: niceRange(torqueValues, [0, 40], { clampMin: 0, minSpan: 2 }) },
       ],
     },
     {
       title: '泵冲',
       width: '0.78 1 104px',
       curves: [
-        { key: 'spm', label: '总泵冲', unit: 'spm', color: '#7c3aed', range: niceRange(spmValues, [0, 96]) },
+        { key: 'spm', label: '总泵冲', unit: 'spm', color: '#7c3aed', range: niceRange(spmValues, [0, 96], { clampMin: 0, minSpan: 5 }) },
       ],
     },
     {
       title: '气测',
       width: '0.84 1 108px',
       curves: [
-        { key: 'totalGas', label: '全烃', unit: '%', color: '#16a34a', range: niceRange(gasValues, [0, 3.6]), warning: 1.5, critical: 2.8 },
+        { key: 'totalGas', label: '全烃', unit: '%', color: '#16a34a', range: niceRange(gasValues, [0, 3.6], { clampMin: 0, referenceValues: [1.5, 2.8] }), warning: 1.5, critical: 2.8 },
       ],
     },
   ];

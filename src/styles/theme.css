@@ -1,4 +1,4 @@
-@custom-variant dark (&:is(.dark *));
+﻿@custom-variant dark (&:is(.dark *));
 
 :root {
   --font-size: 16px;
@@ -2187,8 +2187,8 @@
   max-width: min(38vw, 360px);
 }
 
-.app-topbar > button[title='收缩导航'],
-.app-topbar > button[title='展开导航'] {
+.app-topbar > button[title='鏀剁缉瀵艰埅'],
+.app-topbar > button[title='灞曞紑瀵艰埅'] {
   min-width: 36px;
   min-height: 36px;
   align-items: center;
@@ -2198,8 +2198,8 @@
   color: #26313d;
 }
 
-.dark .app-topbar > button[title='收缩导航'],
-.dark .app-topbar > button[title='展开导航'] {
+.dark .app-topbar > button[title='鏀剁缉瀵艰埅'],
+.dark .app-topbar > button[title='灞曞紑瀵艰埅'] {
   border-color: rgba(51, 65, 85, 0.95);
   background: rgba(15, 23, 42, 0.96);
   color: #cbd5e1;
@@ -2738,23 +2738,23 @@ body {
 .wellbore-expand-button { display: inline-flex; width: 100%; height: 34px; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; border: 1px solid #0f766e; border-radius: 7px; background: #f0fdfa; color: #0f766e; font-size: 11px; font-weight: 700; }
 
 .wellbore-detail-page { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; background: #f6f8fb; padding: 8px; }
-.wellbore-detail-toolbar { display: flex; min-height: 46px; align-items: center; gap: 14px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; padding: 6px 10px; }
+.wellbore-detail-toolbar { display: flex; min-height: 42px; align-items: center; gap: 12px; border: 1px solid #dbe2ea; border-radius: 8px; background: #fff; padding: 6px 10px; }
 .wellbore-back-button { height: 32px; padding: 0 10px; }
-.wellbore-detail-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 12px; color: #475569; font-size: 11px; }
+.wellbore-detail-title { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: #475569; font-size: 11px; }
 .wellbore-detail-title strong { color: #0f172a; font-size: 14px; }
-.wellbore-detail-title span { padding-left: 12px; border-left: 1px solid #e2e8f0; white-space: nowrap; }
+.wellbore-detail-title span { padding-left: 10px; border-left: 1px solid #e2e8f0; white-space: nowrap; }
 .wellbore-state-badge,
-.wellbore-mode-badge { border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; padding: 5px 9px; color: #334155; font-size: 11px; white-space: nowrap; }
+.wellbore-mode-badge { border: 1px solid #cbd5e1; border-radius: 999px; background: #f8fafc; padding: 4px 9px; color: #334155; font-size: 10px; white-space: nowrap; }
 .wellbore-state-badge[data-tone='critical'] { border-color: #fca5a5; background: #fff7f7; color: #dc2626; }
 .wellbore-state-badge[data-tone='warning'],
 .wellbore-mode-badge { border-color: #fdba74; background: #fffaf0; color: #c2410c; }
-.wellbore-online { display: inline-flex; align-items: center; gap: 5px; color: #047857; font-size: 10px; white-space: nowrap; }
-.wellbore-detail-grid { display: grid; min-height: 0; flex: 1 1 auto; gap: 8px; margin-top: 8px; overflow: hidden; }
+.wellbore-online { display: none; }
+.wellbore-detail-grid { display: grid; min-height: 0; flex: 1 1 auto; gap: 8px; margin-top: 8px; overflow: hidden; align-items: stretch; }
 .wellbore-detail-main { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
-.wellbore-detail-figure { width: 100%; height: 100%; min-height: 620px; border-radius: 12px; overflow: hidden; background: #fff; }
-.wellbore-detail-figure img { object-fit: contain; }
-.wellbore-hifi-figure { position: relative; width: 100%; height: 100%; min-height: 620px; border-radius: 12px; overflow: hidden; background: #fff; }
-.wellbore-hifi-base { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+.wellbore-detail-figure { width: 100%; height: 100%; min-height: 620px; border: 1px solid #dde5ec; border-radius: 12px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+.wellbore-detail-figure img { object-fit: contain; object-position: center; }
+.wellbore-hifi-figure { position: relative; display: flex; width: 100%; height: 100%; min-height: 620px; align-items: center; justify-content: center; border-radius: 12px; overflow: hidden; background: #ffffff; }
+.wellbore-hifi-base { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center center; pointer-events: none; user-select: none; }
 .wellbore-hifi-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .wellbore-flow-path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 8; animation: wellboreDashFlow 1.8s linear infinite; }
 .wellbore-flow-path-normal { stroke: rgba(20, 184, 166, 0.6); stroke-width: 2; }
@@ -2765,19 +2765,25 @@ body {
 .wellbore-kick-pulse { transform-box: fill-box; transform-origin: center; animation: wellborePulse 1.6s ease-in-out infinite; }
 .wellbore-bit-pulse { transform-box: fill-box; transform-origin: center; animation: wellboreBitPulse 2.4s ease-in-out infinite; }
 .wellbore-status-breathe { animation: wellboreStatusBreathe 3s ease-in-out infinite; }
-.wellbore-evidence-callout { filter: drop-shadow(0 5px 12px rgba(127, 29, 29, 0.12)); }
-.well-schematic-card-detail { min-height: 0; flex: 1 1 auto; box-shadow: none; }
-.well-schematic-card-detail .well-schematic-status-head { min-height: 46px; flex: 0 0 auto; }
-.well-schematic-summary-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin: 0 0 7px; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; padding: 6px; }
+.wellbore-status-breathe rect { filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.08)); }
+.wellbore-evidence-callout { filter: drop-shadow(0 5px 12px rgba(127, 29, 29, 0.10)); }
+.well-schematic-card-detail { min-height: 0; flex: 1 1 auto; padding: 0; border-color: transparent; background: transparent; box-shadow: none; }
+.well-schematic-card-detail .well-schematic-status-head { display: none; }
+.well-schematic-summary-strip { display: none; }
 .well-schematic-summary-strip span { min-width: 0; overflow: hidden; border-right: 1px solid #e2e8f0; padding: 0 6px; color: #64748b; font-size: 9px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .well-schematic-summary-strip span:last-child { border-right: 0; }
 .well-schematic-summary-strip strong { margin-left: 4px; color: #0f172a; font-size: 10px; font-variant-numeric: tabular-nums; }
-.well-schematic-card-detail .well-schematic-figure { min-height: 0; background: #f8fafc; }
-.well-schematic-card-detail .well-schematic-figure svg { display: block; width: auto; max-width: min(100%, 860px); margin: 0 auto; }
-.well-schematic-legend { display: flex; min-height: 26px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 18px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 9px; }
+.well-schematic-structure-strip { display: none; }
+.well-schematic-structure-strip span { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; padding: 3px 8px; color: #64748b; font-size: 9px; line-height: 1.3; }
+.well-schematic-structure-strip strong { color: #0f172a; font-size: 10px; font-variant-numeric: tabular-nums; }
+.well-schematic-structure-strip .well-schematic-structure-title { border-color: #cbd5e1; background: #f8fafc; color: #334155; font-weight: 700; }
+.well-schematic-card-detail .well-schematic-figure { min-height: 0; flex: 1 1 auto; border-color: #dbe2ea; background: #f8fafc; }
+.well-schematic-card-detail .well-schematic-figure svg { display: block; width: 100%; height: 100%; max-width: none; margin: 0 auto; }
+.well-schematic-legend { display: flex; min-height: 18px; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 12px; border-top: 1px solid #e2e8f0; padding-top: 4px; color: #64748b; font-size: 9px; line-height: 1.3; }
 .well-schematic-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .well-schematic-legend i { display: inline-block; width: 18px; height: 0; border-top: 2px dashed #dc2626; }
 .well-schematic-legend .legend-return { border-top-color: #0d9488; }
+.well-schematic-legend .legend-watch { border-top-color: #f59e0b; }
 .well-schematic-legend .legend-influx { width: 7px; height: 7px; border: 0; border-radius: 999px; background: #dc2626; }
 .wellbore-detail-side { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto auto auto auto; align-content: start; gap: 7px; overflow: hidden; }
 .wellbore-detail-card { padding: 9px 10px; }
@@ -2843,11 +2849,11 @@ body {
 @media (min-width: 1024px) {
   body .monitoring-main-grid { grid-template-columns: minmax(0, 1fr) 360px !important; gap: 10px; }
   body .monitoring-side-panel { grid-template-rows: auto minmax(0, 1fr) !important; }
-  .wellbore-detail-grid { grid-template-columns: minmax(0, 1.65fr) minmax(380px, 0.95fr); }
+  .wellbore-detail-grid { grid-template-columns: minmax(0, 1.9fr) minmax(360px, 0.8fr); }
 }
 @media (min-width: 1536px) {
   body .monitoring-main-grid { grid-template-columns: minmax(0, 1fr) 400px !important; }
-  .wellbore-detail-grid { grid-template-columns: minmax(0, 1.65fr) minmax(440px, 0.95fr); }
+  .wellbore-detail-grid { grid-template-columns: minmax(0, 2fr) minmax(400px, 0.78fr); }
 }
 @media (max-width: 1200px) {
   .realtime-kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -4193,3 +4199,8 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+
+
+
+

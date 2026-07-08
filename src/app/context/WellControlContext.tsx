@@ -283,6 +283,7 @@ export interface WellRuntimeState {
   monitoringStartedAt: string | null;
   startedSampleTime: string | null;
   selectedReplayStartTime?: string | null;
+  pausedSampleTime?: string | null;
   message: string;
   updatedAt: string;
 }
@@ -853,6 +854,7 @@ function sanitizeWellRuntimeState(value: unknown): WellRuntimeState | null {
     monitoringStartedAt: row.monitoringStartedAt ? String(row.monitoringStartedAt) : null,
     startedSampleTime: row.startedSampleTime ? String(row.startedSampleTime) : null,
     selectedReplayStartTime: row.selectedReplayStartTime ? String(row.selectedReplayStartTime) : null,
+    pausedSampleTime: row.pausedSampleTime ? String(row.pausedSampleTime) : null,
     message: wasActive
       ? '正在恢复上次监测流'
       : String(row.message || '待启动'),
@@ -878,6 +880,7 @@ function getInitialWellRuntimeStates() {
       latestFormation: runtime.latestFormation ?? snapshot?.latestFormation ?? snapshot?.currentData.formation,
       shouldAutoRestore: runtime.shouldAutoRestore ?? isRuntimeStreamActive(runtime),
       selectedReplayStartTime: runtime.selectedReplayStartTime || snapshot?.startedSampleTime || snapshot?.currentSampleTime || null,
+      pausedSampleTime: runtime.pausedSampleTime || null,
     };
   });
   Object.entries(snapshots).forEach(([wellId, snapshot]) => {
@@ -905,6 +908,7 @@ function getInitialWellRuntimeStates() {
       monitoringStartedAt: resolveMonitoringStartedAt(null, snapshot),
       startedSampleTime: snapshot.startedSampleTime || snapshot.currentSampleTime || null,
       selectedReplayStartTime: snapshot.startedSampleTime || snapshot.currentSampleTime || null,
+      pausedSampleTime: null,
       message: '已保留本地历史，可按需继续监测',
       updatedAt: new Date().toISOString(),
     };
@@ -1969,6 +1973,7 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
   private lastSampleTime: string | null = null;
   private fallbackActivated = false;
   private connectWatchdog: number | null = null;
+  private reconnectTimer: number | null = null;
 
   constructor(
     private endpoint: string,
@@ -1993,6 +1998,10 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     if (this.connectWatchdog !== null) {
       window.clearTimeout(this.connectWatchdog);
       this.connectWatchdog = null;
+    }
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
     this.activeAdapter?.disconnect();
     this.activeAdapter = null;
@@ -2039,6 +2048,10 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
       };
 
       if (!isFallback && !this.fallbackActivated) {
+        if (state.status === 'paused' && this.totalRecordCount > 0) {
+          this.scheduleSseReconnect(adjustedState, state.message || '检测流结束');
+          return;
+        }
         const shouldFallback = state.status === 'error' || (state.status === 'paused' && this.totalRecordCount === 0);
         if (shouldFallback) {
           this.switchToPreview(state.message || '检测流不可用');
@@ -2048,6 +2061,32 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
 
       this.emitStatus(adjustedState);
     });
+  }
+
+  private scheduleSseReconnect(state: DataSourceState, reason: string) {
+    if (this.closedByClient || this.fallbackActivated || !this.activeWell || !this.seedData || this.reconnectTimer !== null) return;
+    const resumeFrom = normalizeSampleTime(
+      nextPreviewCursorFrom(this.lastSampleTime)
+      || this.lastSampleTime
+      || this.startTime
+      || this.activeWell.discoveryTime
+      || this.activeWell.startTime
+      || '',
+    );
+    if (resumeFrom) this.startTime = resumeFrom;
+    this.activeAdapter?.disconnect();
+    this.activeAdapter = null;
+    this.emitStatus({
+      ...state,
+      status: 'connecting',
+      endpoint: this.endpoint,
+      message: `${reason}，正在从 ${resumeFrom ? formatRecordTime(resumeFrom).timeStr : '最新点'} 续接实时流`,
+    });
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.closedByClient || this.fallbackActivated) return;
+      this.startSse();
+    }, Math.max(800, this.rateMs));
   }
 
   private armWatchdog() {
@@ -2457,6 +2496,10 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
 
   const getResumeSampleTime = useCallback((well: WellInfo, runtime?: WellRuntimeState) => {
     const snapshot = getWellSnapshot(well);
+    if (runtime?.monitoringMode === 'realtime') {
+      return runtime.pausedSampleTime || wellLatestSampleTime(well) || '';
+    }
+    if (runtime?.pausedSampleTime) return runtime.pausedSampleTime;
     return runtime?.lastRecordAt || snapshot.lastRecordAt || snapshot.currentSampleTime || runtime?.startedSampleTime || snapshot.startedSampleTime || well.discoveryTime || well.startTime || '';
   }, [getWellSnapshot]);
 
@@ -2555,6 +2598,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           monitoringStartedAt: null,
           startedSampleTime: null,
           selectedReplayStartTime: null,
+          pausedSampleTime: null,
           message: '待启动',
           ...prev[wellId],
           ...patch,
@@ -2751,6 +2795,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         status: state.status,
         isRunning: streamActive,
         shouldAutoRestore: streamActive,
+        pausedSampleTime: streamActive ? null : previousRuntime?.pausedSampleTime,
         recordCount: nextRecordCount > 0 ? nextRecordCount : undefined,
         lastRecordAt: state.lastRecordAt || previousRuntime?.lastRecordAt,
         message: formatRuntimeFrameMessage(state.message, nextRecordCount),
@@ -3169,7 +3214,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     const mode = selectedWellRuntime?.monitoringMode || 'realtime';
     const adapterStartTime = mode === 'historyReplay'
       ? fromDatetimeLocalValue(selectedStartTime)
-      : (selectedWellRuntime?.lastRecordAt || wellLatestSampleTime(wellInfo));
+      : (selectedWellRuntime?.pausedSampleTime || wellLatestSampleTime(wellInfo));
     const adapter = createMonitoringAdapter(mode, realtimeEndpoint, adapterStartTime, 1200);
     adapterRef.current = adapter;
     adapter.onStatus((state) => {
@@ -3183,6 +3228,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         status: state.status,
         isRunning: streamActive,
         shouldAutoRestore: streamActive,
+        pausedSampleTime: streamActive ? null : previousRuntime?.pausedSampleTime,
         recordCount: nextRecordCount > 0 ? nextRecordCount : undefined,
         lastRecordAt: state.lastRecordAt || previousRuntime?.lastRecordAt,
         message: formatRuntimeFrameMessage(state.message, nextRecordCount),
@@ -3513,10 +3559,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     const runtimeBeforeStart = wellRuntimeStatesRef.current[wellId];
     const snapshotBeforeStart = wellSnapshotsRef.current[wellId] || createWellMonitoringSnapshot(nextWell);
     const monitoringMode = runtimeBeforeStart?.monitoringMode || 'realtime';
-    const resumeCursor = runtimeBeforeStart?.lastRecordAt
-      || snapshotBeforeStart.lastRecordAt
-      || snapshotBeforeStart.currentSampleTime
-      || '';
+    const pausedCursor = runtimeBeforeStart?.pausedSampleTime || '';
     const configuredReplayStart = clampReplayStartTime(
       runtimeBeforeStart?.selectedReplayStartTime
       || runtimeBeforeStart?.startedSampleTime
@@ -3526,12 +3569,12 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     );
     const latestRealtimeStart = wellLatestSampleTime(nextWell);
     const resumeFrom = options?.resumeFrom
-      || (!wasManuallyStopped ? resumeCursor : '')
+      || (!wasManuallyStopped ? pausedCursor : '')
       || (monitoringMode === 'historyReplay' ? configuredReplayStart : latestRealtimeStart)
       || runtimeBeforeStart?.startedSampleTime
       || snapshotBeforeStart.startedSampleTime
       || '';
-    const shouldPreserveSnapshot = Boolean(options?.preserveSnapshot || options?.restoreOnly || (!wasManuallyStopped && resumeCursor));
+    const shouldPreserveSnapshot = Boolean(options?.preserveSnapshot || options?.restoreOnly || (!wasManuallyStopped && pausedCursor));
     const nextMonitoringStartedAt = !wasManuallyStopped && shouldPreserveSnapshot
       ? (resolveMonitoringStartedAt(
         runtimeBeforeStart,
@@ -3560,6 +3603,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         shouldAutoRestore: true,
         monitoringStartedAt: nextMonitoringStartedAt,
         startedSampleTime: runtimeBeforeStart?.startedSampleTime || snapshotBeforeStart.startedSampleTime || resumeFrom,
+        pausedSampleTime: null,
         ...(shouldPreserveSnapshot ? {} : { recordCount: 0, backendLevel: 0 as BackendLevel, lastRecordAt: null }),
         message: `正在恢复检测流 · 起始 ${formatRecordTime(resumeFrom).timeStr}`,
       });
@@ -3597,6 +3641,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       monitoringStartedAt: nextMonitoringStartedAt,
       startedSampleTime: monitoringMode === 'historyReplay' ? directStartTime : null,
       selectedReplayStartTime: monitoringMode === 'historyReplay' ? directStartTime : runtimeBeforeStart?.selectedReplayStartTime ?? null,
+      pausedSampleTime: null,
       ...(shouldPreserveSnapshot ? {} : { recordCount: 0, backendLevel: 0 as BackendLevel, lastRecordAt: null }),
       message: monitoringMode === 'historyReplay'
         ? `正在建立历史回放 · 起始 ${formatRecordTime(directStartTime).timeStr}`
@@ -3718,6 +3763,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       isRunning: false,
       shouldAutoRestore: false,
       lastRecordAt: pauseCursor,
+      pausedSampleTime: pauseCursor,
       message: mode === 'historyReplay'
         ? '历史回放已暂停，可从暂停点继续'
         : '实时监测已暂停，恢复时会补齐暂停期间的新点',
@@ -3750,6 +3796,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       isRunning: false,
       shouldAutoRestore: false,
       startedSampleTime: null,
+      pausedSampleTime: null,
       message: '监测已停止',
       monitoringStartedAt: null,
     });
@@ -3813,6 +3860,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     updateWellRuntime(wellId, {
       monitoringMode: safeMode,
       selectedReplayStartTime: safeMode === 'historyReplay' ? selectedReplayStart : runtime?.selectedReplayStartTime ?? selectedReplayStart,
+      pausedSampleTime: null,
       shouldAutoRestore: false,
       message: safeMode === 'historyReplay' ? '已切换为历史回放，可选择历史时间' : '已切换为实时监测，将从最新点接入',
     });
@@ -3832,6 +3880,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       monitoringMode: 'historyReplay',
       selectedReplayStartTime: nextStart,
       startedSampleTime: nextStart,
+      pausedSampleTime: null,
       shouldAutoRestore: false,
       message: nextStart ? `历史回放起点已选择 · ${formatRecordTime(nextStart).timeStr}` : '请选择历史回放起点',
     });
