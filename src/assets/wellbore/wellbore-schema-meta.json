@@ -1,0 +1,22 @@
+{
+  "source": "wellschematicspy",
+  "units": {
+    "depth": "m",
+    "diameter": "in"
+  },
+  "wellDepth": 4200,
+  "surfaceCasingDepth": 1200,
+  "casingShoeDepth": 3200,
+  "bitDepth": 3860,
+  "kickZone": {
+    "top": 3950,
+    "bottom": 4020
+  },
+  "overlayViewBox": {
+    "width": 420,
+    "height": 850,
+    "topY": 64,
+    "bottomY": 786,
+    "centerX": 210
+  }
+}

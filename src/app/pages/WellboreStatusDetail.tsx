@@ -1,8 +1,8 @@
 ﻿import { Activity, ArrowLeft, Database, Flame, Gauge, RadioTower, ShieldAlert, TrendingUp } from 'lucide-react';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import WellboreHifiFigure from '../../components/WellboreHifiFigure';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
+import { WellboreSchemaFigure } from '../components/WellboreSchemaFigure';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
 
 const LEVEL_LABELS: Record<BackendLevel, string> = {
@@ -160,7 +160,28 @@ export default function WellboreStatusDetail() {
       <div className="wellbore-detail-grid">
         <section className="wellbore-detail-main">
           <div className="wellbore-detail-figure">
-            <WellboreHifiFigure backendLevel={level} />
+            <WellboreSchemaFigure
+              mode="detail"
+              backendLevel={level}
+              wellDepth={wellDepth}
+              bitDepth={data.bitDepth ?? wellDepth}
+              flowIn={data.flowIn}
+              flowOut={data.flowOut}
+              spm={data.spm}
+              casingPressure={data.casingPressure}
+              drillPipePressure={data.spp}
+              pitGain={data.pitGain}
+              pitVolume={data.pitVolume}
+              returnResponse={0}
+              totalGas={data.totalGas}
+              activeSignals={detection.activeSignals}
+              pumpState={data.pumpState}
+              condition={data.condition}
+              cycleInfo={cycle}
+              hasSamples={hasSamples}
+              isRecovering={isRecovering}
+              isStopped={selectedWellManuallyStopped}
+            />
           </div>
         </section>
 

@@ -2714,6 +2714,7 @@ body {
 .wellbore-thumbnail-figure .well-schematic-card { padding: 0; box-shadow: none; }
 .wellbore-thumbnail-figure .well-schematic-figure { border: 0; }
 .wellbore-thumbnail-figure svg { display: block; width: auto; max-width: 278px; margin: 0 auto; }
+.wellbore-thumbnail-figure .wellbore-schema-overlay { position: absolute; width: 100%; max-width: none; margin: 0; }
 .wellbore-thumbnail-figure:hover { outline: 2px solid rgba(15, 118, 110, 0.18); }
 .wellbore-status-line { display: grid; grid-template-columns: auto minmax(0, 1fr) 1px auto minmax(0, 1fr); align-items: center; gap: 7px; min-height: 32px; margin-top: 7px; border: 1px solid #e2e8f0; border-left: 3px solid #0f766e; border-radius: 7px; padding: 5px 8px; white-space: nowrap; }
 .wellbore-status-line[data-tone='warning'] { border-left-color: #d97706; }
@@ -2756,6 +2757,12 @@ body {
 .wellbore-hifi-figure { position: relative; display: flex; width: 100%; height: 100%; min-height: 620px; align-items: center; justify-content: center; border-radius: 12px; overflow: hidden; background: #ffffff; }
 .wellbore-hifi-base { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center center; pointer-events: none; user-select: none; }
 .wellbore-hifi-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.wellbore-schema-figure { position: relative; display: flex; width: 100%; height: 100%; min-height: 238px; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: #ffffff; }
+.wellbore-schema-figure-detail { min-height: 620px; border-radius: 12px; }
+.wellbore-schema-base { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center center; pointer-events: none; user-select: none; }
+.wellbore-schema-overlay { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
+.wellbore-schema-figure-thumbnail .wellbore-schema-base,
+.wellbore-schema-figure-thumbnail .wellbore-schema-overlay { transform: scale(1.08); }
 .wellbore-flow-path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 8; animation: wellboreDashFlow 1.8s linear infinite; }
 .wellbore-flow-path-normal { stroke: rgba(20, 184, 166, 0.6); stroke-width: 2; }
 .wellbore-flow-path-warning { stroke: #f97316; stroke-width: 2.4; }

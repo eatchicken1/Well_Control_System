@@ -2,7 +2,7 @@ import { Maximize2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import type { BackendLevel, CycleInfo } from '../context/WellControlContext';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
-import { WellSchematic } from './WellSchematic';
+import { WellboreSchemaFigure } from './WellboreSchemaFigure';
 
 export interface WellboreStatusViewProps {
   wellName: string;
@@ -56,7 +56,7 @@ export function WellboreStatusThumbnail(props: WellboreStatusViewProps) {
       </header>
 
       <button type="button" className="wellbore-thumbnail-figure" onClick={openDetail} aria-label="放大查看井筒状态">
-        <WellSchematic
+        <WellboreSchemaFigure
           mode="thumbnail"
           wellDepth={props.wellDepth}
           bitDepth={props.bitDepth}
@@ -77,8 +77,6 @@ export function WellboreStatusThumbnail(props: WellboreStatusViewProps) {
           hasSamples={props.hasSamples}
           isRecovering={props.isRecovering}
           isStopped={props.isStopped}
-          compact
-          surface="light"
         />
       </button>
 

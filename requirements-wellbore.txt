@@ -1,0 +1,3 @@
+wellschematicspy==0.1.1
+matplotlib>=3.8
+pydantic<2
