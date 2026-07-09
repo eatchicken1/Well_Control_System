@@ -9,6 +9,7 @@ import Alerts from './pages/Alerts';
 import Settings from './pages/Settings';
 import Baseline from './pages/Baseline';
 import Login from './pages/Login';
+import WellborePreview from './pages/WellborePreview';
 import NotFound from './pages/NotFound';
 import RouteError from './pages/RouteError';
 
@@ -18,6 +19,7 @@ function WellControlLayout() {
 
 export const router = createBrowserRouter([
   { path: '/login', Component: Login, ErrorBoundary: RouteError },
+  { path: '/wellbore-preview', Component: WellborePreview, ErrorBoundary: RouteError },
   {
     Component: ProtectedRoute,
     ErrorBoundary: RouteError,

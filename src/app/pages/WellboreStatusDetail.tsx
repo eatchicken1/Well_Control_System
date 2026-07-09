@@ -1,6 +1,6 @@
 ﻿import { Activity, ArrowLeft, Database, Flame, Gauge, RadioTower, ShieldAlert, TrendingUp } from 'lucide-react';
 import { useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { WellboreSchemaFigure } from '../components/WellboreSchemaFigure';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
@@ -45,6 +45,7 @@ function Sparkline({ values, color = '#0f766e' }: { values: number[]; color?: st
 
 export default function WellboreStatusDetail() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     selectedWellId,
     selectedWellView,
@@ -64,64 +65,91 @@ export default function WellboreStatusDetail() {
   const runtime = wellRuntimeStates[selectedWellId];
   const hasSamples = selectedWellView.flowHistory.length > 0 || selectedWellView.pressureHistory.length > 0;
   const isRecovering = !hasSamples && Boolean(runtime?.isRunning || runtime?.status === 'connecting');
-  const level = detection.publicLevel as BackendLevel;
+  const previewLevelParam = Number(searchParams.get('level'));
+  const previewLevel = ([0, 1, 2, 3, 4].includes(previewLevelParam) ? previewLevelParam : 3) as BackendLevel;
+  const previewActive = searchParams.get('preview') === '1' || searchParams.get('preview') === 'kick' || (!selectedWellId && !hasSamples);
+  const displayData = previewActive
+    ? {
+        ...data,
+        wellDepth: 4200,
+        bitDepth: 3860,
+        flowIn: 32.4,
+        flowOut: previewLevel >= 2 ? 38.8 : previewLevel === 1 ? 34.1 : 32.2,
+        spm: 62,
+        casingPressure: previewLevel >= 2 ? 4.6 : 1.1,
+        spp: previewLevel >= 2 ? 13.7 : 15.2,
+        pitGain: previewLevel >= 2 ? 1.86 : previewLevel === 1 ? 0.42 : 0.04,
+        pitVolume: previewLevel >= 2 ? 122.6 : 118.2,
+        totalGas: previewLevel >= 2 ? 1.42 : 0.18,
+        pumpState: 'running',
+        condition: previewLevel >= 2 ? 'KickPreview' : previewLevel === 1 ? 'WatchPreview' : 'StablePreview',
+      }
+    : data;
+  const displayDetection = previewActive
+    ? {
+        ...detection,
+        publicLevel: previewLevel,
+        activeSignals: previewLevel >= 2 ? ['return_response', 'pit_gain', 'pit_volume', 'total_gas', 'casing_pressure'] : previewLevel === 1 ? ['return_response'] : [],
+      }
+    : detection;
+  const level = displayDetection.publicLevel as BackendLevel;
   const abnormal = level > 0;
 
   const state = deriveWellboreState({
     backendLevel: level,
-    pumpState: data.pumpState,
-    condition: data.condition,
+    pumpState: displayData.pumpState,
+    condition: displayData.condition,
     cycleState: cycle.state,
-    flowIn: data.flowIn,
-    flowOut: data.flowOut,
-    spm: data.spm,
-    hasSamples,
+    flowIn: displayData.flowIn,
+    flowOut: displayData.flowOut,
+    spm: displayData.spm,
+    hasSamples: previewActive || hasSamples,
     isRecovering,
     isStopped: selectedWellManuallyStopped,
   });
 
   const meta = getWellboreStateMeta(state);
-  const conditionLabel = formatWellboreConditionLabel(data.condition, cycle.stateLabel || meta.label);
-  const englishConditionCode = data.condition?.trim() || 'RealtimeMonitoring';
+  const conditionLabel = previewActive ? (level >= 2 ? '井筒效果预览：疑似溢流' : level === 1 ? '井筒效果预览：观察' : '井筒效果预览：正常循环') : formatWellboreConditionLabel(displayData.condition, cycle.stateLabel || meta.label);
+  const englishConditionCode = displayData.condition?.trim() || 'RealtimeMonitoring';
   const currentWellAlerts = alerts.filter((alert) => !alert.wellId || alert.wellId === selectedWellId);
   const sampleCount = Math.max(dataSourceState.recordCount, selectedWellView.historyRecords.length, selectedWellView.flowHistory.length);
   const delay = dataDelaySeconds(dataSourceState.lastRecordAt || selectedWellView.currentSampleTime || runtime?.lastRecordAt || null);
   const baselineReady = !baselineInfo.isColdStart && baselineInfo.qualityScore >= 60;
-  const wellDepth = selectedWellView.latestWellDepth ?? data.wellDepth ?? well.depth;
+  const wellDepth = previewActive ? 4200 : selectedWellView.latestWellDepth ?? displayData.wellDepth ?? well.depth;
   const openHoleLength = Math.max(0, Math.round(wellDepth - CASING_SHOE_DEPTH));
   const stateDescription = abnormal ? meta.description : '关键参数处于基线范围内，未触发预警证据。';
 
   const evidence = [
     {
       label: abnormal ? '出口流量' : '出口/入口差值',
-      value: abnormal ? format(data.flowOut, 1) : format(data.flowOut - data.flowIn, 1),
+      value: abnormal ? format(displayData.flowOut, 1) : format(displayData.flowOut - displayData.flowIn, 1),
       unit: 'L/s',
-      status: abnormal && detection.activeSignals.includes('return_response') ? '超过阈值' : '正常',
-      tone: abnormal && detection.activeSignals.includes('return_response') ? 'critical' : 'normal',
+      status: abnormal && displayDetection.activeSignals.includes('return_response') ? '超过阈值' : '正常',
+      tone: abnormal && displayDetection.activeSignals.includes('return_response') ? 'critical' : 'normal',
       Icon: Activity,
     },
     {
       label: abnormal ? '总池体积' : '池体积漂移',
-      value: format(abnormal ? data.pitVolume : data.pitGain, 2),
+      value: format(abnormal ? displayData.pitVolume : displayData.pitGain, 2),
       unit: 'm³',
-      status: abnormal && (detection.activeSignals.includes('pit_volume') || detection.activeSignals.includes('pit_gain')) ? '超过阈值' : '正常',
-      tone: abnormal && (detection.activeSignals.includes('pit_volume') || detection.activeSignals.includes('pit_gain')) ? 'warning' : 'normal',
+      status: abnormal && (displayDetection.activeSignals.includes('pit_volume') || displayDetection.activeSignals.includes('pit_gain')) ? '超过阈值' : '正常',
+      tone: abnormal && (displayDetection.activeSignals.includes('pit_volume') || displayDetection.activeSignals.includes('pit_gain')) ? 'warning' : 'normal',
       Icon: Database,
     },
     {
       label: abnormal ? '立压' : '立压残差',
-      value: format(data.spp, 2),
+      value: format(displayData.spp, 2),
       unit: 'MPa',
-      status: abnormal && (detection.activeSignals.includes('standpipe_pressure') || detection.activeSignals.includes('spp_drop')) ? '持续跟踪' : '正常',
-      tone: abnormal && (detection.activeSignals.includes('standpipe_pressure') || detection.activeSignals.includes('spp_drop')) ? 'warning' : 'normal',
+      status: abnormal && (displayDetection.activeSignals.includes('standpipe_pressure') || displayDetection.activeSignals.includes('spp_drop')) ? '持续跟踪' : '正常',
+      tone: abnormal && (displayDetection.activeSignals.includes('standpipe_pressure') || displayDetection.activeSignals.includes('spp_drop')) ? 'warning' : 'normal',
       Icon: Gauge,
     },
     {
       label: '全烃',
-      value: format(data.totalGas, 2),
+      value: format(displayData.totalGas, 2),
       unit: '%',
-      status: abnormal && detection.activeSignals.includes('total_gas') ? '持续跟踪' : '正常',
-      tone: abnormal && detection.activeSignals.includes('total_gas') ? 'critical' : 'normal',
+      status: abnormal && displayDetection.activeSignals.includes('total_gas') ? '持续跟踪' : '正常',
+      tone: abnormal && displayDetection.activeSignals.includes('total_gas') ? 'critical' : 'normal',
       Icon: Flame,
     },
   ] as const;
@@ -153,7 +181,20 @@ export default function WellboreStatusDetail() {
         <div className="wellbore-detail-title">
           <strong>井筒状态监测</strong>
           <span>当前井号：{well.wellName}</span>
+          {previewActive ? <span>预览模式</span> : null}
           <b className="wellbore-state-badge" data-tone={meta.tone}>L{level} {LEVEL_LABELS[level]}</b>
+        </div>
+        <div className="wellbore-preview-levels" aria-label="井筒预览等级">
+          {[0, 1, 3, 4].map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={previewActive && level === item ? 'is-active' : ''}
+              onClick={() => setSearchParams({ preview: '1', level: String(item) })}
+            >
+              L{item}
+            </button>
+          ))}
         </div>
       </header>
 
@@ -164,21 +205,21 @@ export default function WellboreStatusDetail() {
               mode="detail"
               backendLevel={level}
               wellDepth={wellDepth}
-              bitDepth={data.bitDepth ?? wellDepth}
-              flowIn={data.flowIn}
-              flowOut={data.flowOut}
-              spm={data.spm}
-              casingPressure={data.casingPressure}
-              drillPipePressure={data.spp}
-              pitGain={data.pitGain}
-              pitVolume={data.pitVolume}
+              bitDepth={displayData.bitDepth ?? wellDepth}
+              flowIn={displayData.flowIn}
+              flowOut={displayData.flowOut}
+              spm={displayData.spm}
+              casingPressure={displayData.casingPressure}
+              drillPipePressure={displayData.spp}
+              pitGain={displayData.pitGain}
+              pitVolume={displayData.pitVolume}
               returnResponse={0}
-              totalGas={data.totalGas}
-              activeSignals={detection.activeSignals}
-              pumpState={data.pumpState}
-              condition={data.condition}
+              totalGas={displayData.totalGas}
+              activeSignals={displayDetection.activeSignals}
+              pumpState={displayData.pumpState}
+              condition={displayData.condition}
               cycleInfo={cycle}
-              hasSamples={hasSamples}
+              hasSamples={previewActive || hasSamples}
               isRecovering={isRecovering}
               isStopped={selectedWellManuallyStopped}
             />

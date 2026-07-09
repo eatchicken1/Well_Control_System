@@ -25,10 +25,32 @@ interface WellboreSchemaFigureProps {
   isStopped?: boolean;
 }
 
-const VIEW_BOX = '0 0 420 850';
-const TOP_Y = 64;
-const BOTTOM_Y = 786;
-const CENTER_X = 210;
+const DETAIL_VIEW_BOX = '0 0 760 620';
+const THUMB_VIEW_BOX = '0 0 420 620';
+
+const DETAIL = {
+  top: 64,
+  bottom: 556,
+  centerX: 358,
+  baseX: 224,
+  baseY: 38,
+  baseW: 268,
+  baseH: 540,
+  axisX: 94,
+  labelX: 536,
+};
+
+const THUMB = {
+  top: 56,
+  bottom: 566,
+  centerX: 210,
+  baseX: 86,
+  baseY: 28,
+  baseW: 248,
+  baseH: 560,
+  axisX: 42,
+  labelX: 314,
+};
 
 const LABELS = {
   aria: '\u4e95\u7b52\u72b6\u6001\u5de5\u7a0b\u5256\u9762',
@@ -45,7 +67,11 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function depthToY(depth: number, wellDepth: number) {
-  return TOP_Y + (clamp(depth, 0, wellDepth) / wellDepth) * (BOTTOM_Y - TOP_Y);
+  return DETAIL.top + (clamp(depth, 0, wellDepth) / wellDepth) * (DETAIL.bottom - DETAIL.top);
+}
+
+function depthToGeometryY(depth: number, wellDepth: number, geometry: typeof DETAIL | typeof THUMB) {
+  return geometry.top + (clamp(depth, 0, wellDepth) / wellDepth) * (geometry.bottom - geometry.top);
 }
 
 function toneColor(tone: WellboreTone) {
@@ -136,85 +162,127 @@ export function WellboreSchemaFigure({
   });
 
   const isDetail = mode === 'detail';
+  const geometry = isDetail ? DETAIL : THUMB;
   const color = levelColor(backendLevel);
-  const bitY = depthToY(model.bitDepth, model.wellDepth);
-  const kickY = depthToY(model.kickPointDepth, model.wellDepth);
-  const watchY = depthToY(model.observationDepth, model.wellDepth);
-  const shoeY = depthToY(model.casingShoeDepth, model.wellDepth);
-  const topReturnY = TOP_Y + 72;
+  const bitY = depthToGeometryY(model.bitDepth, model.wellDepth, geometry);
+  const kickY = depthToGeometryY(model.kickPointDepth, model.wellDepth, geometry);
+  const watchY = depthToGeometryY(model.observationDepth, model.wellDepth, geometry);
+  const shoeY = depthToGeometryY(model.casingShoeDepth, model.wellDepth, geometry);
+  const topReturnY = geometry.top + 74;
   const returnStartY = Math.max(bitY - 18, shoeY + 28);
   const evidenceNote = model.evidenceNotes[0] || model.statusDescription;
+  const ticks = [0, 1000, 2000, 3000, Math.round(model.wellDepth)].filter((value, index, all) => value <= model.wellDepth && all.indexOf(value) === index);
 
   return (
     <div className={`wellbore-schema-figure wellbore-schema-figure-${mode}`}>
-      <img className="wellbore-schema-base" src={baseSvg} alt={LABELS.aria} draggable={false} />
       <svg
         className="wellbore-schema-overlay"
-        viewBox={VIEW_BOX}
+        viewBox={isDetail ? DETAIL_VIEW_BOX : THUMB_VIEW_BOX}
         preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label={`${LABELS.aria} L${backendLevel} ${model.statusLabel}`}
       >
+        <defs>
+          <linearGradient id={`wellborePanel-${mode}`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="100%" stopColor="#f8fafc" />
+          </linearGradient>
+          <pattern id={`wellboreGrid-${mode}`} width="22" height="22" patternUnits="userSpaceOnUse">
+            <path d="M 22 0 L 0 0 0 22" fill="none" stroke="#e2e8f0" strokeWidth="0.6" opacity="0.55" />
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill={`url(#wellborePanel-${mode})`} />
+        <rect x={isDetail ? 22 : 12} y={isDetail ? 18 : 14} width={isDetail ? 716 : 396} height={isDetail ? 584 : 592} rx="10" fill={`url(#wellboreGrid-${mode})`} opacity="0.38" />
+        <rect x={geometry.baseX - 22} y={geometry.baseY - 18} width={geometry.baseW + 44} height={geometry.baseH + 36} rx="10" fill="#ffffff" stroke="#dbe2ea" strokeWidth="1.2" />
+        <image href={baseSvg} x={geometry.baseX} y={geometry.baseY} width={geometry.baseW} height={geometry.baseH} preserveAspectRatio="xMidYMid meet" />
+
+        {isDetail ? (
+          <g fontFamily="Microsoft YaHei, PingFang SC, Arial">
+            <text x="36" y="42" fill="#0f172a" fontSize="15" fontWeight="800">井筒工程剖面</text>
+            <text x="36" y="62" fill="#64748b" fontSize="10">wellschematicspy 底图 + 实时状态覆盖</text>
+            <rect x="528" y="42" width="176" height="72" rx="8" fill="#ffffff" stroke="#dbe2ea" />
+            <text x="544" y="65" fill="#0f172a" fontSize="12" fontWeight="800">结构参数</text>
+            <text x="544" y="86" fill="#64748b" fontSize="10">井深 {Math.round(model.wellDepth)} m</text>
+            <text x="624" y="86" fill="#64748b" fontSize="10">裸眼 {Math.round(model.openHoleLength)} m</text>
+            <text x="544" y="104" fill="#64748b" fontSize="10">当前层位 {shortText(model.currentFormation, 8)}</text>
+          </g>
+        ) : null}
+
+        <g aria-label="深度轴" fontFamily="Microsoft YaHei, PingFang SC, Arial">
+          <line x1={geometry.axisX} y1={geometry.top} x2={geometry.axisX} y2={geometry.bottom} stroke="#94a3b8" strokeWidth="1" />
+          {ticks.map((depth) => {
+            const y = depthToGeometryY(depth, model.wellDepth, geometry);
+            return (
+              <g key={depth}>
+                <line x1={geometry.axisX - 5} y1={y} x2={geometry.axisX + 5} y2={y} stroke="#94a3b8" strokeWidth="1" />
+                <line x1={geometry.axisX + 12} y1={y} x2={geometry.baseX + geometry.baseW + 26} y2={y} stroke="#cbd5e1" strokeWidth="0.7" strokeDasharray="4 7" opacity="0.7" />
+                <text x={geometry.axisX - 10} y={y + 4} fill="#64748b" fontSize={isDetail ? '10' : '9'} textAnchor="end">{depth}</text>
+              </g>
+            );
+          })}
+        </g>
+
         {model.evidenceBands.map((band) => {
-          const y = depthToY(band.from, model.wellDepth);
-          const endY = depthToY(band.to, model.wellDepth);
+          const y = depthToGeometryY(band.from, model.wellDepth, geometry);
+          const endY = depthToGeometryY(band.to, model.wellDepth, geometry);
           const bandColor = toneColor(band.tone);
-          const x = band.lane === 'formation' ? CENTER_X + 28 : CENTER_X - 42;
-          const width = band.lane === 'formation' ? 58 : 84;
+          const x = band.lane === 'formation' ? geometry.centerX + 38 : geometry.centerX - 48;
+          const width = band.lane === 'formation' ? 66 : 96;
           return <rect key={band.key} x={x} y={y} width={width} height={Math.max(14, endY - y)} rx="8" fill={bandColor} opacity={band.opacity ?? 0.18} />;
         })}
 
         {model.flowState.showNormalPath ? (
           <g aria-label={LABELS.normal}>
-            <path className="wellbore-flow-path wellbore-flow-path-normal wellbore-flow-path-subtle" d={`M ${CENTER_X} ${TOP_Y + 8} V ${Math.max(bitY - 20, TOP_Y + 40)}`} />
-            <path className="wellbore-flow-path wellbore-flow-path-normal" d={`M ${CENTER_X - 25} ${returnStartY} C ${CENTER_X - 42} ${(returnStartY + topReturnY) / 2} ${CENTER_X - 39} ${topReturnY + 42} ${CENTER_X - 20} ${topReturnY}`} />
-            <path className="wellbore-flow-path wellbore-flow-path-normal" d={`M ${CENTER_X + 25} ${returnStartY} C ${CENTER_X + 42} ${(returnStartY + topReturnY) / 2} ${CENTER_X + 39} ${topReturnY + 42} ${CENTER_X + 20} ${topReturnY}`} />
+            <path className="wellbore-flow-path wellbore-flow-path-normal wellbore-flow-path-subtle" d={`M ${geometry.centerX} ${geometry.top + 8} V ${Math.max(bitY - 20, geometry.top + 40)}`} />
+            <path className="wellbore-flow-path wellbore-flow-path-normal" d={`M ${geometry.centerX - 32} ${returnStartY} C ${geometry.centerX - 58} ${(returnStartY + topReturnY) / 2} ${geometry.centerX - 48} ${topReturnY + 42} ${geometry.centerX - 22} ${topReturnY}`} />
+            <path className="wellbore-flow-path wellbore-flow-path-normal" d={`M ${geometry.centerX + 32} ${returnStartY} C ${geometry.centerX + 58} ${(returnStartY + topReturnY) / 2} ${geometry.centerX + 48} ${topReturnY + 42} ${geometry.centerX + 22} ${topReturnY}`} />
           </g>
         ) : null}
 
         {model.flowState.showWatchPath ? (
           <g aria-label={LABELS.watch}>
-            <path className="wellbore-flow-path wellbore-flow-path-warning" d={`M ${CENTER_X + 27} ${returnStartY} C ${CENTER_X + 47} ${(returnStartY + topReturnY) / 2} ${CENTER_X + 43} ${topReturnY + 46} ${CENTER_X + 21} ${topReturnY}`} />
-            <circle className="wellbore-kick-pulse" cx={CENTER_X + 38} cy={watchY} r="15" fill="#f97316" opacity="0.16" />
-            <circle cx={CENTER_X + 38} cy={watchY} r="5" fill="#f97316" opacity="0.86" />
+            <path className="wellbore-flow-path wellbore-flow-path-warning" d={`M ${geometry.centerX + 34} ${returnStartY} C ${geometry.centerX + 58} ${(returnStartY + topReturnY) / 2} ${geometry.centerX + 50} ${topReturnY + 46} ${geometry.centerX + 22} ${topReturnY}`} />
+            <circle className="wellbore-kick-pulse" cx={geometry.centerX + 42} cy={watchY} r="15" fill="#f97316" opacity="0.16" />
+            <circle cx={geometry.centerX + 42} cy={watchY} r="5" fill="#f97316" opacity="0.86" />
           </g>
         ) : null}
 
         {model.flowState.showKickPath ? (
           <g aria-label={LABELS.kick}>
-            <path className="wellbore-flow-path wellbore-flow-path-critical" d={`M ${CENTER_X - 28} ${returnStartY} C ${CENTER_X - 50} ${(returnStartY + topReturnY) / 2} ${CENTER_X - 46} ${topReturnY + 50} ${CENTER_X - 21} ${topReturnY}`} />
-            <path className="wellbore-flow-path wellbore-flow-path-critical" d={`M ${CENTER_X + 28} ${returnStartY} C ${CENTER_X + 50} ${(returnStartY + topReturnY) / 2} ${CENTER_X + 46} ${topReturnY + 50} ${CENTER_X + 21} ${topReturnY}`} />
-            <path className="wellbore-flow-path wellbore-flow-path-critical wellbore-flow-path-warning-level" d={`M ${CENTER_X + 86} ${kickY + 16} C ${CENTER_X + 66} ${kickY + 4} ${CENTER_X + 49} ${kickY} ${CENTER_X + 31} ${kickY}`} />
-            <circle className="wellbore-kick-pulse" cx={CENTER_X + 31} cy={kickY} r="18" fill="#dc2626" opacity="0.2" />
-            <circle cx={CENTER_X + 31} cy={kickY} r="6" fill="#dc2626" />
+            <path className="wellbore-flow-path wellbore-flow-path-critical" d={`M ${geometry.centerX - 34} ${returnStartY} C ${geometry.centerX - 58} ${(returnStartY + topReturnY) / 2} ${geometry.centerX - 52} ${topReturnY + 50} ${geometry.centerX - 22} ${topReturnY}`} />
+            <path className="wellbore-flow-path wellbore-flow-path-critical" d={`M ${geometry.centerX + 34} ${returnStartY} C ${geometry.centerX + 58} ${(returnStartY + topReturnY) / 2} ${geometry.centerX + 52} ${topReturnY + 50} ${geometry.centerX + 22} ${topReturnY}`} />
+            <path className="wellbore-flow-path wellbore-flow-path-critical wellbore-flow-path-warning-level" d={`M ${geometry.centerX + 118} ${kickY + 16} C ${geometry.centerX + 86} ${kickY + 4} ${geometry.centerX + 62} ${kickY} ${geometry.centerX + 38} ${kickY}`} />
+            <circle className="wellbore-kick-pulse" cx={geometry.centerX + 38} cy={kickY} r="18" fill="#dc2626" opacity="0.2" />
+            <circle cx={geometry.centerX + 38} cy={kickY} r="6" fill="#dc2626" />
             {isDetail ? (
               <g fontFamily="Microsoft YaHei, PingFang SC, Arial">
-                <rect x={CENTER_X + 80} y={kickY - 4} width="126" height="48" rx="7" fill="#fff7f7" stroke="#fca5a5" />
-                <text x={CENTER_X + 92} y={kickY + 15} fill="#b91c1c" fontSize="11" fontWeight="800">{LABELS.influx}</text>
-                <text x={CENTER_X + 92} y={kickY + 32} fill="#7f1d1d" fontSize="8.8">{shortText(evidenceNote, 15)}</text>
+                <rect x={geometry.centerX + 112} y={kickY - 6} width="156" height="50" rx="7" fill="#fff7f7" stroke="#fca5a5" />
+                <text x={geometry.centerX + 126} y={kickY + 14} fill="#b91c1c" fontSize="11" fontWeight="800">{LABELS.influx}</text>
+                <text x={geometry.centerX + 126} y={kickY + 32} fill="#7f1d1d" fontSize="8.8">{shortText(evidenceNote, 18)}</text>
               </g>
             ) : null}
           </g>
         ) : null}
 
         <g className="wellbore-bit-pulse" aria-label={LABELS.bit}>
-          <circle cx={CENTER_X} cy={bitY} r={isDetail ? 18 : 14} fill={color} opacity="0.12" />
-          <circle cx={CENTER_X} cy={bitY} r={isDetail ? 5.8 : 4.8} fill={color} opacity="0.82" />
+          <circle cx={geometry.centerX} cy={bitY} r={isDetail ? 18 : 14} fill={color} opacity="0.12" />
+          <circle cx={geometry.centerX} cy={bitY} r={isDetail ? 5.8 : 4.8} fill={color} opacity="0.82" />
         </g>
 
         {isDetail ? (
           <g fontFamily="Microsoft YaHei, PingFang SC, Arial">
-            <line x1={CENTER_X + 48} y1={shoeY} x2={CENTER_X + 118} y2={shoeY} stroke="#64748b" strokeWidth="1" strokeDasharray="4 4" />
-            <text x={CENTER_X + 124} y={shoeY + 4} fontSize="10.5" fill="#334155">{LABELS.shoe} {Math.round(model.casingShoeDepth)} m</text>
-            <line x1={CENTER_X + 18} y1={bitY} x2={CENTER_X + 88} y2={bitY} stroke={color} strokeWidth="1" strokeDasharray="4 4" />
-            <text x={CENTER_X + 94} y={bitY + 4} fontSize="10.5" fill={color}>{LABELS.bit} {Math.round(model.bitDepth)} m</text>
+            <line x1={geometry.centerX + 58} y1={shoeY} x2={geometry.labelX} y2={shoeY} stroke="#64748b" strokeWidth="1" strokeDasharray="4 4" />
+            <text x={geometry.labelX + 8} y={shoeY + 4} fontSize="10.5" fill="#334155">{LABELS.shoe} {Math.round(model.casingShoeDepth)} m</text>
+            <line x1={geometry.centerX + 22} y1={bitY} x2={geometry.labelX} y2={bitY} stroke={color} strokeWidth="1" strokeDasharray="4 4" />
+            <text x={geometry.labelX + 8} y={bitY + 4} fontSize="10.5" fill={color}>{LABELS.bit} {Math.round(model.bitDepth)} m</text>
           </g>
         ) : null}
 
         <StatusPill
-          x={isDetail ? 26 : 18}
-          y={isDetail ? 710 : 724}
-          width={isDetail ? 170 : 148}
+          x={isDetail ? 38 : 20}
+          y={isDetail ? 500 : 524}
+          width={isDetail ? 176 : 148}
           title={`L${backendLevel} ${model.statusLabel}`}
           copy={model.conditionLabel}
           color={color}

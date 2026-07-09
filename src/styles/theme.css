@@ -2749,6 +2749,10 @@ body {
 .wellbore-state-badge[data-tone='critical'] { border-color: #fca5a5; background: #fff7f7; color: #dc2626; }
 .wellbore-state-badge[data-tone='warning'],
 .wellbore-mode-badge { border-color: #fdba74; background: #fffaf0; color: #c2410c; }
+.wellbore-preview-levels { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; border: 1px solid #dbe2ea; border-radius: 8px; background: #f8fafc; padding: 3px; }
+.wellbore-preview-levels button { min-width: 32px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: #64748b; font-size: 11px; font-weight: 800; }
+.wellbore-preview-levels button:hover,
+.wellbore-preview-levels button.is-active { background: #0f766e; color: #fff; box-shadow: 0 2px 8px rgba(15, 118, 110, 0.16); }
 .wellbore-online { display: none; }
 .wellbore-detail-grid { display: grid; min-height: 0; flex: 1 1 auto; gap: 8px; margin-top: 8px; overflow: hidden; align-items: stretch; }
 .wellbore-detail-main { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
@@ -2761,8 +2765,7 @@ body {
 .wellbore-schema-figure-detail { min-height: 620px; border-radius: 12px; }
 .wellbore-schema-base { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center center; pointer-events: none; user-select: none; }
 .wellbore-schema-overlay { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
-.wellbore-schema-figure-thumbnail .wellbore-schema-base,
-.wellbore-schema-figure-thumbnail .wellbore-schema-overlay { transform: scale(1.08); }
+.wellbore-schema-figure-thumbnail .wellbore-schema-overlay { transform: scale(1.02); }
 .wellbore-flow-path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 8; animation: wellboreDashFlow 1.8s linear infinite; }
 .wellbore-flow-path-normal { stroke: rgba(20, 184, 166, 0.6); stroke-width: 2; }
 .wellbore-flow-path-warning { stroke: #f97316; stroke-width: 2.4; }
@@ -2832,6 +2835,39 @@ body {
 .wellbore-event-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .wellbore-event-list span { min-width: 0; overflow: hidden; border: 1px solid #e2e8f0; border-left: 3px solid #0f766e; border-radius: 6px; background: #f8fafc; padding: 6px 7px; color: #334155; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .wellbore-detail-note { padding: 7px 10px; color: #64748b; font-size: 9px; line-height: 1.35; }
+
+.wellbore-preview-page { min-height: 100vh; background: #edf4f8; padding: 14px; color: #0f172a; }
+.wellbore-preview-toolbar { display: flex; align-items: center; gap: 12px; border: 1px solid #dbe2ea; border-radius: 10px; background: #fff; padding: 10px 12px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+.wellbore-preview-title { min-width: 0; flex: 1; }
+.wellbore-preview-title strong { display: block; font-size: 18px; }
+.wellbore-preview-title span { display: block; margin-top: 3px; color: #64748b; font-size: 12px; }
+.wellbore-preview-levels { display: inline-flex; gap: 5px; border: 1px solid #dbe2ea; border-radius: 9px; background: #f8fafc; padding: 4px; }
+.wellbore-preview-levels button { min-width: 38px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #64748b; font-size: 12px; font-weight: 800; }
+.wellbore-preview-levels button:hover,
+.wellbore-preview-levels button.is-active { background: #0f766e; color: #fff; box-shadow: 0 2px 8px rgba(15, 118, 110, 0.16); }
+.wellbore-preview-shell { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; margin-top: 12px; }
+.wellbore-preview-stage { min-height: calc(100vh - 116px); overflow: hidden; border: 1px solid #dbe2ea; border-radius: 12px; background: #fff; }
+.wellbore-preview-side { display: grid; align-content: start; gap: 12px; }
+.wellbore-preview-side section,
+.wellbore-preview-metrics,
+.wellbore-preview-note { border: 1px solid #dbe2ea; border-radius: 10px; background: #fff; padding: 14px; }
+.wellbore-preview-side h1 { margin: 0; color: #0f172a; font-size: 22px; }
+.wellbore-preview-side p { margin: 10px 0 0; color: #475569; font-size: 13px; line-height: 1.6; }
+.wellbore-preview-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.wellbore-preview-metrics div { min-width: 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 10px; }
+.wellbore-preview-metrics svg { color: #0f766e; }
+.wellbore-preview-metrics span { display: block; margin-top: 6px; color: #64748b; font-size: 11px; }
+.wellbore-preview-metrics strong { display: block; margin-top: 3px; color: #0f172a; font-size: 14px; }
+.wellbore-preview-note { display: flex; align-items: flex-start; gap: 8px; color: #475569; font-size: 12px; line-height: 1.5; }
+.wellbore-preview-note svg { flex: 0 0 auto; color: #d97706; }
+.wellbore-preview-shell[data-tone='critical'] .wellbore-preview-side section { border-top: 3px solid #dc2626; }
+.wellbore-preview-shell[data-tone='warning'] .wellbore-preview-side section { border-top: 3px solid #f97316; }
+
+@media (max-width: 980px) {
+  .wellbore-preview-toolbar { flex-wrap: wrap; }
+  .wellbore-preview-shell { grid-template-columns: 1fr; }
+  .wellbore-preview-stage { min-height: 620px; }
+}
 
 @keyframes wellboreDashFlow {
   from { stroke-dashoffset: 36; }
