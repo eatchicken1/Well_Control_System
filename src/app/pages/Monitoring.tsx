@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { VerticalCurveDeck } from '../components/VerticalCurveDeck';
+import { EventProjectionLanes } from '../components/EventProjectionLanes';
 import { WellboreStatusThumbnail } from '../components/WellboreStatusThumbnail';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
@@ -170,6 +171,9 @@ export default function Monitoring() {
     wellRuntimeStates,
     selectedWellView,
     selectedWellManuallyStopped,
+    eventSpans,
+    lifecycleNodes,
+    eventProjectionState,
   } = useWellControl();
   const activeWellIds = monitoredWellIds.length > 0
     ? monitoredWellIds
@@ -255,8 +259,9 @@ export default function Monitoring() {
               <div><span>立压</span><strong>{formatMetricOrPlaceholder(viewCurrentData.spp, 2, hasSamples)} MPa</strong></div>
               <div><span>套压</span><strong>{formatMetricOrPlaceholder(viewCurrentData.casingPressure, 2, hasSamples)} MPa</strong></div>
             </div>
-            <div className="min-h-0 flex-1 p-1.5">
-              <VerticalCurveDeck
+            <div className="flex min-h-0 flex-1 flex-col p-1.5">
+              <div className="min-h-0 flex-1">
+                <VerticalCurveDeck
                 flowData={trackFlowData}
                 pressureData={trackPressureData}
                 thresholds={thresholds}
@@ -265,6 +270,15 @@ export default function Monitoring() {
                 isStopped={selectedWellManuallyStopped}
                 compact
                 fillViewport
+                eventSpans={eventSpans}
+                  eventProjectionState={eventProjectionState}
+                />
+              </div>
+              <EventProjectionLanes
+                eventSpans={eventSpans}
+                lifecycleNodes={lifecycleNodes}
+                hypothesisState={viewCycleInfo.hypothesisState}
+                projectionState={eventProjectionState}
               />
             </div>
           </section>

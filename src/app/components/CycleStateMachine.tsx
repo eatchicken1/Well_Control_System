@@ -31,12 +31,13 @@ function clampPercent(value: number) {
 export function CycleStateMachine({ cycleInfo, compact = false }: { cycleInfo: CycleInfo; compact?: boolean }) {
   const activeProgress = clampPercent(cycleInfo.progress);
   const cycleIndex = Number.isFinite(cycleInfo.cycleIndex) ? cycleInfo.cycleIndex : 0;
+  const hasBackendState = cycleInfo.source === 'backend';
   return (
     <section className="ops-panel cycle-machine-shell overflow-hidden p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="ops-eyebrow">实时工况状态</div>
-          <h2 className="text-base text-slate-800 dark:text-slate-100">监测阶段 #{cycleIndex}</h2>
+          <h2 className="text-base text-slate-800 dark:text-slate-100">{hasBackendState ? `监测周期 #${cycleIndex}` : '监测周期待同步'}</h2>
         </div>
         <div className="flex items-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-2 py-1 text-xs text-cyan-800 dark:border-cyan-900/60 dark:bg-cyan-950/25 dark:text-cyan-100">
           <TimerReset className="h-3.5 w-3.5" />
@@ -47,8 +48,8 @@ export function CycleStateMachine({ cycleInfo, compact = false }: { cycleInfo: C
       <div className="cycle-rail-grid relative grid grid-cols-2 gap-2 md:grid-cols-6">
         <div className="cycle-fluid-thread hidden md:block" />
         {STATES.map((item) => {
-          const active = item.state === cycleInfo.state;
-          const past = item.state < cycleInfo.state;
+          const active = hasBackendState && item.state === cycleInfo.state;
+          const past = hasBackendState && item.state < cycleInfo.state;
           return (
             <div key={item.state} className={`relative rounded-md border px-2.5 py-2 ${stateTone(active, past)}`}>
               {active && <div className="cycle-active-wash" />}
@@ -80,8 +81,9 @@ export function CycleStateMachine({ cycleInfo, compact = false }: { cycleInfo: C
       {!compact && (
         <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
           <div className="rounded-md border border-slate-200 bg-[#f6fafc] px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-            <div className="ops-muted">当前状态说明</div>
+            <div className="ops-muted">操作周期 / 跨周期假设</div>
             <div className="ops-break-text mt-1 text-slate-900 dark:text-slate-100">{cycleInfo.description}</div>
+            <div className="mt-1 text-[11px] ops-muted">{cycleInfo.operationState} / {cycleInfo.hypothesisState}</div>
           </div>
           <div className="rounded-md border border-slate-200 bg-[#f6fafc] px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
             <div className="ops-muted">停泵 / 开泵锚点</div>

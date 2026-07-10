@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { BackendLevel, FlowDataPoint, PressureDataPoint, ThresholdSettings } from '../context/WellControlContext';
+import type { BackendLevel, EventProjectionState, EventSpan, FlowDataPoint, PressureDataPoint, ThresholdSettings } from '../context/WellControlContext';
 import { useIsDarkMode } from '../hooks/useChartTheme';
 
 interface VerticalCurveDeckProps {
@@ -12,10 +12,13 @@ interface VerticalCurveDeckProps {
   isStopped?: boolean;
   compact?: boolean;
   fillViewport?: boolean;
+  eventSpans?: EventSpan[];
+  eventProjectionState?: EventProjectionState;
 }
 
 interface CurvePoint {
   time: string;
+  timestampMs?: number;
   depth: number;
   bitDepth: number;
   level: BackendLevel;
@@ -246,7 +249,6 @@ function useNarrowViewport() {
 function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoint[], wellDepth = 3200, currentDepth = 3200): CurvePoint[] {
   const maxLength = Math.max(flowData.length, pressureData.length);
   if (maxLength === 0) return [];
-  const startDepth = Math.max(0, wellDepth - maxLength * 0.6);
   const currentBitDepth = Number.isFinite(currentDepth) ? currentDepth : wellDepth;
   return Array.from({ length: maxLength }).map((_, index) => {
     const flow = flowData[Math.max(0, index - (maxLength - flowData.length))];
@@ -264,12 +266,14 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
     const drillTime = finite(flow?.drillTime, 0);
     const rpm = finite(flow?.rpm, 0);
     const torque = finite(flow?.torque, 0);
-    const bitDepth = finite(flow?.bitDepth, Math.max(0, currentBitDepth - (maxLength - index - 1) * 0.6));
+    const bitDepth = finite(flow?.bitDepth, currentBitDepth);
+    const frameWellDepth = finite(flow?.wellDepth, wellDepth);
     const level = (flow?.backendLevel ?? pressure?.backendLevel ?? 0) as BackendLevel;
 
     return {
       time: flow?.time || pressure?.time || '',
-      depth: startDepth + index * 0.6,
+      timestampMs: flow?.timestampMs ?? pressure?.timestampMs,
+      depth: frameWellDepth,
       bitDepth,
       level,
       eventId: flow?.eventId ?? pressure?.eventId ?? null,
@@ -342,6 +346,7 @@ function VerticalTrack({
   compact = false,
   mobileDense = false,
   fillViewport = false,
+  eventSpans = [],
 }: {
   config: TrackConfig;
   points: CurvePoint[];
@@ -350,6 +355,7 @@ function VerticalTrack({
   compact?: boolean;
   mobileDense?: boolean;
   fillViewport?: boolean;
+  eventSpans?: EventSpan[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [sizeTick, setSizeTick] = useState(0);
@@ -414,17 +420,34 @@ function VerticalTrack({
     const latest = points[points.length - 1];
 
     const eventBandMap = new Map<string, { start: number; end: number; level: BackendLevel; eventId: string }>();
-    points.forEach((point, index) => {
-      if (!point.eventId || point.level < 2) return;
-      const existing = eventBandMap.get(point.eventId);
-      if (existing) {
-        existing.start = Math.min(existing.start, index);
-        existing.end = Math.max(existing.end, index);
-        existing.level = Math.max(existing.level, point.level) as BackendLevel;
-        return;
-      }
-      eventBandMap.set(point.eventId, { start: index, end: index, level: point.level, eventId: point.eventId });
-    });
+    const pointTimes = points.map((point) => Number.isFinite(point.timestampMs) ? Number(point.timestampMs) : Number.isFinite(Date.parse(point.time)) ? Date.parse(point.time) : NaN);
+    const hasAbsoluteTimes = pointTimes.filter(Number.isFinite).length >= 2;
+    if (eventSpans.length > 0 && hasAbsoluteTimes) {
+      const firstTime = pointTimes.find(Number.isFinite) as number;
+      const lastTime = [...pointTimes].reverse().find(Number.isFinite) as number;
+      eventSpans.forEach((span) => {
+        const startMs = Date.parse(span.startTime);
+        const endMs = span.endTime ? Date.parse(span.endTime) : lastTime;
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < firstTime || startMs > lastTime) return;
+        const start = pointTimes.findIndex((value) => Number.isFinite(value) && value >= startMs);
+        let end = pointTimes.findLastIndex((value) => Number.isFinite(value) && value <= endMs);
+        if (start < 0) return;
+        if (end < start) end = start;
+        eventBandMap.set(span.eventId, { start, end, level: span.highestLevel, eventId: span.eventId });
+      });
+    } else {
+      points.forEach((point, index) => {
+        if (!point.eventId || point.level < 2) return;
+        const existing = eventBandMap.get(point.eventId);
+        if (existing) {
+          existing.start = Math.min(existing.start, index);
+          existing.end = Math.max(existing.end, index);
+          existing.level = Math.max(existing.level, point.level) as BackendLevel;
+          return;
+        }
+        eventBandMap.set(point.eventId, { start: index, end: index, level: point.level, eventId: point.eventId });
+      });
+    }
     const eventBands = [...eventBandMap.values()].sort((a, b) => a.start - b.start);
     eventBands.forEach((band) => {
       const y1 = yForIndex(band.start);
@@ -581,7 +604,7 @@ function VerticalTrack({
         ctx.fillText(`钻头 ${fmtDepthWithUnit(point.bitDepth)}`, 14, y + (mobileDense ? 27 : 31));
       });
     }
-  }, [config, points, showAxis, palette, compact, mobileDense, pad, sizeTick]);
+  }, [config, points, showAxis, palette, compact, mobileDense, pad, sizeTick, eventSpans]);
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -680,6 +703,8 @@ export function VerticalCurveDeck({
   isStopped = false,
   compact = false,
   fillViewport = false,
+  eventSpans = [],
+  eventProjectionState,
 }: VerticalCurveDeckProps) {
   const isDark = useIsDarkMode();
   const mobileDense = useNarrowViewport() && compact;
@@ -690,16 +715,20 @@ export function VerticalCurveDeck({
   const isDownsampled = renderPoints.length < points.length;
   const eventStats = useMemo(() => {
     const byId = new Map<string, BackendLevel>();
-    points.forEach((point) => {
-      if (!point.eventId || point.level < 2) return;
-      byId.set(point.eventId, Math.max(byId.get(point.eventId) || 0, point.level) as BackendLevel);
-    });
+    if (eventSpans.length > 0) {
+      eventSpans.forEach((span) => byId.set(span.eventId, span.highestLevel));
+    } else {
+      points.forEach((point) => {
+        if (!point.eventId || point.level < 2) return;
+        byId.set(point.eventId, Math.max(byId.get(point.eventId) || 0, point.level) as BackendLevel);
+      });
+    }
     const levels = [...byId.values()];
     return {
       warningCount: levels.filter((level) => level === 2 || level === 3).length,
       criticalCount: levels.filter((level) => level >= 4).length,
     };
-  }, [points]);
+  }, [eventSpans, points]);
   const pitVolumeValues = points.map((point) => point.values.pitVolume);
   const flowValues = points.flatMap((point) => [point.values.flowIn, point.values.flowOut]);
   const casingValues = points.map((point) => point.values.casingPressure);
@@ -787,6 +816,9 @@ export function VerticalCurveDeck({
             {isDownsampled ? <span>绘制 {renderPoints.length}</span> : null}
             <span>预警事件 {eventStats.warningCount}</span>
             <span>确认事件 {eventStats.criticalCount}</span>
+            <span className={eventProjectionState?.status === 'connected' ? 'text-emerald-700 dark:text-emerald-300' : eventProjectionState?.status === 'error' ? 'text-red-600 dark:text-red-300' : ''} title={eventProjectionState?.message}>
+              {eventProjectionState?.status === 'connected' ? '服务端正式泳道' : '帧级兼容泳道'}
+            </span>
           </div>
           <div className="text-[11px] text-slate-500 dark:text-slate-400">
             {latestPoint?.time ? `最新 ${timeLabel(latestPoint.time)} · ` : ''}30min 窗口 · 时间向下
@@ -804,6 +836,7 @@ export function VerticalCurveDeck({
             compact={compact}
             mobileDense={mobileDense}
             fillViewport={fillTracks}
+            eventSpans={eventSpans}
           />
         ))}
       </div>

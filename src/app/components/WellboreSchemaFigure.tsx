@@ -68,8 +68,8 @@ type WellboreVisualState = {
   animationIntensity: 'none' | 'low' | 'medium' | 'high';
 };
 
-const DETAIL: Geometry = { viewBox: '0 0 660 640', width: 660, height: 640, top: 78, bottom: 584, centerX: 282, axisX: 38, labelX: 418, formationX: 536, formationW: 46, scale: 1.82 };
-const THUMB: Geometry = { viewBox: '0 0 520 640', width: 520, height: 640, top: 70, bottom: 584, centerX: 246, axisX: 48, labelX: 354, formationX: 416, formationW: 44, scale: 0.68 };
+const DETAIL: Geometry = { viewBox: '0 0 660 640', width: 660, height: 640, top: 78, bottom: 584, centerX: 282, axisX: 38, labelX: 418, formationX: 536, formationW: 46, scale: 1.68 };
+const THUMB: Geometry = { viewBox: '0 0 520 640', width: 520, height: 640, top: 70, bottom: 584, centerX: 246, axisX: 48, labelX: 354, formationX: 416, formationW: 44, scale: 0.64 };
 
 const LEVEL_LABEL: Record<BackendLevel, string> = { 0: '正常循环', 1: '异常观察', 2: '溢流预警', 3: '疑似溢流', 4: '溢流确认' };
 const TEXT = { aria: '井筒状态工程剖面', bit: '钻头', shoe: '套管鞋', influx: '推测侵入区', openHole: '裸眼段', casing: '套管', cement: '水泥环', drill: '钻柱 / BHA' };
@@ -85,8 +85,9 @@ function clamp(value: number, min: number, max: number) { return Math.max(min, M
 function yOf(depth: number, model: WellboreSimulationModel, g: Geometry) { return g.top + (clamp(depth, 0, model.wellDepth) / model.wellDepth) * (g.bottom - g.top); }
 function wOf(width: number, g: Geometry) { return Math.max(10, width * g.scale); }
 function hydraulicWidth(width: number, g: Geometry, kind: 'bore' | 'pipe' | 'bha' | 'bit') {
-  const minimum = kind === 'bore' ? 24 : kind === 'pipe' ? 7 : kind === 'bha' ? 13 : 24;
-  return Math.max(minimum, width * g.scale);
+  const minimum = kind === 'bore' ? 22 : kind === 'pipe' ? 7 : kind === 'bha' ? 12 : 22;
+  const visualScale = g.scale * (kind === 'bore' ? 0.88 : 0.94);
+  return Math.max(minimum, width * visualScale);
 }
 function depth(value: number) { return `${Math.round(value)} m`; }
 function short(value: string, max = 18) { return value.length > max ? `${value.slice(0, max - 2)}...` : value; }
@@ -98,7 +99,7 @@ function sectionLanes(model: WellboreSimulationModel, g: Geometry) {
     const toolKind = section.sectionType === 'bit' ? 'bit' : section.sectionType === 'bha' ? 'bha' : 'pipe';
     const boreWidth = hydraulicWidth(section.boreInnerWidth, g, 'bore');
     const drillWidth = hydraulicWidth(section.drillOuterWidth, g, toolKind);
-    const annulusGap = Math.max(3.5, (boreWidth - drillWidth) / 2);
+    const annulusGap = Math.max(3.2, (boreWidth - drillWidth) / 2);
     const laneOffset = drillWidth / 2 + annulusGap / 2;
     return {
       ...section,
@@ -109,7 +110,7 @@ function sectionLanes(model: WellboreSimulationModel, g: Geometry) {
       bottomY: yOf(section.toDepth, model, g),
       leftX: g.centerX - laneOffset,
       rightX: g.centerX + laneOffset,
-      laneWidth: Math.max(3.5, annulusGap * 0.42),
+      laneWidth: Math.max(3.2, Math.min(7.5, annulusGap * 0.34)),
     };
   });
 }
@@ -192,8 +193,8 @@ function FluidColumn({ model, g, id, level }: { model: WellboreSimulationModel; 
           <rect x={section.rightX - section.laneWidth / 2} y={section.topY} width={section.laneWidth} height={Math.max(2, section.bottomY - section.topY)} rx="4" fill={kickTone ? "#fff1ed" : "#ccfbf1"} opacity={kickTone ? 0.2 : 0.17} />
         </g>
       ))}
-      <path d={annulusPath(model, g, "left")} fill="none" stroke={kickTone ? "#fed7aa" : "#99f6e4"} strokeWidth="0.8" strokeDasharray="2 9" opacity="0.58" />
-      <path d={annulusPath(model, g, "right")} fill="none" stroke={kickTone ? "#fed7aa" : "#99f6e4"} strokeWidth="0.8" strokeDasharray="2 9" opacity="0.58" />
+      <path d={annulusPath(model, g, "left")} fill="none" stroke={kickTone ? "#fed7aa" : "#99f6e4"} strokeWidth="0.75" strokeDasharray="2 8" strokeDashoffset="1" opacity="0.54" />
+      <path d={annulusPath(model, g, "right")} fill="none" stroke={kickTone ? "#fed7aa" : "#99f6e4"} strokeWidth="0.75" strokeDasharray="2 8" strokeDashoffset="1" opacity="0.54" />
     </g>
   );
 }
@@ -328,8 +329,14 @@ function Flow({ model, g, level, id, visual }: { model: WellboreSimulationModel;
         return Array.from({ length: count }, (_, index) => {
           const x = side === 'left' ? section.leftX : section.rightX;
           const y = section.topY + margin + usable * ((index + 1) / (count + 1));
-          const arrowHalf = Math.min(4, Math.max(2.8, section.laneWidth * 0.42));
-          return <path key={`${side}-${section.sectionType}-${index}`} d={`M ${x - arrowHalf} ${y + 4} L ${x} ${y - 4} L ${x + arrowHalf} ${y + 4}`} fill="none" stroke={visual.returnFlowColor} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" opacity="0.76" />;
+          const arrowHalf = Math.min(3.7, Math.max(2.6, section.laneWidth * 0.46));
+          const arrowPath = `M ${x - arrowHalf} ${y + 3.8} L ${x} ${y - 3.8} L ${x + arrowHalf} ${y + 3.8}`;
+          return (
+            <g key={`${side}-${section.sectionType}-${index}`} className="wellbore-return-chevron">
+              <path d={arrowPath} fill="none" stroke="#ffffff" strokeWidth="3.1" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+              <path d={arrowPath} fill="none" stroke={visual.returnFlowColor} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" opacity="0.88" />
+            </g>
+          );
         });
       })}
     </g>

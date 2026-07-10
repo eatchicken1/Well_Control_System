@@ -4333,3 +4333,25 @@ body {
 .wellbore-schema-figure[data-animation='low'] .wellbore-flow-particle { opacity: 0.72; }
 .wellbore-schema-figure[data-animation='medium'] .wellbore-flow-particle { opacity: 0.86; }
 .wellbore-schema-figure[data-animation='high'] .wellbore-flow-particle { opacity: 1; }
+
+
+.event-projection-lanes { flex: 0 0 auto; margin-top: 6px; overflow: hidden; border: 1px solid #cbd5e1; border-radius: 7px; background: #f8fafc; font-size: 10px; color: #334155; }
+.event-projection-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px; border-bottom: 1px solid #dbe3ea; background: #eef3f6; }
+.event-projection-head strong { color: #172033; font-size: 11px; letter-spacing: .04em; }
+.event-projection-head span { overflow: hidden; max-width: 72%; color: #64748b; text-overflow: ellipsis; white-space: nowrap; }
+.event-projection-head span[data-status='connected'] { color: #047857; }
+.event-projection-head span[data-status='error'] { color: #b91c1c; }
+.event-projection-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); min-height: 26px; border-bottom: 1px solid #e2e8f0; }
+.event-projection-row:last-child { border-bottom: 0; }
+.event-projection-row > b { display: flex; align-items: center; padding: 4px 8px; border-right: 1px solid #e2e8f0; color: #475569; background: rgba(241, 245, 249, .8); }
+.event-projection-row > div { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 3px 6px; }
+.event-projection-row span, .event-projection-row em { flex: 0 0 auto; border: 1px solid #dbe3ea; border-radius: 4px; background: #fff; padding: 2px 6px; color: #475569; font-style: normal; white-space: nowrap; }
+.event-projection-row span.is-warning { border-color: #fdba74; background: #fff7ed; color: #c2410c; }
+.event-projection-row span.is-critical { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
+.event-projection-row span.is-recovering { border-color: #67e8f9; background: #ecfeff; color: #0e7490; }
+.event-projection-row span.is-hypothesis { border-color: #a5b4fc; background: #eef2ff; color: #4338ca; }
+.dark .event-projection-lanes { border-color: #334155; background: #0f172a; color: #cbd5e1; }
+.dark .event-projection-head, .dark .event-projection-row > b { border-color: #334155; background: #111827; color: #cbd5e1; }
+.dark .event-projection-row { border-color: #273449; }
+.dark .event-projection-row > b { border-right-color: #334155; }
+.dark .event-projection-row span, .dark .event-projection-row em { border-color: #334155; background: #111827; color: #cbd5e1; }

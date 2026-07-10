@@ -6,6 +6,8 @@ import { useAuth } from './AuthContext';
 export type AlertStatus = 'normal' | 'warning' | 'critical';
 export type BackendLevel = 0 | 1 | 2 | 3 | 4;
 export type CycleState = 0 | 1 | 2 | 3 | 4 | 5;
+export type OperationCycleState = 'Disturbance' | 'StableDrilling' | 'StableCirculation' | 'PumpStopped' | 'PumpRestarting' | 'Monitoring' | 'Unknown';
+export type HypothesisCycleState = 'None' | 'WatchingPostStop' | 'AwaitingRestartShortHold' | 'StaticDriftReview' | 'LongStopGuard' | 'Restarting' | 'ObservingStablePumping' | 'Resolved' | 'Unknown';
 export type MonitoringMode = 'realtime' | 'historyReplay';
 export type DataSourceMode = MonitoringMode;
 export type DataSourceConnectionStatus = 'connecting' | 'connected' | 'paused' | 'disconnected' | 'error';
@@ -64,6 +66,9 @@ export interface MonitoringData {
 
 export interface CycleInfo {
   state: CycleState;
+  operationState: OperationCycleState;
+  hypothesisState: HypothesisCycleState;
+  source: 'backend' | 'unknown';
   stateLabel: string;
   shortLabel: string;
   description: string;
@@ -101,6 +106,12 @@ export interface AlgorithmInterfaceInfo {
 
 export interface Alert {
   id: number;
+  warningId?: number;
+  lifecycleStatus?: string;
+  ackStatus?: string;
+  acknowledgedBy?: string;
+  acknowledgedAt?: string;
+  acknowledgementCount?: number;
   wellId?: string;
   wellName?: string;
   wellBlock?: string;
@@ -146,6 +157,32 @@ export interface BackendDetectionState {
   baselineInvalidReason: string;
 }
 
+export interface EventSpan {
+  eventId: string;
+  candidateId: number;
+  startTime: string;
+  endTime: string | null;
+  currentLevel: BackendLevel;
+  highestLevel: BackendLevel;
+  lifecycleStatus: 'active' | 'recovering' | 'ended' | string;
+  resolution?: string;
+}
+
+export interface LifecycleNode {
+  eventId: string;
+  candidateId: number;
+  timestamp: string;
+  eventName: string;
+  reason: string;
+  publicLevel: BackendLevel;
+}
+
+export interface EventProjectionState {
+  status: 'loading' | 'connected' | 'fallback' | 'error';
+  message: string;
+  lastUpdatedAt: string | null;
+}
+
 export interface FlowDataPoint {
   time: string;
   timestampMs?: number;
@@ -156,6 +193,7 @@ export interface FlowDataPoint {
   returnResponse?: number;
   pitGain?: number;
   pitVolume?: number;
+  wellDepth?: number;
   bitDepth?: number;
   spm?: number;
   totalGas?: number;
@@ -231,10 +269,11 @@ const STORAGE_MONITORED_WELLS = `${STORAGE_PREFIX}:monitored-well-ids`;
 const STORAGE_REALTIME_TABS = `${STORAGE_PREFIX}:realtime-tab-well-ids`;
 const STORAGE_REALTIME_ENDPOINT = `${STORAGE_PREFIX}:realtime-endpoint`;
 const STORAGE_WELL_RUNTIME_STATES = `${STORAGE_PREFIX}:well-runtime-states`;
-const STORAGE_WELL_SNAPSHOTS = `${STORAGE_PREFIX}:well-snapshots`;
+const SNAPSHOT_DB_NAME = `${STORAGE_PREFIX}:cache`;
+const SNAPSHOT_STORE_NAME = 'wellSnapshots';
+const EVENT_PROJECTION_STORE_NAME = 'eventProjections';
 const STORAGE_MANUAL_STOPPED_WELLS = `${STORAGE_PREFIX}:manual-stopped-well-ids`;
-const STORAGE_ACKNOWLEDGED_EVENTS = `${STORAGE_PREFIX}:acknowledged-events`;
-const STORAGE_ALERT_EVENTS = `${STORAGE_PREFIX}:alert-events`;
+const STORAGE_ERROR_EVENT = 'wcs-storage-error';
 
 export interface RealtimeStartOption {
   frame: number;
@@ -260,6 +299,10 @@ export interface RealTimeRecord extends Partial<MonitoringData> {
 
 export interface DataSourceState {
   mode: DataSourceMode;
+  streamSequence?: number;
+  sourceRowNo?: number;
+  lifecycleRevision?: number;
+  streamGap?: boolean;
   adapterName: string;
   status: DataSourceConnectionStatus;
   endpoint: string | null;
@@ -432,6 +475,9 @@ interface WellControlContextType {
   alertStatus: AlertStatus;
   backendDetection: BackendDetectionState;
   cycleInfo: CycleInfo;
+  eventSpans: EventSpan[];
+  lifecycleNodes: LifecycleNode[];
+  eventProjectionState: EventProjectionState;
   baselineInfo: BaselineInfo;
   wells: WellInfo[];
   wellRuntimeStates: Record<string, WellRuntimeState>;
@@ -455,8 +501,8 @@ interface WellControlContextType {
   buildRealtimeApiUrl: (path: string) => string;
   setIsRunning: (v: boolean) => void;
   handleReset: () => void;
-  acknowledgeAlert: (id: number) => void;
-  acknowledgeAll: () => void;
+  acknowledgeAlert: (id: number) => Promise<void>;
+  acknowledgeAll: () => Promise<void>;
   selectWell: (wellId: string) => void;
   toggleMonitoredWell: (wellId: string) => void;
   addMonitoredWell: (wellId: string) => void;
@@ -487,8 +533,8 @@ const MAX_STORED_HISTORY_RECORDS = 2200;
 const STREAM_CONNECT_TIMEOUT_MS = 10000;
 const PREVIEW_BATCH_LIMIT = 240;
 const PREVIEW_IDLE_POLL_MS = 4000;
-const SNAPSHOT_PERSIST_DEBOUNCE_MS = 220;
-const RUNTIME_PERSIST_DEBOUNCE_MS = 220;
+const SNAPSHOT_PERSIST_DEBOUNCE_MS = 20_000;
+const RUNTIME_PERSIST_DEBOUNCE_MS = 3_000;
 
 export function useWellControl() {
   const ctx = useContext(WellControlContext);
@@ -546,39 +592,45 @@ const ALGORITHM_INTERFACE: AlgorithmInterfaceInfo = {
   ],
 };
 
-const CYCLE_STATES: Array<Omit<CycleInfo, 'cycleIndex' | 'elapsedInState' | 'totalStateSeconds' | 'progress' | 'tStopPump' | 'tStartPump' | 'tStable'>> = [
+const CYCLE_STATES: Array<Omit<CycleInfo, 'cycleIndex' | 'elapsedInState' | 'totalStateSeconds' | 'progress' | 'tStopPump' | 'tStartPump' | 'tStable' | 'hypothesisState' | 'source'>> = [
   {
     state: 0,
+    operationState: 'Disturbance',
     stateLabel: '井筒扰动观察',
     shortLabel: '观察',
     description: '关注抽汲诱发的井筒体积扰动',
   },
   {
     state: 1,
+    operationState: 'StableDrilling',
     stateLabel: '钻进稳定',
     shortLabel: '稳态',
     description: '稳定段进入基线候选池',
   },
   {
     state: 2,
+    operationState: 'StableCirculation',
     stateLabel: '循环稳定',
     shortLabel: '循环',
     description: '泵仍运行，建立停泵前压力参照',
   },
   {
     state: 3,
+    operationState: 'PumpStopped',
     stateLabel: '停泵监测',
     shortLabel: '停泵',
     description: '持续跟踪停泵出口流量与总池体积变化',
   },
   {
     state: 4,
+    operationState: 'PumpRestarting',
     stateLabel: '开泵恢复',
     shortLabel: '开泵',
     description: '重新建立开泵后的水力参照',
   },
   {
     state: 5,
+    operationState: 'Monitoring',
     stateLabel: '实时监测',
     shortLabel: '检测',
     description: '实时判级进入稳定监测窗口',
@@ -661,6 +713,45 @@ function dedupeMonitoringPoints<T extends { timestampMs?: number; time?: string 
     previousKey = key;
   }
   return deduped;
+}
+
+function trimMonitoringBufferInPlace<T extends { timestampMs?: number }>(items: T[]) {
+  if (items.length === 0) return items;
+  const latestTimestamp = Number(items.at(-1)?.timestampMs ?? 0);
+  const cutoff = Number.isFinite(latestTimestamp) ? latestTimestamp - MONITORING_WINDOW_MS : Number.NEGATIVE_INFINITY;
+  let removeCount = 0;
+  while (removeCount < items.length - MIN_MONITORING_POINTS) {
+    const timestamp = Number(items[removeCount]?.timestampMs ?? Number.NaN);
+    if (!Number.isFinite(timestamp) || timestamp >= cutoff) break;
+    removeCount += 1;
+  }
+  const overflow = Math.max(0, items.length - removeCount - MAX_MONITORING_POINTS);
+  if (removeCount + overflow > 0) items.splice(0, removeCount + overflow);
+  return items;
+}
+
+function appendMonitoringPoint<T extends { timestampMs?: number; time?: string }>(items: T[], point: T) {
+  const last = items.at(-1);
+  const pointKey = `${Number(point.timestampMs ?? 0)}|${String(point.time ?? '')}`;
+  const lastKey = last ? `${Number(last.timestampMs ?? 0)}|${String(last.time ?? '')}` : '';
+  if (pointKey === lastKey) return items;
+  if (!last || Number(point.timestampMs ?? 0) >= Number(last.timestampMs ?? 0)) {
+    items.push(point);
+    return trimMonitoringBufferInPlace(items);
+  }
+  const normalized = keepMonitoringWindow(dedupeMonitoringPoints(sortMonitoringPoints([...items, point])));
+  items.splice(0, items.length, ...normalized);
+  return items;
+}
+
+function appendHistoryRecord(items: HistoryRecord[], point: HistoryRecord) {
+  const last = items.at(-1);
+  const key = `${point.date}|${point.time}|${point.bitDepth}|${point.backendLevel}`;
+  const lastKey = last ? `${last.date}|${last.time}|${last.bitDepth}|${last.backendLevel}` : '';
+  if (key === lastKey) return items;
+  items.push(point);
+  if (items.length > 240) items.splice(0, items.length - 240);
+  return items;
 }
 
 function dedupeHistoryRecords(items: HistoryRecord[]) {
@@ -761,8 +852,8 @@ function writeStoredJson(key: string, value: unknown) {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore storage failures
+  } catch (error) {
+    window.dispatchEvent(new CustomEvent(STORAGE_ERROR_EVENT, { detail: { key, message: error instanceof Error ? error.message : '写入失败' } }));
   }
 }
 
@@ -775,10 +866,124 @@ function persistStringValueState(key: string, value: string) {
   if (typeof window === 'undefined') return value;
   try {
     window.localStorage.setItem(key, value);
-  } catch {
-    // ignore storage failures
+  } catch (error) {
+    window.dispatchEvent(new CustomEvent(STORAGE_ERROR_EVENT, { detail: { key, message: error instanceof Error ? error.message : '写入失败' } }));
   }
   return value;
+}
+
+function dispatchStorageError(key: string, error: unknown) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(STORAGE_ERROR_EVENT, { detail: { key, message: error instanceof Error ? error.message : '写入失败' } }));
+}
+
+function openSnapshotDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('当前浏览器不支持 IndexedDB'));
+      return;
+    }
+    const request = indexedDB.open(SNAPSHOT_DB_NAME, 2);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(SNAPSHOT_STORE_NAME)) database.createObjectStore(SNAPSHOT_STORE_NAME);
+      if (!database.objectStoreNames.contains(EVENT_PROJECTION_STORE_NAME)) database.createObjectStore(EVENT_PROJECTION_STORE_NAME);
+    };
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => database.close();
+      resolve(database);
+    };
+    request.onblocked = () => reject(new Error('IndexedDB 升级被其他页面阻塞，请关闭旧页面后重试'));
+    request.onerror = () => reject(request.error || new Error('IndexedDB 打开失败'));
+  });
+}
+
+async function readWellSnapshotsFromIndexedDb(): Promise<Record<string, WellMonitoringSnapshot>> {
+  try {
+    const database = await openSnapshotDatabase();
+    const rows = await new Promise<Array<[IDBValidKey, unknown]>>((resolve, reject) => {
+      const transaction = database.transaction(SNAPSHOT_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(SNAPSHOT_STORE_NAME);
+      const keysRequest = store.getAllKeys();
+      const valuesRequest = store.getAll();
+      transaction.oncomplete = () => resolve(keysRequest.result.map((key, index) => [key, valuesRequest.result[index]]));
+      transaction.onerror = () => reject(transaction.error || new Error('IndexedDB 读取失败'));
+      transaction.onabort = () => reject(transaction.error || new Error('IndexedDB 读取已中止'));
+    });
+    database.close();
+    const snapshots: Record<string, WellMonitoringSnapshot> = {};
+    rows.forEach(([key, value]) => {
+      const snapshot = sanitizeWellMonitoringSnapshot(value);
+      if (snapshot) snapshots[String(key)] = snapshot;
+    });
+    return snapshots;
+  } catch (error) {
+    dispatchStorageError(SNAPSHOT_STORE_NAME, error);
+    return {};
+  }
+}
+
+async function writeWellSnapshotsToIndexedDb(snapshots: Record<string, WellMonitoringSnapshot>) {
+  try {
+    const database = await openSnapshotDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(SNAPSHOT_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(SNAPSHOT_STORE_NAME);
+      store.clear();
+      Object.entries(snapshots).forEach(([wellId, snapshot]) => store.put(snapshot, wellId));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error('IndexedDB 写入失败'));
+      transaction.onabort = () => reject(transaction.error || new Error('IndexedDB 写入已中止'));
+    });
+    database.close();
+  } catch (error) {
+    dispatchStorageError(SNAPSHOT_STORE_NAME, error);
+  }
+}
+
+interface CachedEventProjection {
+  eventSpans: EventSpan[];
+  lifecycleNodes: LifecycleNode[];
+  updatedAt: string;
+}
+
+async function readEventProjectionFromIndexedDb(wellId: string): Promise<CachedEventProjection | null> {
+  try {
+    const database = await openSnapshotDatabase();
+    const value = await new Promise<unknown>((resolve, reject) => {
+      const transaction = database.transaction(EVENT_PROJECTION_STORE_NAME, 'readonly');
+      const request = transaction.objectStore(EVENT_PROJECTION_STORE_NAME).get(wellId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('事件投影缓存读取失败'));
+    });
+    database.close();
+    if (!value || typeof value !== 'object') return null;
+    const row = value as Record<string, unknown>;
+    const eventSpans = Array.isArray(row.eventSpans) ? row.eventSpans.map(normalizeEventSpan).filter(Boolean) as EventSpan[] : [];
+    const lifecycleNodes = Array.isArray(row.lifecycleNodes) ? row.lifecycleNodes.map(normalizeLifecycleNode).filter(Boolean) as LifecycleNode[] : [];
+    if (eventSpans.length === 0 && lifecycleNodes.length === 0) return null;
+    return { eventSpans, lifecycleNodes, updatedAt: String(row.updatedAt || '') || new Date().toISOString() };
+  } catch (error) {
+    dispatchStorageError(EVENT_PROJECTION_STORE_NAME, error);
+    return null;
+  }
+}
+
+async function writeEventProjectionToIndexedDb(wellId: string, projection: CachedEventProjection) {
+  try {
+    const database = await openSnapshotDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(EVENT_PROJECTION_STORE_NAME, 'readwrite');
+      transaction.objectStore(EVENT_PROJECTION_STORE_NAME).put(projection, wellId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error('事件投影缓存写入失败'));
+      transaction.onabort = () => reject(transaction.error || new Error('事件投影缓存写入已中止'));
+    });
+    database.close();
+  } catch (error) {
+    dispatchStorageError(EVENT_PROJECTION_STORE_NAME, error);
+  }
 }
 
 function saveWellSelection(key: string, value: string) {
@@ -864,7 +1069,7 @@ function sanitizeWellRuntimeState(value: unknown): WellRuntimeState | null {
 
 function getInitialWellRuntimeStates() {
   const stored = readStoredJson<Record<string, unknown>>(STORAGE_WELL_RUNTIME_STATES, {});
-  const snapshots = getInitialWellSnapshots();
+  const snapshots: Record<string, WellMonitoringSnapshot> = {};
   const sanitized: Record<string, WellRuntimeState> = {};
   Object.entries(stored).forEach(([key, value]) => {
     const runtime = sanitizeWellRuntimeState(value);
@@ -987,6 +1192,9 @@ function sanitizeStoredCycleInfo(value: unknown): CycleInfo {
     ...fallback,
     ...row,
     state,
+    operationState: parseOperationCycleState(row.operationState, state),
+    hypothesisState: parseHypothesisCycleState(row.hypothesisState),
+    source: row.source === 'backend' ? 'backend' : 'unknown',
     stateLabel: String(row.stateLabel || fallback.stateLabel),
     shortLabel: String(row.shortLabel || fallback.shortLabel),
     description: String(row.description || fallback.description),
@@ -1049,22 +1257,13 @@ function serializeWellMonitoringSnapshot(snapshot: WellMonitoringSnapshot): Well
   };
 }
 
-function getInitialWellSnapshots() {
-  const stored = readStoredJson<Record<string, unknown>>(STORAGE_WELL_SNAPSHOTS, {});
-  const sanitized: Record<string, WellMonitoringSnapshot> = {};
-  Object.entries(stored).forEach(([key, value]) => {
-    const snapshot = sanitizeWellMonitoringSnapshot(value);
-    if (snapshot) sanitized[key] = snapshot;
-  });
-  return sanitized;
+function getInitialWellSnapshots(): Record<string, WellMonitoringSnapshot> {
+  return {};
 }
-function getInitialAcknowledgedEvents() {
-  const stored = readStoredJson<Record<string, unknown>>(STORAGE_ACKNOWLEDGED_EVENTS, {});
-  const sanitized: AcknowledgedEventMap = {};
-  Object.entries(stored).forEach(([key, value]) => {
-    if (value === true) sanitized[key] = true;
-  });
-  return sanitized;
+
+function isAcknowledgedStatus(value: unknown) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['acknowledged', 'confirmed', 'accepted', 'closed'].includes(normalized);
 }
 
 function alertLevelFromBackend(level: BackendLevel) {
@@ -1084,6 +1283,12 @@ function sanitizeAlert(value: unknown): Alert | null {
   const id = Math.max(1, Math.round(finite(row.id, 0)));
   return {
     id,
+    warningId: Number.isFinite(Number(row.warningId)) ? Number(row.warningId) : undefined,
+    lifecycleStatus: row.lifecycleStatus ? String(row.lifecycleStatus) : undefined,
+    ackStatus: row.ackStatus ? String(row.ackStatus) : undefined,
+    acknowledgedBy: row.acknowledgedBy ? String(row.acknowledgedBy) : undefined,
+    acknowledgedAt: row.acknowledgedAt ? String(row.acknowledgedAt) : undefined,
+    acknowledgementCount: Math.max(0, Math.round(finite(row.acknowledgementCount, 0))),
     wellId: row.wellId ? String(row.wellId) : undefined,
     wellName: row.wellName ? String(row.wellName) : undefined,
     wellBlock: row.wellBlock ? String(row.wellBlock) : undefined,
@@ -1108,16 +1313,6 @@ function sanitizeAlert(value: unknown): Alert | null {
     pumpState: String(row.pumpState || 'Unknown'),
     count: Math.max(1, Math.round(finite(row.count, 1))),
   };
-}
-
-function getInitialAlerts() {
-  const stored = readStoredJson<unknown[]>(STORAGE_ALERT_EVENTS, []);
-  return Array.isArray(stored)
-    ? stored.flatMap((item) => {
-      const alert = sanitizeAlert(item);
-      return alert ? [alert] : [];
-    }).slice(0, 120)
-    : [];
 }
 
 function formatStartLabel(frame: number, timestamp: string) {
@@ -1348,10 +1543,64 @@ function parseCycleState(value: unknown): CycleState | null {
     return rounded >= 0 && rounded <= 5 ? rounded as CycleState : null;
   }
   if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
+    const normalized = value.trim();
+    const parsed = Number(normalized);
     if (Number.isFinite(parsed)) return parseCycleState(parsed);
+    const byName: Record<string, CycleState> = {
+      disturbance: 0,
+      stabledrilling: 1,
+      stablecirculation: 2,
+      pumpstopped: 3,
+      pumprestarting: 4,
+      monitoring: 5,
+    };
+    return byName[normalized.replace(/[s_-]/g, '').toLowerCase()] ?? null;
   }
   return null;
+}
+
+function parseOperationCycleState(value: unknown, fallbackState: CycleState | null): OperationCycleState {
+  const state = parseCycleState(value) ?? fallbackState;
+  return state === null ? 'Unknown' : CYCLE_STATES[state].operationState;
+}
+
+function parseHypothesisCycleState(value: unknown): HypothesisCycleState {
+  const normalized = String(value || '').replace(/[s_-]/g, '').toLowerCase();
+  const values: Record<string, HypothesisCycleState> = {
+    none: 'None',
+    watchingpoststop: 'WatchingPostStop',
+    awaitingrestartshorthold: 'AwaitingRestartShortHold',
+    staticdriftreview: 'StaticDriftReview',
+    longstopguard: 'LongStopGuard',
+    restarting: 'Restarting',
+    observingstablepumping: 'ObservingStablePumping',
+    resolved: 'Resolved',
+  };
+  return values[normalized] ?? 'Unknown';
+}
+
+function cycleInfoFromRecord(record: RealTimeRecord, previous: CycleInfo): CycleInfo {
+  const source = record as Record<string, unknown>;
+  const rawOperation = readValue(source, ['operation_cycle_state', 'operationCycleState', 'operation_state_std', 'cycle_state', 'cycleState']);
+  const state = parseCycleState(rawOperation);
+  const rawHypothesis = readValue(source, ['hypothesis_cycle_state', 'hypothesisCycleState', 'cycle_candidate_state', 'cycleCandidateState']);
+  if (state === null && rawHypothesis === undefined) return { ...previous, source: 'unknown' };
+  const meta = state === null ? null : CYCLE_STATES[state];
+  const elapsed = Math.max(0, finite(readValue(source, ['cycle_seconds', 'cycleSeconds', 'elapsed_in_state', 'elapsedInState']), 0));
+  const total = Math.max(elapsed, finite(readValue(source, ['total_state_seconds', 'totalStateSeconds']), elapsed || 1));
+  return {
+    ...(meta ? { ...previous, ...meta, state } : previous),
+    operationState: parseOperationCycleState(rawOperation, state),
+    hypothesisState: parseHypothesisCycleState(rawHypothesis),
+    source: 'backend',
+    cycleIndex: Math.max(0, Math.round(finite(readValue(source, ['cycle_index', 'cycleIndex']), previous.cycleIndex))),
+    elapsedInState: elapsed,
+    totalStateSeconds: total,
+    progress: total > 0 ? clamp((elapsed / total) * 100, 0, 100) : 0,
+    tStopPump: String(readValue(source, ['t_stop_pump', 'tStopPump']) || previous.tStopPump || '') || null,
+    tStartPump: String(readValue(source, ['t_start_pump', 'tStartPump']) || previous.tStartPump || '') || null,
+    tStable: String(readValue(source, ['t_stable', 'tStable']) || previous.tStable || '') || null,
+  };
 }
 
 function buildRealtimeApiUrl(endpoint: string, path: string) {
@@ -1360,11 +1609,13 @@ function buildRealtimeApiUrl(endpoint: string, path: string) {
   return new URL(`${base}${suffix}`, window.location.origin).toString();
 }
 
-function buildRealtimeStreamUrl(endpoint: string, wellId: string, startTime: string, rateMs: number) {
+function buildRealtimeStreamUrl(endpoint: string, wellId: string, startTime: string, rateMs: number, lastSourceRowNo?: number, lastEventId?: string) {
     const url = new URL(buildRealtimeApiUrl(endpoint, `/wells/${encodeURIComponent(wellId)}/stream`));
     url.searchParams.set('rateMs', String(rateMs));
     if (startTime) url.searchParams.set('startTime', startTime);
-    return appendAccessToken(url.toString());
+    if (Number.isFinite(lastSourceRowNo)) url.searchParams.set('lastSourceRowNo', String(lastSourceRowNo));
+    if (lastEventId) url.searchParams.set('lastEventId', lastEventId);
+    return url.toString();
 }
 
 const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
@@ -1386,6 +1637,49 @@ const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
   baselineEndTime: '',
   baselineInvalidReason: '',
 };
+
+function normalizeEventSpan(value: unknown): EventSpan | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const eventId = String(readValue(row, ['event_id', 'eventId']) || '').trim();
+  const startTime = String(readValue(row, ['start_time', 'startTime']) || '').trim();
+  if (!eventId || !startTime) return null;
+  const endValue = readValue(row, ['end_time', 'endTime']);
+  return {
+    eventId,
+    candidateId: Math.max(0, Math.round(finite(readValue(row, ['candidate_id', 'candidateId']), 0))),
+    startTime,
+    endTime: endValue ? String(endValue) : null,
+    currentLevel: normalizeBackendLevel(readValue(row, ['current_level', 'currentLevel', 'public_level', 'publicLevel'])),
+    highestLevel: normalizeBackendLevel(readValue(row, ['highest_level', 'highestLevel', 'peak_level', 'peakLevel'])),
+    lifecycleStatus: String(readValue(row, ['lifecycle_status', 'lifecycleStatus', 'status']) || 'active'),
+    resolution: String(readValue(row, ['resolution', 'cycle_resolution', 'cycleResolution']) || '') || undefined,
+  };
+}
+
+function normalizeLifecycleNode(value: unknown): LifecycleNode | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const eventId = String(readValue(row, ['event_id', 'eventId']) || '').trim();
+  const timestamp = String(readValue(row, ['timestamp', 'event_time', 'eventTime']) || '').trim();
+  if (!eventId || !timestamp) return null;
+  return {
+    eventId,
+    candidateId: Math.max(0, Math.round(finite(readValue(row, ['candidate_id', 'candidateId']), 0))),
+    timestamp,
+    eventName: String(readValue(row, ['event_name', 'eventName', 'name']) || 'Lifecycle'),
+    reason: displayAlarmText(readValue(row, ['reason']) || ''),
+    publicLevel: normalizeBackendLevel(readValue(row, ['public_level', 'publicLevel', 'level'])),
+  };
+}
+
+function unwrapCollection(payload: unknown, keys: string[]) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+  const row = payload as Record<string, unknown>;
+  for (const key of keys) if (Array.isArray(row[key])) return row[key] as unknown[];
+  return [];
+}
 
 function normalizeBackendLevel(value: unknown): BackendLevel {
   const numeric = Number(value);
@@ -1416,6 +1710,12 @@ function displayAlarmText(value: unknown) {
 
 interface BackendLogEntry {
   eventId: string;
+  warningId?: number;
+  lifecycleStatus?: string;
+  ackStatus?: string;
+  acknowledgedBy?: string;
+  acknowledgedAt?: string;
+  acknowledgementCount?: number;
   publicLevel: BackendLevel;
   formalEvalLevel: BackendLevel;
   reason: string;
@@ -1444,6 +1744,12 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
     if (!shouldKeep) return [];
     return [{
       eventId,
+      warningId: Number.isFinite(Number(readValue(row, ['warning_id', 'warningId', 'id']))) ? Number(readValue(row, ['warning_id', 'warningId', 'id'])) : undefined,
+      lifecycleStatus: String(readValue(row, ['lifecycle_status', 'lifecycleStatus']) || eventState),
+      ackStatus: String(readValue(row, ['ack_status', 'ackStatus']) || ''),
+      acknowledgedBy: String(readValue(row, ['acknowledged_by', 'acknowledgedBy']) || '') || undefined,
+      acknowledgedAt: String(readValue(row, ['acknowledged_at', 'acknowledgedAt']) || '') || undefined,
+      acknowledgementCount: Math.max(0, Math.round(finite(readValue(row, ['acknowledgement_count', 'acknowledgementCount']), 0))),
       publicLevel,
       formalEvalLevel: normalizeBackendLevel(readValue(row, ['formal_eval_level', 'formalEvalLevel']) ?? publicLevel),
       reason: displayAlarmText(readValue(row, ['reason']) || `实时判级 L${publicLevel}`),
@@ -1592,158 +1898,87 @@ function normalizeRealtimeWell(item: unknown): WellInfo | null {
 }
 
 class SseDetectionDataSourceAdapter implements DataSourceAdapter {
-  private stream: EventSource | null = null;
+  private controller: AbortController | null = null;
   private recordCallback: (record: RealTimeRecord) => void = () => {};
   private statusCallback: (state: DataSourceState) => void = () => {};
   private recordCount = 0;
   private lastSampleTime: string | null = null;
   private closedByClient = false;
 
-  constructor(private endpoint: string, private startTime: string, private rateMs = 1200) {}
+  constructor(private endpoint: string, private startTime: string, private rateMs = 1200, private lastSourceRowNo?: number, private lastEventId?: string) {}
 
   connect(well: WellInfo) {
     this.disconnect();
     this.closedByClient = false;
     this.recordCount = 0;
     this.lastSampleTime = null;
+    const controller = new AbortController();
+    this.controller = controller;
+    const url = buildRealtimeStreamUrl(this.endpoint, well.wellId, this.startTime || well.discoveryTime || well.startTime || '', this.rateMs, this.lastSourceRowNo, this.lastEventId);
+    this.emitStatus({ mode: 'realtime', adapterName: 'V7 实时检测流', status: 'connecting', endpoint: url, message: `正在建立 ${well.wellName} 实时检测流`, lastRecordAt: null, recordCount: 0 });
+    void this.consume(url, well, controller);
+  }
 
-    if (typeof EventSource === 'undefined') {
-      this.emitStatus({
-        mode: 'realtime',
-        adapterName: 'V7 实时检测流',
-        status: 'error',
-        endpoint: this.endpoint,
-        message: '当前浏览器不支持 SSE 流式接口',
-        lastRecordAt: null,
-        recordCount: 0,
-      });
-      return;
-    }
-
-    const url = buildRealtimeStreamUrl(this.endpoint, well.wellId, this.startTime || well.discoveryTime || well.startTime || '', this.rateMs);
-    this.emitStatus({
-      mode: 'realtime',
-      adapterName: 'V7 实时检测流',
-      status: 'connecting',
-      endpoint: url,
-      message: `正在建立 ${well.wellName} 实时检测流`,
-      lastRecordAt: null,
-      recordCount: 0,
-    });
-
+  private async consume(url: string, well: WellInfo, controller: AbortController) {
     try {
-      this.stream = new EventSource(url, { withCredentials: true });
-    } catch {
-      this.emitStatus({
-        mode: 'realtime',
-        adapterName: 'V7 实时检测流',
-        status: 'error',
-        endpoint: url,
-        message: '检测流地址无效',
-        lastRecordAt: null,
-        recordCount: 0,
-      });
-      return;
+      const response = await authenticatedFetch(url, { cache: 'no-store', signal: controller.signal, headers: { Accept: 'text/event-stream' } });
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      this.emitStatus({ mode: 'realtime', adapterName: 'V7 实时检测流', status: 'connected', endpoint: url, message: '检测流已接入，等待实时帧', lastRecordAt: null, recordCount: this.recordCount });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (!controller.signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          this.handleBlock(block, well);
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+      if (!controller.signal.aborted) this.emitStatus({ mode: 'realtime', adapterName: 'V7 实时检测流', status: 'paused', endpoint: url, message: `检测流结束 · ${this.recordCount} 帧`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount });
+    } catch (error) {
+      if (controller.signal.aborted || this.closedByClient) return;
+      this.emitStatus({ mode: 'realtime', adapterName: 'V7 实时检测流', status: 'error', endpoint: url, message: `检测流连接中断：${error instanceof Error ? error.message : '未知错误'}`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount });
+    } finally {
+      if (this.controller === controller) this.controller = null;
     }
+  }
 
-    this.stream.addEventListener('start', () => {
-      this.emitStatus({
-        mode: 'realtime',
-        adapterName: 'V7 实时检测流',
-        status: 'connecting',
-        endpoint: url,
-        message: '正在按起始时间计算检测窗口',
-        lastRecordAt: null,
-        recordCount: this.recordCount,
-      });
+  private handleBlock(block: string, well: WellInfo) {
+    let eventName = 'message';
+    const dataLines: string[] = [];
+    block.split('\n').forEach((line) => {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim();
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
     });
-
-    this.stream.addEventListener('init', (event) => {
-      const data = JSON.parse((event as MessageEvent).data || '{}');
-      this.emitStatus({
-        mode: 'realtime',
-        adapterName: 'V7 实时检测流',
-        status: 'connected',
-        endpoint: url,
-        message: `检测流已接入 · 起始 ${data.start_time || this.startTime || '--'}`,
-        lastRecordAt: null,
-        recordCount: this.recordCount,
-      });
-    });
-
-    this.stream.addEventListener('frame', (event) => {
-      const frame = JSON.parse((event as MessageEvent).data || '{}') as RealTimeRecord;
-      const sampleTime = String(frame.timestamp || frame.sampleTime || frame.sample_time || '');
+    const dataText = dataLines.join('\n');
+    if (!dataText) return;
+    const data = JSON.parse(dataText) as RealTimeRecord & Record<string, unknown>;
+    if (eventName === 'frame' || eventName === 'message') {
+      const sampleTime = String(data.timestamp || data.sampleTime || data.sample_time || '');
       if (sampleTime) this.lastSampleTime = sampleTime;
       this.recordCount += 1;
-      this.recordCallback(frame);
-      this.emitStatus({
-        mode: 'realtime',
-        adapterName: 'V7 实时检测流',
-        status: 'connected',
-        endpoint: url,
-        message: `检测流推送中 · ${well.wellName} · ${this.recordCount} 帧`,
-        lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
-        recordCount: this.recordCount,
-      });
-    });
-
-    this.stream.addEventListener('done', () => {
-      this.emitStatus({
-        mode: 'realtime',
-        adapterName: 'V7 实时检测流',
-        status: 'paused',
-        endpoint: url,
-        message: `检测窗口推送完成 · ${this.recordCount} 帧`,
-        lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
-        recordCount: this.recordCount,
-      });
-      this.disconnect();
-    });
-
-    this.stream.addEventListener('error', (event) => {
-      const data = (() => {
-        try {
-          return JSON.parse((event as MessageEvent).data || '{}');
-        } catch {
-          return {};
-        }
-      })() as { error?: string };
-      this.emitStatus({
-        mode: 'realtime',
-        adapterName: 'V7 实时检测流',
-        status: 'error',
-        endpoint: url,
-        message: data.error || '检测流连接中断，请检查接口和 MySQL',
-        lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
-        recordCount: this.recordCount,
-      });
-      this.disconnect();
-    });
+      this.recordCallback(data);
+      this.emitStatus({ mode: 'realtime', adapterName: 'V7 实时检测流', status: 'connected', endpoint: this.endpoint, message: `检测流推送中 · ${well.wellName} · ${this.recordCount} 帧`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount });
+      return;
+    }
+    if (eventName === 'error') throw new Error(String(data.error || '后端检测流错误'));
+    if (eventName === 'done') this.emitStatus({ mode: 'realtime', adapterName: 'V7 实时检测流', status: 'paused', endpoint: this.endpoint, message: `检测窗口推送完成 · ${this.recordCount} 帧`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount });
   }
 
   disconnect() {
     this.closedByClient = true;
-    if (this.stream) {
-      this.stream.close();
-      this.stream = null;
-    }
+    this.controller?.abort();
+    this.controller = null;
   }
-
-  onRecord(callback: (record: RealTimeRecord) => void) {
-    this.recordCallback = callback;
-  }
-
-  onStatus(callback: (state: DataSourceState) => void) {
-    this.statusCallback = callback;
-  }
-
-  private emitStatus(state: DataSourceState) {
-    if (this.closedByClient && state.status === 'error') return;
-    this.statusCallback(state);
-  }
+  onRecord(callback: (record: RealTimeRecord) => void) { this.recordCallback = callback; }
+  onStatus(callback: (state: DataSourceState) => void) { this.statusCallback = callback; }
+  private emitStatus(state: DataSourceState) { if (!(this.closedByClient && state.status === 'error')) this.statusCallback(state); }
 }
-
 class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
   private recordCallback: (record: RealTimeRecord) => void = () => {};
   private statusCallback: (state: DataSourceState) => void = () => {};
@@ -1974,6 +2209,11 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
   private fallbackActivated = false;
   private connectWatchdog: number | null = null;
   private reconnectTimer: number | null = null;
+  private reconnectAttempt = 0;
+  private lastStreamSequence: number | null = null;
+  private lastSourceRowNo: number | undefined;
+  private lastEventId = '';
+  private lifecycleRevision: number | undefined;
 
   constructor(
     private endpoint: string,
@@ -1990,6 +2230,11 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     this.totalRecordCount = 0;
     this.lastSampleTime = null;
     this.fallbackActivated = false;
+    this.reconnectAttempt = 0;
+    this.lastStreamSequence = null;
+    this.lastSourceRowNo = undefined;
+    this.lastEventId = '';
+    this.lifecycleRevision = undefined;
     this.startSse();
   }
 
@@ -2019,7 +2264,7 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
 
   private startSse() {
     if (!this.activeWell || !this.seedData) return;
-    const adapter = new SseDetectionDataSourceAdapter(this.endpoint, this.startTime, this.rateMs);
+    const adapter = new SseDetectionDataSourceAdapter(this.endpoint, this.startTime, this.rateMs, this.lastSourceRowNo, this.lastEventId);
     this.activeAdapter = adapter;
     this.bindAdapter(adapter, false);
     this.armWatchdog();
@@ -2031,6 +2276,35 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
       if (this.closedByClient) return;
       const sampleTime = normalizeSampleTime(sampleTimeFromRecord(record));
       if (sampleTime) this.lastSampleTime = sampleTime;
+      const source = record as Record<string, unknown>;
+      const streamSequence = finite(readValue(source, ['stream_sequence', 'streamSequence']), NaN);
+      const sourceRowNo = finite(readValue(source, ['source_row_no', 'sourceRowNo']), NaN);
+      const lifecycleRevision = finite(readValue(source, ['lifecycle_revision', 'lifecycleRevision']), NaN);
+      const eventId = String(readValue(source, ['event_id', 'eventId']) || '');
+      const resumeSourceRowNo = this.lastSourceRowNo;
+      const hasGap = Number.isFinite(streamSequence) && this.lastStreamSequence !== null && streamSequence !== this.lastStreamSequence + 1;
+      if (hasGap && !isFallback) {
+        this.lastSourceRowNo = resumeSourceRowNo;
+        this.scheduleSseReconnect({
+          mode: 'realtime',
+          adapterName: 'V7 实时检测流',
+          status: 'connecting',
+          endpoint: this.endpoint,
+          message: '检测到流序号缺口',
+          lastRecordAt: sampleTime ? formatRecordDateTime(sampleTime) : null,
+          recordCount: this.totalRecordCount,
+          streamSequence: this.lastStreamSequence ?? undefined,
+          sourceRowNo: resumeSourceRowNo,
+          lifecycleRevision: this.lifecycleRevision,
+          streamGap: true,
+        }, '流序号缺口');
+        return;
+      }
+      if (Number.isFinite(streamSequence)) this.lastStreamSequence = streamSequence;
+      if (Number.isFinite(sourceRowNo)) this.lastSourceRowNo = sourceRowNo;
+      if (Number.isFinite(lifecycleRevision)) this.lifecycleRevision = lifecycleRevision;
+      if (eventId) this.lastEventId = eventId;
+      this.reconnectAttempt = 0;
       this.totalRecordCount += 1;
       if (!isFallback && this.connectWatchdog !== null) {
         window.clearTimeout(this.connectWatchdog);
@@ -2052,9 +2326,12 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
           this.scheduleSseReconnect(adjustedState, state.message || '检测流结束');
           return;
         }
-        const shouldFallback = state.status === 'error' || (state.status === 'paused' && this.totalRecordCount === 0);
-        if (shouldFallback) {
-          this.switchToPreview(state.message || '检测流不可用');
+        if (state.status === 'error') {
+          this.scheduleSseReconnect(adjustedState, state.message || '检测流连接中断');
+          return;
+        }
+        if (state.status === 'paused' && this.totalRecordCount === 0) {
+          this.scheduleSseReconnect(adjustedState, state.message || '检测流未返回数据');
           return;
         }
       }
@@ -2076,17 +2353,24 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     if (resumeFrom) this.startTime = resumeFrom;
     this.activeAdapter?.disconnect();
     this.activeAdapter = null;
+    const delays = [1000, 2000, 5000, 10000, 30000];
+    const delay = delays[Math.min(this.reconnectAttempt, delays.length - 1)];
+    this.reconnectAttempt += 1;
     this.emitStatus({
       ...state,
       status: 'connecting',
       endpoint: this.endpoint,
-      message: `${reason}，正在从 ${resumeFrom ? formatRecordTime(resumeFrom).timeStr : '最新点'} 续接实时流`,
+      message: `${reason}，${Math.round(delay / 1000)} 秒后从源行 ${this.lastSourceRowNo ?? '--'} 续接`,
+      streamSequence: this.lastStreamSequence ?? undefined,
+      sourceRowNo: this.lastSourceRowNo,
+      lifecycleRevision: this.lifecycleRevision,
+      streamGap: reason.includes('缺口'),
     });
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       if (this.closedByClient || this.fallbackActivated) return;
       this.startSse();
-    }, Math.max(800, this.rateMs));
+    }, delay);
   }
 
   private armWatchdog() {
@@ -2173,36 +2457,23 @@ function createMonitoringAdapter(mode: MonitoringMode, endpoint: string, startTi
     : new ResilientRealtimeDataSourceAdapter(endpoint, startTime, rateMs);
 }
 
-function getCycleInfo(totalSeconds: number): CycleInfo {
-  const cycleIndex = Math.floor(totalSeconds / TOTAL_CYCLE_SECONDS) + 1;
-  const secondInCycle = totalSeconds % TOTAL_CYCLE_SECONDS;
-  let cursor = 0;
-  let state: CycleState = 0;
-  let elapsedInState = 0;
-  let totalStateSeconds = CYCLE_DURATIONS[0];
-
-  for (let index = 0; index < CYCLE_DURATIONS.length; index += 1) {
-    const duration = CYCLE_DURATIONS[index];
-    if (secondInCycle < cursor + duration) {
-      state = index as CycleState;
-      elapsedInState = secondInCycle - cursor;
-      totalStateSeconds = duration;
-      break;
-    }
-    cursor += duration;
-  }
-
-  const meta = CYCLE_STATES[state];
-  const { timeStr } = formatNow();
+function getCycleInfo(_totalSeconds: number): CycleInfo {
   return {
-    ...meta,
-    cycleIndex,
-    elapsedInState,
-    totalStateSeconds,
-    progress: clamp((elapsedInState / totalStateSeconds) * 100, 0, 100),
-    tStopPump: state >= 3 ? timeStr : null,
-    tStartPump: state >= 4 ? timeStr : null,
-    tStable: state >= 5 ? timeStr : null,
+    ...CYCLE_STATES[0],
+    state: 0,
+    operationState: 'Unknown',
+    hypothesisState: 'Unknown',
+    source: 'unknown',
+    stateLabel: '后端状态未提供',
+    shortLabel: '--',
+    description: '等待后端返回操作周期与跨周期假设状态',
+    cycleIndex: 0,
+    elapsedInState: 0,
+    totalStateSeconds: 1,
+    progress: 0,
+    tStopPump: null,
+    tStartPump: null,
+    tStable: null,
   };
 }
 
@@ -2259,8 +2530,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const currentDataRef = useRef<MonitoringData>(currentData);
   const [flowHistory, setFlowHistory] = useState<FlowDataPoint[]>(() => createInitialSelectedViewState(selectedWellId).flowHistory);
   const [pressureHistory, setPressureHistory] = useState<PressureDataPoint[]>(() => createInitialSelectedViewState(selectedWellId).pressureHistory);
-  const [alerts, setAlerts] = useState<Alert[]>(getInitialAlerts);
-  const [acknowledgedEvents, setAcknowledgedEvents] = useState<AcknowledgedEventMap>(getInitialAcknowledgedEvents);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [acknowledgedEvents, setAcknowledgedEvents] = useState<AcknowledgedEventMap>({});
   const [backendDetection, setBackendDetection] = useState<BackendDetectionState>(() => createInitialSelectedViewState(selectedWellId).backendDetection);
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>(() => createInitialSelectedViewState(selectedWellId).historyRecords);
   const [shutInActive, setShutInActive] = useState(() => createInitialSelectedViewState(selectedWellId).shutInActive);
@@ -2278,6 +2549,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const timeIndexRequestKeyRef = useRef('');
   const runtimePersistTimerRef = useRef<number | null>(null);
   const snapshotPersistTimerRef = useRef<number | null>(null);
+  const snapshotCacheLoadedRef = useRef(false);
+  const selectedUiFlushTimerRef = useRef<number | null>(null);
+  const pendingSelectedUiSnapshotRef = useRef<WellMonitoringSnapshot | null>(null);
   const wellRuntimeStatesRef = useRef(wellRuntimeStates);
   const backendEventIdsRef = useRef<Set<string>>(new Set());
   const backendEventKeysRef = useRef<Set<string>>(new Set());
@@ -2285,6 +2559,22 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const selectedWellIdRef = useRef(selectedWellId);
   const acknowledgedEventsRef = useRef<AcknowledgedEventMap>(acknowledgedEvents);
   const [cycleInfo, setCycleInfo] = useState<CycleInfo>(() => createInitialSelectedViewState(selectedWellId).cycleInfo);
+  const [eventSpans, setEventSpans] = useState<EventSpan[]>([]);
+  const [lifecycleNodes, setLifecycleNodes] = useState<LifecycleNode[]>([]);
+  const [eventProjectionState, setEventProjectionState] = useState<EventProjectionState>({ status: 'loading', message: '等待读取服务端事件投影', lastUpdatedAt: null });
+
+  useEffect(() => {
+    const handleStorageError = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; message?: string }>).detail;
+      setRawDataSourceState((previous) => ({
+        ...previous,
+        status: 'error',
+        message: `本地状态保存失败（${detail?.key || 'unknown'}）：${detail?.message || '浏览器存储不可用'}`,
+      }));
+    };
+    window.addEventListener(STORAGE_ERROR_EVENT, handleStorageError);
+    return () => window.removeEventListener(STORAGE_ERROR_EVENT, handleStorageError);
+  }, []);
 
   useEffect(() => {
     selectedWellIdRef.current = selectedWellId;
@@ -2408,7 +2698,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       ) return;
       serialized[wellId] = serializeWellMonitoringSnapshot(snapshot);
     });
-    writeStoredJson(STORAGE_WELL_SNAPSHOTS, serialized);
+    void writeWellSnapshotsToIndexedDb(serialized);
   }, [monitoredWellIds, realtimeTabWellIds]);
 
   const flushRuntimeStates = useCallback((states?: Record<string, WellRuntimeState>) => {
@@ -2446,6 +2736,10 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       if (snapshotPersistTimerRef.current !== null) {
         window.clearTimeout(snapshotPersistTimerRef.current);
         snapshotPersistTimerRef.current = null;
+      }
+      if (selectedUiFlushTimerRef.current !== null) {
+        window.clearTimeout(selectedUiFlushTimerRef.current);
+        selectedUiFlushTimerRef.current = null;
       }
     }
     flushRuntimeStates();
@@ -2524,6 +2818,21 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     setShutInActive(snapshot.shutInActive);
     setShutInStartedAt(snapshot.shutInStartedAt);
   }, [getWellSnapshot]);
+
+  useEffect(() => {
+    if (snapshotCacheLoadedRef.current) return;
+    snapshotCacheLoadedRef.current = true;
+    void readWellSnapshotsFromIndexedDb().then((storedSnapshots) => {
+      const merged = { ...storedSnapshots };
+      Object.entries(wellSnapshotsRef.current).forEach(([wellId, snapshot]) => {
+        if (hasSnapshotResumeProgress(snapshot) || !merged[wellId]) merged[wellId] = snapshot;
+      });
+      wellSnapshotsRef.current = merged;
+      const selectedWell = wells.find((well) => well.wellId === selectedWellIdRef.current) || wellInfo;
+      const visibleHasProgress = flowHistory.length > 0 || pressureHistory.length > 0 || historyRecords.length > 0 || Boolean(currentSampleTime);
+      if (selectedWell?.wellId && !visibleHasProgress && merged[selectedWell.wellId]) hydrateWellView(selectedWell);
+    });
+  }, [currentSampleTime, flowHistory.length, historyRecords.length, hydrateWellView, pressureHistory.length, wellInfo, wells]);
 
   useEffect(() => {
     if (!wellInfo?.wellId) return;
@@ -2643,6 +2952,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         if (existingIndex >= 0) {
           nextAlerts = nextAlerts.map((alert, index) => index === existingIndex ? {
             ...alert,
+            warningId: entry.warningId ?? alert.warningId,
+            lifecycleStatus: entry.lifecycleStatus || alert.lifecycleStatus,
+            ackStatus: entry.ackStatus || alert.ackStatus,
+            acknowledged: entry.ackStatus ? isAcknowledgedStatus(entry.ackStatus) : alert.acknowledged,
+            acknowledgedBy: entry.acknowledgedBy || alert.acknowledgedBy,
+            acknowledgedAt: entry.acknowledgedAt || alert.acknowledgedAt,
+            acknowledgementCount: entry.acknowledgementCount ?? alert.acknowledgementCount,
             level: entry.publicLevel >= 4 ? 'critical' as const : entry.publicLevel >= 2 ? 'warning' as const : 'info' as const,
             message: entry.reason || alert.message,
             time: eventTime.timeStr,
@@ -2666,6 +2982,12 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         backendEventKeysRef.current.add(eventKey);
         additions.push({
           id: alertIdCounter.current++,
+          warningId: entry.warningId,
+          lifecycleStatus: entry.lifecycleStatus,
+          ackStatus: entry.ackStatus,
+          acknowledgedBy: entry.acknowledgedBy,
+          acknowledgedAt: entry.acknowledgedAt,
+          acknowledgementCount: entry.acknowledgementCount,
           wellId: well.wellId,
           wellName: well.wellName,
           wellBlock: well.blockName || well.block,
@@ -2693,6 +3015,27 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       });
       return additions.length > 0 ? [...additions.reverse(), ...nextAlerts].slice(0, 120) : nextAlerts;
     });
+  }, []);
+
+  const scheduleSelectedUiSnapshot = useCallback((snapshot: WellMonitoringSnapshot) => {
+    pendingSelectedUiSnapshotRef.current = snapshot;
+    if (selectedUiFlushTimerRef.current !== null) return;
+    selectedUiFlushTimerRef.current = window.setTimeout(() => {
+      selectedUiFlushTimerRef.current = null;
+      const pending = pendingSelectedUiSnapshotRef.current;
+      pendingSelectedUiSnapshotRef.current = null;
+      if (!pending) return;
+      currentDataRef.current = pending.currentData;
+      setCurrentData(pending.currentData);
+      setCurrentSampleTime(pending.currentSampleTime);
+      setFlowHistory([...pending.flowHistory]);
+      setPressureHistory([...pending.pressureHistory]);
+      setBackendDetection(pending.backendDetection);
+      setHistoryRecords([...pending.historyRecords]);
+      setCycleInfo(pending.cycleInfo);
+      setShutInActive(pending.shutInActive);
+      setShutInStartedAt(pending.shutInStartedAt);
+    }, 250);
   }, []);
 
   const syncWellSnapshotFromSample = useCallback((
@@ -2733,19 +3076,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       latestFormation: nextData.formation,
     };
     schedulePersistWellSnapshots();
-    if (well.wellId === selectedWellIdRef.current) {
-      currentDataRef.current = nextData;
-      setCurrentData(nextData);
-      setCurrentSampleTime(sampleTime);
-      setFlowHistory(flowHistoryItems);
-      setPressureHistory(pressureHistoryItems);
-      setBackendDetection(backendDetectionState);
-      setHistoryRecords(historyItems);
-      setCycleInfo(cycleState);
-      setShutInActive(shutInState?.active ?? false);
-      setShutInStartedAt(shutInState?.startedAt ?? null);
-    }
-  }, [schedulePersistWellSnapshots]);
+    if (well.wellId === selectedWellIdRef.current) scheduleSelectedUiSnapshot(wellSnapshotsRef.current[well.wellId]);
+  }, [schedulePersistWellSnapshots, scheduleSelectedUiSnapshot]);
 
   const resetWellSnapshot = useCallback((well: WellInfo) => {
     wellSnapshotsRef.current[well.wellId] = createWellMonitoringSnapshot(well);
@@ -2814,18 +3146,12 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const timestampMs = recordMillis(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
       const nextDetection = normalizeBackendDetection(record);
       const canPaintEvent = isMonitorableEventRecord(record, lastData);
-      const recordCycleState = parseCycleState(record.cycleState ?? record.operation_state_std);
-      cycleState = recordCycleState === null ? getCycleInfo(recordCount) : {
-        ...getCycleInfo(recordCount),
-        ...CYCLE_STATES[recordCycleState],
-        state: recordCycleState,
-      };
+      cycleState = cycleInfoFromRecord(record, cycleState);
       const sampleTimeText = String(record.sampleTime || record.sample_time || record.timestamp || '');
       if (sampleTimeText) sampleTime = sampleTimeText.replace('T', ' ');
       const activeEventId = nextDetection.publicLevel >= 2 && canPaintEvent ? (nextDetection.eventId || null) : null;
       backendState = nextDetection;
-      flowItems = keepMonitoringWindow(dedupeMonitoringPoints(sortMonitoringPoints([
-        ...flowItems,
+      flowItems = appendMonitoringPoint(flowItems,
         {
           time: recordTime.timeStr,
           timestampMs,
@@ -2833,6 +3159,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           eventId: activeEventId,
           flowIn: lastData.flowIn,
           flowOut: lastData.flowOut,
+          wellDepth: lastData.wellDepth,
           bitDepth: lastData.bitDepth,
           pitGain: lastData.pitGain,
           pitVolume: lastData.pitVolume,
@@ -2845,9 +3172,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           rpm: lastData.rpm,
           torque: lastData.torque,
         },
-      ])));
-      pressureItems = keepMonitoringWindow(dedupeMonitoringPoints(sortMonitoringPoints([
-        ...pressureItems,
+      );
+      pressureItems = appendMonitoringPoint(pressureItems,
         {
           time: recordTime.timeStr,
           timestampMs,
@@ -2858,9 +3184,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           spp: lastData.spp,
           sppPredicted: lastData.sppPredicted,
         },
-      ])));
-      historyItems = dedupeHistoryRecords([
-        ...historyItems.slice(-239),
+      );
+      historyItems = appendHistoryRecord(historyItems,
         {
           id: historyItems.at(-1)?.id ? historyItems.at(-1)!.id + 1 : 1,
           time: recordTime.timeStr,
@@ -2889,7 +3214,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           baselineCount: nextDetection.baselineCount,
           status: backendLevelToStatus(nextDetection.publicLevel),
         },
-      ]);
+      );
       updateWellRuntime(well.wellId, {
         monitoringMode: mode,
         status: 'connected',
@@ -3018,10 +3343,6 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   }, [schedulePersistRuntimeStates, wellRuntimeStates]);
 
   useEffect(() => {
-    writeStoredJson(STORAGE_ACKNOWLEDGED_EVENTS, acknowledgedEvents);
-  }, [acknowledgedEvents]);
-
-  useEffect(() => {
     const handleBeforeUnload = () => {
       flushAllPersistence();
     };
@@ -3038,10 +3359,6 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       flushAllPersistence();
     };
   }, [flushAllPersistence]);
-
-  useEffect(() => {
-    writeStoredJson(STORAGE_ALERT_EVENTS, alerts.slice(0, 120));
-  }, [alerts]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -3127,6 +3444,132 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       controller.abort();
     };
   }, [authLoading, hasAccessToken, realtimeEndpoint, user?.id]);
+
+  useEffect(() => {
+    if (!hasAccessToken) return undefined;
+    const controller = new AbortController();
+    const loadWarnings = async () => {
+      try {
+        const url = new URL('/api/warnings/events', window.location.origin);
+        if (wellInfo?.wellId) url.searchParams.set('wellId', wellInfo.wellId);
+        const response = await authenticatedFetch(url.toString(), { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const rows = unwrapCollection(payload, ['events', 'warnings', 'items', 'data']);
+        const next = rows.flatMap((value, index) => {
+          if (!value || typeof value !== 'object') return [];
+          const row = value as Record<string, unknown>;
+          const warningId = Number(readValue(row, ['warning_id', 'warningId', 'id']));
+          const eventId = String(readValue(row, ['event_id', 'eventId']) || warningId || '').trim();
+          if (!eventId || !Number.isFinite(warningId)) return [];
+          const eventTime = formatRecordTime(readValue(row, ['start_time', 'startTime', 'timestamp']) as string | number | undefined);
+          const level = normalizeBackendLevel(readValue(row, ['current_level', 'currentLevel', 'public_level', 'publicLevel', 'level']));
+          const highestLevel = normalizeBackendLevel(readValue(row, ['highest_level', 'highestLevel', 'peak_level', 'peakLevel']) ?? level);
+          const ackStatus = String(readValue(row, ['ack_status', 'ackStatus']) || 'unacknowledged');
+          const backendEventId = `${String(readValue(row, ['well_id', 'wellId']) || wellInfo.wellId)}:${eventId}:${String(readValue(row, ['start_time', 'startTime']) || eventTime.dateStr + ' ' + eventTime.timeStr)}`;
+          return [{
+            id: Math.max(1, Math.round(warningId || index + 1)),
+            warningId,
+            wellId: String(readValue(row, ['well_id', 'wellId']) || wellInfo.wellId),
+            wellName: String(readValue(row, ['well_name', 'wellName']) || wellInfo.wellName),
+            time: eventTime.timeStr,
+            date: eventTime.dateStr,
+            level: alertLevelFromBackend(level),
+            message: displayAlarmText(readValue(row, ['reason', 'message']) || `后端报警 L${level}`),
+            acknowledged: isAcknowledgedStatus(ackStatus),
+            backendEventId,
+            backendLevel: level,
+            peakBackendLevel: highestLevel,
+            formalEvalLevel: normalizeBackendLevel(readValue(row, ['formal_eval_level', 'formalEvalLevel']) ?? level),
+            peakFormalEvalLevel: normalizeBackendLevel(readValue(row, ['peak_formal_eval_level', 'peakFormalEvalLevel']) ?? level),
+            activeSignals: parseActiveSignals(readValue(row, ['active_signals', 'activeSignals'])),
+            eventState: String(readValue(row, ['event_state', 'eventState', 'lifecycle_status', 'lifecycleStatus']) || 'tracking'),
+            pumpState: String(readValue(row, ['pump_state', 'pumpState']) || 'Unknown'),
+            lifecycleStatus: String(readValue(row, ['lifecycle_status', 'lifecycleStatus']) || ''),
+            ackStatus,
+            acknowledgedBy: String(readValue(row, ['acknowledged_by', 'acknowledgedBy']) || '') || undefined,
+            acknowledgedAt: String(readValue(row, ['acknowledged_at', 'acknowledgedAt']) || '') || undefined,
+            acknowledgementCount: Math.max(0, Math.round(finite(readValue(row, ['acknowledgement_count', 'acknowledgementCount']), 0))),
+            count: Math.max(1, Math.round(finite(readValue(row, ['sample_count', 'sampleCount']), 1))),
+          } as Alert];
+        });
+        if (!controller.signal.aborted && next.length > 0) setAlerts(next.slice(0, 120));
+      } catch {
+        // Frame-stream alerts remain available when the warning projection endpoint is unavailable.
+      }
+    };
+    void loadWarnings();
+    const timer = window.setInterval(() => void loadWarnings(), 15000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [hasAccessToken, wellInfo?.wellId, wellInfo?.wellName]);
+  useEffect(() => {
+    const selectedWellId = wellInfo?.wellId;
+    if (!selectedWellId) {
+      setEventSpans([]);
+      setLifecycleNodes([]);
+      setEventProjectionState({ status: 'fallback', message: '尚未选择井，事件投影暂不可用', lastUpdatedAt: null });
+      return undefined;
+    }
+    const controller = new AbortController();
+    let timer = 0;
+    let cachedProjection: CachedEventProjection | null = null;
+    const applyCachedProjection = (projection: CachedEventProjection, message: string, status: EventProjectionState['status']) => {
+      if (controller.signal.aborted || selectedWellIdRef.current !== selectedWellId) return;
+      setEventSpans(projection.eventSpans);
+      setLifecycleNodes(projection.lifecycleNodes);
+      setEventProjectionState({ status, message, lastUpdatedAt: projection.updatedAt });
+    };
+    const loadCache = async () => {
+      cachedProjection = await readEventProjectionFromIndexedDb(selectedWellId);
+      if (cachedProjection) applyCachedProjection(cachedProjection, `本地正式事件投影 · ${cachedProjection.eventSpans.length} 个事件 · ${cachedProjection.lifecycleNodes.length} 个节点`, 'fallback');
+      else if (!hasAccessToken) {
+        setEventSpans([]);
+        setLifecycleNodes([]);
+        setEventProjectionState({ status: 'fallback', message: '未连接服务端事件投影，曲线仅显示帧级兼容标记', lastUpdatedAt: null });
+      }
+    };
+    const load = async () => {
+      if (!hasAccessToken) return;
+      setEventProjectionState((previous) => ({ ...previous, status: previous.lastUpdatedAt ? previous.status : 'loading', message: '正在同步服务端事件投影' }));
+      try {
+        const wellId = encodeURIComponent(selectedWellId);
+        const [spanResponse, lifecycleResponse] = await Promise.all([
+          authenticatedFetch(buildRealtimeApiUrl(realtimeEndpoint, `/wells/${wellId}/event-spans`), { cache: 'no-store', signal: controller.signal }),
+          authenticatedFetch(buildRealtimeApiUrl(realtimeEndpoint, `/wells/${wellId}/lifecycle-events`), { cache: 'no-store', signal: controller.signal }),
+        ]);
+        if (spanResponse.status === 404 || lifecycleResponse.status === 404) {
+          if (cachedProjection) applyCachedProjection(cachedProjection, '后端暂未开放 EventSpan 接口，继续显示本地正式投影', 'fallback');
+          else {
+            setEventSpans([]);
+            setLifecycleNodes([]);
+            setEventProjectionState({ status: 'fallback', message: '后端暂未开放 EventSpan 接口，当前使用帧级兼容标记', lastUpdatedAt: new Date().toISOString() });
+          }
+          return;
+        }
+        if (!spanResponse.ok || !lifecycleResponse.ok) throw new Error(`HTTP ${spanResponse.status}/${lifecycleResponse.status}`);
+        const [spanPayload, lifecyclePayload] = await Promise.all([spanResponse.json(), lifecycleResponse.json()]);
+        if (controller.signal.aborted || selectedWellIdRef.current !== selectedWellId) return;
+        const nextSpans = unwrapCollection(spanPayload, ['eventSpans', 'event_spans', 'items', 'data']).map(normalizeEventSpan).filter(Boolean) as EventSpan[];
+        const nextNodes = unwrapCollection(lifecyclePayload, ['lifecycleEvents', 'lifecycle_events', 'items', 'data']).map(normalizeLifecycleNode).filter(Boolean) as LifecycleNode[];
+        const updatedAt = new Date().toISOString();
+        cachedProjection = { eventSpans: nextSpans, lifecycleNodes: nextNodes, updatedAt };
+        setEventSpans(nextSpans);
+        setLifecycleNodes(nextNodes);
+        setEventProjectionState({ status: 'connected', message: `服务端事件投影 · ${nextSpans.length} 个事件 · ${nextNodes.length} 个节点`, lastUpdatedAt: updatedAt });
+        void writeEventProjectionToIndexedDb(selectedWellId, cachedProjection);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (cachedProjection) applyCachedProjection(cachedProjection, `事件投影同步失败，继续显示本地正式投影：${error instanceof Error ? error.message : '未知错误'}`, 'error');
+        else setEventProjectionState({ status: 'error', message: `事件投影同步失败：${error instanceof Error ? error.message : '未知错误'}`, lastUpdatedAt: new Date().toISOString() });
+      }
+    };
+    void loadCache().then(() => void load());
+    if (hasAccessToken) timer = window.setInterval(() => void load(), 15000);
+    return () => {
+      controller.abort();
+      if (timer) window.clearInterval(timer);
+    };
+  }, [hasAccessToken, realtimeEndpoint, wellInfo?.wellId]);
 
   useEffect(() => {
     if (!hasAccessToken) return;
@@ -3255,20 +3698,12 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const previousSnapshot = getWellSnapshot(wellInfo);
       const recordTime = formatRecordTime(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
       const timestampMs = recordMillis(record.sampleTime || record.sample_time as string | number | undefined || record.timestamp);
-      timeCounter.current = Number(record.cycleSeconds) > 0 ? Number(record.cycleSeconds) : timeCounter.current + 1;
-      const recordCycleState = parseCycleState(record.cycleState ?? record.operation_state_std);
-      const nextCycleInfo = recordCycleState === null ? getCycleInfo(timeCounter.current) : {
-        ...getCycleInfo(timeCounter.current),
-        ...CYCLE_STATES[recordCycleState],
-        state: recordCycleState,
-      };
+      timeCounter.current = Number(record.cycleSeconds) > 0 ? Number(record.cycleSeconds) : timeCounter.current;
+      const nextCycleInfo = cycleInfoFromRecord(record, previousSnapshot.cycleInfo);
 
-      setCycleInfo(nextCycleInfo);
       const nextData = normalizeRealTimeRecord(record, currentDataRef.current);
       currentDataRef.current = nextData;
-      setCurrentData(nextData);
       const sampleTimeText = String(record.sampleTime || record.sample_time || record.timestamp || '');
-      if (sampleTimeText) setCurrentSampleTime(sampleTimeText.replace('T', ' '));
       const nextDetection = normalizeBackendDetection(record);
       const canPaintEvent = isMonitorableEventRecord(record, nextData);
       if (nextDetection.eventId && canPaintEvent) {
@@ -3277,9 +3712,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         activeEventIdRef.current = null;
       }
       const activeEventId = nextDetection.publicLevel >= 2 && canPaintEvent ? activeEventIdRef.current : null;
-      setBackendDetection(nextDetection);
-      const nextFlowHistory = dedupeMonitoringPoints(sortMonitoringPoints(keepMonitoringWindow([
-        ...previousSnapshot.flowHistory,
+      const nextFlowHistory = appendMonitoringPoint(previousSnapshot.flowHistory,
         {
           time: recordTime.timeStr,
           timestampMs,
@@ -3287,6 +3720,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           eventId: activeEventId,
           flowIn: nextData.flowIn,
           flowOut: nextData.flowOut,
+          wellDepth: nextData.wellDepth,
           bitDepth: nextData.bitDepth,
           pitGain: nextData.pitGain,
           pitVolume: nextData.pitVolume,
@@ -3299,9 +3733,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           rpm: nextData.rpm,
           torque: nextData.torque,
         },
-      ])));
-      const nextPressureHistory = dedupeMonitoringPoints(sortMonitoringPoints(keepMonitoringWindow([
-        ...previousSnapshot.pressureHistory,
+      );
+      const nextPressureHistory = appendMonitoringPoint(previousSnapshot.pressureHistory,
         {
           time: recordTime.timeStr,
           timestampMs,
@@ -3312,9 +3745,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           spp: nextData.spp,
           sppPredicted: nextData.sppPredicted,
         },
-      ])));
-      const nextHistoryRecords = dedupeHistoryRecords([
-        ...previousSnapshot.historyRecords.slice(-239),
+      );
+      const nextHistoryRecords = appendHistoryRecord(previousSnapshot.historyRecords,
         {
           id: historyIdCounter.current++,
           time: recordTime.timeStr,
@@ -3343,7 +3775,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           baselineCount: nextDetection.baselineCount,
           status: backendLevelToStatus(nextDetection.publicLevel),
         },
-      ]);
+      );
       updateWellRuntime(wellInfo.wellId, {
         monitoringMode: mode,
         backendLevel: nextDetection.publicLevel,
@@ -3358,9 +3790,6 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         message: `检测流推送中 · ${historyIdCounter.current} 帧`,
       });
       appendAlertsFromRecord(wellInfo, record, nextData);
-      setFlowHistory(nextFlowHistory);
-      setPressureHistory(nextPressureHistory);
-      setHistoryRecords(nextHistoryRecords);
       syncWellSnapshotFromSample(
         wellInfo,
         nextData,
@@ -3924,30 +4353,53 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     resetForWell(wellInfo, value);
   };
 
-  const acknowledgeAlert = (id: number) => {
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acknowledged: true } : a)));
+  const acknowledgeAlert = async (id: number) => {
     const target = alerts.find((alert) => alert.id === id);
-    if (target?.backendEventId) {
-      setAcknowledgedEvents((prev) => {
-        const next = { ...prev, [target.backendEventId]: true };
+    if (!target?.warningId) {
+      setRawDataSourceState((previous) => ({ ...previous, status: 'error', message: '报警确认失败：后端事件未返回 warningId，无法形成审计记录' }));
+      return;
+    }
+    try {
+      const response = await authenticatedFetch(new URL(`/api/warnings/events/${target.warningId}/acknowledge`, window.location.origin).toString(), { method: 'POST' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const acknowledgedAt = new Date().toISOString();
+      setAlerts((previous) => previous.map((alert) => alert.id === id ? { ...alert, acknowledged: true, ackStatus: 'acknowledged', acknowledgedAt, acknowledgementCount: (alert.acknowledgementCount || 0) + 1 } : alert));
+      setAcknowledgedEvents((previous) => {
+        const next = { ...previous, [target.backendEventId]: true };
         acknowledgedEventsRef.current = next;
         return next;
       });
+    } catch (error) {
+      setRawDataSourceState((previous) => ({ ...previous, status: 'error', message: `报警确认失败：${error instanceof Error ? error.message : '未知错误'}` }));
     }
   };
 
-  const acknowledgeAll = () => {
-    setAlerts((prev) => prev.map((a) => ({ ...a, acknowledged: true })));
-    setAcknowledgedEvents((prev) => {
-      const next = { ...prev };
-      alerts.forEach((alert) => {
-        if (alert.backendEventId) next[alert.backendEventId] = true;
+  const acknowledgeAll = async () => {
+    const targets = alerts.filter((alert) => !alert.acknowledged && alert.warningId);
+    if (targets.length === 0) {
+      setRawDataSourceState((previous) => ({ ...previous, status: 'error', message: '批量确认失败：当前事件缺少可审计 warningId' }));
+      return;
+    }
+    try {
+      const response = await authenticatedFetch(new URL('/api/warnings/events/acknowledge-all', window.location.origin).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ warningIds: targets.map((alert) => alert.warningId), wellId: wellInfo.wellId }),
       });
-      acknowledgedEventsRef.current = next;
-      return next;
-    });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const targetIds = new Set(targets.map((alert) => alert.id));
+      const acknowledgedAt = new Date().toISOString();
+      setAlerts((previous) => previous.map((alert) => targetIds.has(alert.id) ? { ...alert, acknowledged: true, ackStatus: 'acknowledged', acknowledgedAt, acknowledgementCount: (alert.acknowledgementCount || 0) + 1 } : alert));
+      setAcknowledgedEvents((previous) => {
+        const next = { ...previous };
+        targets.forEach((alert) => { next[alert.backendEventId] = true; });
+        acknowledgedEventsRef.current = next;
+        return next;
+      });
+    } catch (error) {
+      setRawDataSourceState((previous) => ({ ...previous, status: 'error', message: `批量确认失败：${error instanceof Error ? error.message : '未知错误'}` }));
+    }
   };
-
   const startShutInProcedure = () => {
     if (shutInActive) return;
     const { timeStr } = formatNow();
@@ -3976,6 +4428,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         alertStatus,
         backendDetection,
         cycleInfo,
+        eventSpans,
+        lifecycleNodes,
+        eventProjectionState,
         baselineInfo,
         wells,
         wellRuntimeStates,
