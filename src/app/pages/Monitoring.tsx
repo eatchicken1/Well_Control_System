@@ -284,6 +284,8 @@ export default function Monitoring() {
                 pitGain={viewCurrentData.pitGain}
                 pitVolume={viewCurrentData.pitVolume}
                 totalGas={viewCurrentData.totalGas}
+                returnResponse={viewCurrentData.returnResponse}
+                mudWeight={viewCurrentData.mudWeight}
                 backendLevel={viewBackendDetection.publicLevel}
                 activeSignals={viewBackendDetection.activeSignals}
                 pumpState={viewCurrentData.pumpState}

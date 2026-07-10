@@ -28,6 +28,8 @@ function previewData(level: BackendLevel) {
     pitGain: level >= 2 ? 1.86 : level === 1 ? 0.42 : 0.04,
     pitVolume: level >= 2 ? 122.6 : 118.2,
     totalGas: level >= 2 ? 1.42 : 0.18,
+    returnResponse: level >= 2 ? 19.8 : level === 1 ? 5.2 : 0.6,
+    mudWeight: 1.22,
     activeSignals: level >= 2 ? ['return_response', 'pit_gain', 'pit_volume', 'total_gas', 'casing_pressure'] : level === 1 ? ['return_response'] : [],
     condition: level >= 2 ? '循环异常' : level === 1 ? '循环观察' : '稳定监测',
   };
@@ -40,20 +42,18 @@ export default function WellborePreview() {
   const abnormal = level >= 2;
   const watch = level === 1;
   const deltaQ = data.flowOut - data.flowIn;
-  const porePressure = level >= 4 ? 1.32 : level >= 2 ? 1.28 : level === 1 ? 1.21 : 1.18;
-  const mudWeight = level >= 2 ? 1.18 : level === 1 ? 1.22 : 1.26;
   const evidenceRows = abnormal
     ? [
         { label: '流量差', value: `ΔQ +${deltaQ.toFixed(1)} L/s`, tone: 'critical' },
         { label: '池体积', value: `池增 ${data.pitGain.toFixed(2)} m³`, tone: 'warning' },
-        { label: '气侵段', value: '前缘 3482 m / 上移 54 m/min', tone: 'critical' },
-        { label: '压力窗', value: `PP ${porePressure.toFixed(2)} > MW ${mudWeight.toFixed(2)}`, tone: 'critical' },
+        { label: '气侵段', value: '示意前缘 / 非现场反演结果', tone: 'critical' },
+        { label: '压力窗', value: `MW ${data.mudWeight.toFixed(2)}；PP / ECD 未接入`, tone: 'warning' },
       ]
     : [
         { label: '流量差', value: `ΔQ ${deltaQ.toFixed(1)} L/s`, tone: watch ? 'warning' : 'normal' },
         { label: '池体积', value: `池增 ${data.pitGain.toFixed(2)} m³`, tone: watch ? 'warning' : 'normal' },
         { label: '气测', value: `全烃 ${data.totalGas.toFixed(2)}%`, tone: 'normal' },
-        { label: '压力窗', value: `MW ${mudWeight.toFixed(2)} > PP ${porePressure.toFixed(2)}`, tone: 'normal' },
+        { label: '压力窗', value: `MW ${data.mudWeight.toFixed(2)}；PP / ECD 未接入`, tone: 'normal' },
       ];
   const actionSteps = abnormal
     ? [
@@ -102,8 +102,15 @@ export default function WellborePreview() {
             drillPipePressure={data.spp}
             pitGain={data.pitGain}
             pitVolume={data.pitVolume}
-            returnResponse={abnormal ? 38 : level === 1 ? 12 : 0}
+            returnResponse={data.returnResponse}
             totalGas={data.totalGas}
+            mudWeight={data.mudWeight}
+            influxSource={abnormal ? 'estimated' : undefined}
+            influxConfidence={abnormal ? (level >= 4 ? 0.68 : level === 3 ? 0.56 : 0.42) : undefined}
+            influxSide={abnormal ? 'right' : undefined}
+            gasFrontDepth={abnormal ? (level >= 4 ? 3460 : level === 3 ? 3580 : 3740) : undefined}
+            gasColumnBottomDepth={abnormal ? 4080 : undefined}
+            gasFraction={abnormal ? (level >= 4 ? 0.48 : level === 3 ? 0.34 : 0.2) : undefined}
             activeSignals={data.activeSignals}
             pumpState="running"
             condition={data.condition}
@@ -114,7 +121,7 @@ export default function WellborePreview() {
         <aside className="wellbore-preview-side">
           <section>
             <h1>L{level} {LEVEL_LABELS[level]}</h1>
-            <p>{abnormal ? '侧壁侵入、右环空上返、气侵柱前缘与流量/池增证据同步映射。' : level === 1 ? '观察路径和浅色证据带用于展示轻微偏离。' : '正常循环路径以绿色虚线展示，井筒结构保持清晰可读。'}</p>
+            <p>{abnormal ? '推测侵入区保持局部偏侧，总体钻井液沿左右环空共同返出；前缘为示意数据。' : level === 1 ? '观察路径和浅色证据带用于展示轻微偏离。' : '正常循环路径以绿色虚线展示，井筒结构保持清晰可读。'}</p>
           </section>
           <div className="wellbore-preview-metrics">
             <div data-tone={abnormal ? 'critical' : watch ? 'warning' : 'normal'}><Activity size={18} /><span>出口流量</span><strong>{data.flowOut.toFixed(1)} L/s</strong></div>
@@ -145,11 +152,11 @@ export default function WellborePreview() {
             <h2><Ruler size={16} />准确性核查</h2>
             <span><CheckCircle2 size={14} />深度轴按 0-{data.wellDepth} m 线性比例映射</span>
             <span><CheckCircle2 size={14} />套管鞋固定标注在 3200 m，以下进入裸眼段</span>
-            <span><CheckCircle2 size={14} />钻头/BHA 位于 {data.bitDepth} m{abnormal ? '，异常侵入点贴近井底裸眼段' : '，当前未绘制异常侵入点'}</span>
+            <span><CheckCircle2 size={14} />钻头/BHA 位于 {data.bitDepth} m{abnormal ? '，绘制推测侵入区而非确定侵入点' : '，当前未绘制侵入源'}</span>
           </div>
           <div className="wellbore-preview-note">
             <AlertTriangle size={16} />
-            <span>这个页面不依赖数据库选井，专门用于检查井筒视觉效果。</span>
+            <span>示意预览数据：仅用于检查井筒视觉效果，不代表现场算法反演结果。</span>
           </div>
         </aside>
       </section>

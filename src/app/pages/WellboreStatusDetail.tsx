@@ -81,6 +81,8 @@ export default function WellboreStatusDetail() {
         pitGain: previewLevel >= 2 ? 1.86 : previewLevel === 1 ? 0.42 : 0.04,
         pitVolume: previewLevel >= 2 ? 122.6 : 118.2,
         totalGas: previewLevel >= 2 ? 1.42 : 0.18,
+        returnResponse: previewLevel >= 2 ? 19.8 : previewLevel === 1 ? 5.2 : 0.6,
+        mudWeight: 1.22,
         pumpState: 'running',
         condition: previewLevel >= 2 ? '循环异常' : previewLevel === 1 ? '循环观察' : '稳定监测',
       }
@@ -119,7 +121,11 @@ export default function WellboreStatusDetail() {
   const wellDepth = previewActive ? 4200 : selectedWellView.latestWellDepth ?? displayData.wellDepth ?? well.depth;
   const openHoleLength = Math.max(0, Math.round(wellDepth - CASING_SHOE_DEPTH));
   const stateDescription = abnormal ? meta.description : watch ? '参数出现轻微偏离，进入观察窗口但尚未形成溢流证据链。' : '关键参数处于基线范围内，未触发预警证据。';
-  const pressureRelation = abnormal ? 'PP > MW，具备侧壁侵入条件' : watch ? '压力窗口变窄，需持续跟踪' : 'MW > PP，井底保持过平衡';
+  const pressureRelation = previewActive
+    ? '示意预览：MW 已设定，PP / ECD 未接入'
+    : displayData.mudWeight > 0
+      ? `MW ${format(displayData.mudWeight, 2)} g/cm³；PP / ECD 数据不足`
+      : '压力关系：数据不足';
 
   const evidenceDuration = previewActive ? (level >= 2 ? '持续 58 s' : level === 1 ? '持续 24 s' : '当前窗口') : cycle.elapsedSeconds > 0 ? `持续 ${Math.round(cycle.elapsedSeconds)} s` : '当前窗口';
   const flowDelta = displayData.flowOut - displayData.flowIn;
@@ -193,11 +199,11 @@ export default function WellboreStatusDetail() {
         <div className="wellbore-detail-title">
           <strong>井筒状态监测</strong>
           <span>当前井号：{well.wellName}</span>
-          {previewActive ? <span>预览模式</span> : null}
+          {previewActive ? <span>示意预览数据</span> : <span>现场实时数据</span>}
           <b className="wellbore-state-badge" data-tone={meta.tone}>L{level} {LEVEL_LABELS[level]}</b>
         </div>
         <div className="wellbore-preview-levels" aria-label="井筒预览等级">
-          {[0, 1, 3, 4].map((item) => (
+          {[0, 1, 2, 3, 4].map((item) => (
             <button
               key={item}
               type="button"
@@ -225,8 +231,15 @@ export default function WellboreStatusDetail() {
               drillPipePressure={displayData.spp}
               pitGain={displayData.pitGain}
               pitVolume={displayData.pitVolume}
-              returnResponse={abnormal ? 38 : watch ? 12 : 0}
+              returnResponse={displayData.returnResponse}
               totalGas={displayData.totalGas}
+              mudWeight={displayData.mudWeight}
+              influxSource={previewActive && abnormal ? 'estimated' : undefined}
+              influxConfidence={previewActive && abnormal ? (level >= 4 ? 0.68 : level === 3 ? 0.56 : 0.42) : undefined}
+              influxSide={previewActive && abnormal ? 'right' : undefined}
+              gasFrontDepth={previewActive && abnormal ? (level >= 4 ? 3460 : level === 3 ? 3580 : 3740) : undefined}
+              gasColumnBottomDepth={previewActive && abnormal ? 4080 : undefined}
+              gasFraction={previewActive && abnormal ? (level >= 4 ? 0.48 : level === 3 ? 0.34 : 0.2) : undefined}
               activeSignals={displayDetection.activeSignals}
               pumpState={displayData.pumpState}
               condition={displayData.condition}

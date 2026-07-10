@@ -16,7 +16,26 @@ export interface WellboreSimulationInput {
   spm?: number;
   wellDepth?: number;
   bitDepth?: number;
+  drillPipeOD?: number;
+  bhaOD?: number;
+  bitOD?: number;
+  casingID?: number;
+  openHoleDiameter?: number;
   formation?: string;
+  mudWeight?: number;
+  ecd?: number;
+  porePressureEquivalent?: number;
+  fractureGradientEquivalent?: number;
+  inclination?: number;
+  highSideDirection?: number;
+  influxFromDepth?: number;
+  influxToDepth?: number;
+  influxConfidence?: number;
+  influxSource?: 'measured' | 'estimated' | 'unknown';
+  influxSide?: 'left' | 'right' | 'highSide' | 'unknown';
+  gasFrontDepth?: number;
+  gasColumnBottomDepth?: number;
+  gasFraction?: number;
   activeSignals?: string[];
   pumpState?: string;
   condition?: string;
@@ -85,18 +104,52 @@ export interface WellboreTubularString {
 }
 
 export interface WellborePressureWindow {
-  mudWeight: number;
-  porePressureEquivalent: number;
-  margin: number;
-  status: 'overbalanced' | 'narrow' | 'underbalanced';
+  mudWeight?: number;
+  ecd?: number;
+  porePressureEquivalent?: number;
+  fractureGradientEquivalent?: number;
+  margin?: number;
+  status: 'overbalanced' | 'narrow' | 'underbalanced' | 'unknown';
+  source: 'measured' | 'partial' | 'unknown';
 }
 
 export interface WellboreKickDiagnostics {
   severity: number;
   influxRate: number;
-  gasFrontDepth: number;
-  gasColumnLength: number;
-  migrationVelocity: number;
+  gasFrontDepth?: number;
+  gasColumnLength?: number;
+  migrationVelocity?: number;
+}
+
+export interface WellboreHydraulicGeometry {
+  drillPipeOD: number;
+  bhaOD: number;
+  bitOD: number;
+  casingID: number;
+  openHoleDiameter: number;
+}
+
+export interface WellboreSectionGeometry {
+  fromDepth: number;
+  toDepth: number;
+  boreInnerWidth: number;
+  drillOuterWidth: number;
+  sectionType: 'cased' | 'openHole' | 'bha' | 'bit';
+}
+
+export interface InfluxLocalization {
+  fromDepth: number;
+  toDepth: number;
+  confidence: number;
+  source: 'measured' | 'estimated' | 'unknown';
+  side: 'left' | 'right' | 'highSide' | 'unknown';
+}
+
+export interface AnnulusPhaseState {
+  gasFrontDepth?: number;
+  gasColumnBottomDepth?: number;
+  gasFraction?: number;
+  highSideBias?: number;
 }
 
 export interface WellboreSimulationModel {
@@ -108,7 +161,11 @@ export interface WellboreSimulationModel {
   openHoleStartDepth: number;
   openHoleLength: number;
   openHoleSizeLabel: string;
+  hydraulicGeometry: WellboreHydraulicGeometry;
+  sectionGeometry: WellboreSectionGeometry[];
   pressureWindow: WellborePressureWindow;
+  influxLocalization: InfluxLocalization;
+  annulusPhaseState: AnnulusPhaseState;
   kickDiagnostics: WellboreKickDiagnostics;
   currentFormation: string;
   conditionLabel: string;
@@ -258,7 +315,22 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const { tubularStrings, casingShoes } = buildTubularStrings(wellDepth, casingShoeDepth);
   const openHoleStartDepth = casingShoeDepth;
   const openHoleLength = Math.max(0, Math.round(wellDepth - openHoleStartDepth));
-  const openHoleSizeLabel = '6 in';
+  const hydraulicGeometry: WellboreHydraulicGeometry = {
+    drillPipeOD: finite(input.drillPipeOD, 22),
+    bhaOD: finite(input.bhaOD, 34),
+    bitOD: finite(input.bitOD, 50),
+    casingID: finite(input.casingID, tubularStrings[tubularStrings.length - 1]?.innerWidth ?? 58),
+    openHoleDiameter: finite(input.openHoleDiameter, 66),
+  };
+  const openHoleSizeLabel = '8-1/2 in';
+  const bhaTopDepth = Math.max(openHoleStartDepth + 80, bitDepth - 620);
+  const bitTopDepth = Math.max(bhaTopDepth + 40, bitDepth - 80);
+  const sectionGeometry: WellboreSectionGeometry[] = [
+    { fromDepth: 0, toDepth: openHoleStartDepth, boreInnerWidth: hydraulicGeometry.casingID, drillOuterWidth: hydraulicGeometry.drillPipeOD, sectionType: 'cased' },
+    { fromDepth: openHoleStartDepth, toDepth: bhaTopDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.drillPipeOD, sectionType: 'openHole' },
+    { fromDepth: bhaTopDepth, toDepth: bitTopDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bhaOD, sectionType: 'bha' },
+    { fromDepth: bitTopDepth, toDepth: wellDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bitOD, sectionType: 'bit' },
+  ].filter((section) => section.toDepth > section.fromDepth + 1);
   const currentFormation = inferFormationName(input.formation, wellDepth);
   const conditionLabel = formatWellboreConditionLabel(input.condition, input.cycleInfo?.stateLabel || '\u7a33\u5b9a\u76d1\u6d4b');
   const state = deriveWellboreState({
@@ -278,14 +350,20 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const flowDelta = finite(input.flowOut, 0) - finite(input.flowIn, 0);
   const circulationActive = finite(input.flowIn, 0) > 0.5 || finite(input.spm, 0) > 8;
   const returnActive = finite(input.flowOut, 0) > 0.5 || finite(input.returnResponse, 0) > 5;
-  const mudWeight = input.backendLevel >= 2 ? 1.18 : input.backendLevel === 1 ? 1.22 : 1.26;
-  const porePressureEquivalent = input.backendLevel >= 4 ? 1.32 : input.backendLevel >= 2 ? 1.28 : input.backendLevel === 1 ? 1.21 : 1.18;
-  const pressureMargin = Number((mudWeight - porePressureEquivalent).toFixed(2));
+  const mudWeight = Number.isFinite(input.mudWeight) && Number(input.mudWeight) > 0 ? Number(input.mudWeight) : undefined;
+  const ecd = Number.isFinite(input.ecd) && Number(input.ecd) > 0 ? Number(input.ecd) : undefined;
+  const porePressureEquivalent = Number.isFinite(input.porePressureEquivalent) && Number(input.porePressureEquivalent) > 0 ? Number(input.porePressureEquivalent) : undefined;
+  const fractureGradientEquivalent = Number.isFinite(input.fractureGradientEquivalent) && Number(input.fractureGradientEquivalent) > 0 ? Number(input.fractureGradientEquivalent) : undefined;
+  const effectiveDensity = ecd ?? mudWeight;
+  const pressureMargin = effectiveDensity !== undefined && porePressureEquivalent !== undefined ? Number((effectiveDensity - porePressureEquivalent).toFixed(2)) : undefined;
   const pressureWindow: WellborePressureWindow = {
     mudWeight,
+    ecd,
     porePressureEquivalent,
+    fractureGradientEquivalent,
     margin: pressureMargin,
-    status: pressureMargin < 0 ? 'underbalanced' : pressureMargin <= 0.03 ? 'narrow' : 'overbalanced',
+    status: pressureMargin === undefined ? 'unknown' : pressureMargin !== undefined && pressureMargin < 0 ? 'underbalanced' : pressureMargin <= 0.03 ? 'narrow' : 'overbalanced',
+    source: porePressureEquivalent === undefined ? (mudWeight !== undefined || ecd !== undefined ? 'partial' : 'unknown') : 'measured',
   };
 
   const gasSupport = finite(input.totalGas, 0) >= 0.8 || hasSignal(input.activeSignals, ['total_gas', 'gas_support']);
@@ -293,21 +371,41 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const pressureSupport = hasSignal(input.activeSignals, ['standpipe_pressure', 'spp', 'spp_drop', 'casing_pressure']);
   const returnSupport = flowDelta > 0.8 || finite(input.returnResponse, 0) > 8 || hasSignal(input.activeSignals, ['return_response']);
 
-  const kickPointDepth = clamp(bitDepth - Math.max(80, openHoleLength * 0.12), openHoleStartDepth + 40, wellDepth - 40);
-  const observationDepth = clamp(bitDepth - Math.max(50, openHoleLength * 0.08), openHoleStartDepth + 30, bitDepth - 12);
-  const evidenceScore = (returnSupport ? 0.28 : 0) + (pitSupport ? 0.22 : 0) + (gasSupport ? 0.26 : 0) + (pressureMargin < 0 ? 0.24 : 0);
+  const estimatedCenterDepth = clamp(bitDepth - Math.max(100, openHoleLength * 0.12), openHoleStartDepth + 80, wellDepth - 80);
+  const localizationHalfSpan = clamp(openHoleLength * 0.045, 40, 120);
+  const localizationSource = input.influxSource ?? (input.backendLevel >= 2 ? 'estimated' : 'unknown');
+  const localizationFrom = input.influxFromDepth ?? estimatedCenterDepth - localizationHalfSpan;
+  const localizationTo = input.influxToDepth ?? estimatedCenterDepth + localizationHalfSpan;
+  const influxLocalization: InfluxLocalization = {
+    fromDepth: clamp(Math.min(localizationFrom, localizationTo), openHoleStartDepth + 20, wellDepth - 20),
+    toDepth: clamp(Math.max(localizationFrom, localizationTo), openHoleStartDepth + 40, wellDepth),
+    confidence: clamp(input.influxConfidence ?? (localizationSource === 'estimated' ? 0.28 + [returnSupport, pitSupport, gasSupport, pressureSupport].filter(Boolean).length * 0.12 : 0), 0, 1),
+    source: localizationSource,
+    side: input.influxSide ?? 'unknown',
+  };
+  const kickPointDepth = (influxLocalization.fromDepth + influxLocalization.toDepth) / 2;
+  const observationDepth = clamp(kickPointDepth - Math.max(50, openHoleLength * 0.08), openHoleStartDepth + 30, bitDepth - 12);
+  const evidenceScore = (returnSupport ? 0.28 : 0) + (pitSupport ? 0.22 : 0) + (gasSupport ? 0.26 : 0) + (pressureMargin !== undefined && pressureMargin !== undefined && pressureMargin < 0 ? 0.24 : 0);
   const levelBase = input.backendLevel >= 4 ? 0.76 : input.backendLevel === 3 ? 0.62 : input.backendLevel === 2 ? 0.48 : 0;
   const severity = input.backendLevel >= 2 ? clamp(levelBase + evidenceScore * 0.18, 0.35, 0.96) : input.backendLevel === 1 ? 0.18 : 0;
-  const gasColumnLength = input.backendLevel >= 2 ? clamp(openHoleLength * (0.22 + severity * 0.36), 120, Math.max(160, openHoleLength * 0.72)) : 0;
-  const gasFrontDepth = input.backendLevel >= 2 ? clamp(kickPointDepth - gasColumnLength, openHoleStartDepth + 35, kickPointDepth - 30) : 0;
+  const gasColumnBottomDepth = input.gasColumnBottomDepth;
+  const gasFrontDepth = input.gasFrontDepth;
+  const gasColumnLength = gasFrontDepth !== undefined && gasColumnBottomDepth !== undefined ? Math.max(0, gasColumnBottomDepth - gasFrontDepth) : undefined;
   const influxRate = input.backendLevel >= 2 ? clamp(Math.max(flowDelta, 0) * 0.78 + finite(input.pitGain, 0) * 0.42 + finite(input.totalGas, 0) * 0.34, 0.4, 8.8) : 0;
   const migrationVelocity = input.backendLevel >= 2 ? clamp(12 + severity * 36 + Math.max(flowDelta, 0) * 1.2, 10, 58) : 0;
   const kickDiagnostics: WellboreKickDiagnostics = {
     severity: Number(severity.toFixed(2)),
     influxRate: Number(influxRate.toFixed(1)),
-    gasFrontDepth: Math.round(gasFrontDepth),
-    gasColumnLength: Math.round(gasColumnLength),
-    migrationVelocity: Math.round(migrationVelocity),
+    gasFrontDepth: gasFrontDepth === undefined ? undefined : Math.round(gasFrontDepth),
+    gasColumnLength: gasColumnLength === undefined ? undefined : Math.round(gasColumnLength),
+    migrationVelocity: input.backendLevel >= 2 ? Math.round(migrationVelocity) : undefined,
+  };
+  const hasDirectionalBasis = Number.isFinite(input.inclination) && Number(input.inclination) >= 5 && Number.isFinite(input.highSideDirection);
+  const annulusPhaseState: AnnulusPhaseState = {
+    gasFrontDepth: kickDiagnostics.gasFrontDepth,
+    gasColumnBottomDepth,
+    gasFraction: input.gasFraction ?? (input.backendLevel >= 2 ? clamp(finite(input.totalGas, 0) / 4, 0.08, 0.62) : undefined),
+    highSideBias: hasDirectionalBasis ? clamp(Number(input.inclination) / 90, 0, 1) : undefined,
   };
 
   const formationBands = buildFormationBands(wellDepth);
@@ -325,7 +423,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
       lane: 'annulus',
     });
     evidenceNotes.push('\u672a\u89e6\u53d1\u5f02\u5e38\u4fb5\u5165\u8bc1\u636e');
-    evidenceNotes.push(`\u4e95\u5e95\u538b\u529b\u7a97\u53e3\u5904\u4e8e\u8fc7\u5e73\u8861\uff0c\u0394\u03c1 ${formatSigned(pressureMargin, 2, 'g/cm\u00b3')}`);
+    evidenceNotes.push(pressureMargin === undefined ? '压力关系数据不足，未接入 PP / ECD' : `井底压力裕度 Δρ ${formatSigned(pressureMargin, 2, 'g/cm³')}`);
     if (circulationActive) evidenceNotes.push(`\u5165\u53e3 / \u8fd4\u51fa\u57fa\u672c\u5e73\u8861\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}`);
   } else if (input.backendLevel === 1) {
     evidenceBands.push({
@@ -338,7 +436,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
       lane: 'annulus',
     });
     evidenceNotes.push('\u5f02\u5e38\u89c2\u5bdf\u4e2d');
-    evidenceNotes.push(`\u538b\u529b\u7a97\u53e3\u53d8\u7a84\uff0c\u0394\u03c1 ${formatSigned(pressureMargin, 2, 'g/cm\u00b3')}`);
+    evidenceNotes.push(pressureMargin === undefined ? '压力关系数据不足，持续观察流量与池体积' : `压力裕度 Δρ ${formatSigned(pressureMargin, 2, 'g/cm³')}`);
     evidenceNotes.push(returnSupport ? `\u8fd4\u51fa\u54cd\u5e94\u8f7b\u5fae\u62ac\u5347\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}` : '\u5173\u6ce8\u8fd4\u51fa\u4e0e\u6c60\u4f53\u79ef\u5fae\u5c0f\u6ce2\u52a8');
   } else {
     const annulusTone = input.backendLevel >= 4 ? 'critical' : 'warning';
@@ -361,7 +459,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
       lane: 'formation',
     });
     if (returnSupport) evidenceNotes.push(`\u51fa\u53e3\u6d41\u91cf\u9ad8\u4e8e\u5165\u53e3\u6d41\u91cf\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}`);
-    if (pressureMargin < 0) evidenceNotes.push(`\u6ce5\u6d46\u5f53\u91cf\u4f4e\u4e8e\u5730\u5c42\u538b\u529b\u5f53\u91cf\uff0c\u0394\u03c1 ${formatSigned(pressureMargin, 2, 'g/cm\u00b3')}`);
+    if (pressureMargin !== undefined && pressureMargin < 0) evidenceNotes.push(`\u6ce5\u6d46\u5f53\u91cf\u4f4e\u4e8e\u5730\u5c42\u538b\u529b\u5f53\u91cf\uff0c\u0394\u03c1 ${pressureMargin === undefined ? '数据不足' : formatSigned(pressureMargin, 2, 'g/cm\u00b3')}`);
     if (pitSupport) evidenceNotes.push(`\u6c60\u589e\u91cf ${formatValue(finite(input.pitGain, 0), 2, 'm\u00b3')}\uff0c\u603b\u6c60\u4f53\u79ef ${formatValue(finite(input.pitVolume, 0), 2, 'm\u00b3')}`);
     if (pressureSupport) evidenceNotes.push(`\u7acb\u538b ${formatValue(finite(input.drillPipePressure, 0), 2, 'MPa')} / \u5957\u538b ${formatValue(finite(input.casingPressure, 0), 2, 'MPa')}`);
     if (gasSupport) evidenceNotes.push(`\u5168\u70c3 ${formatValue(finite(input.totalGas, 0), 2, '%')}\uff0c\u652f\u6301\u4e95\u5e95\u4fb5\u5165\u5224\u65ad`);
@@ -395,7 +493,11 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
     openHoleStartDepth,
     openHoleLength,
     openHoleSizeLabel,
+    hydraulicGeometry,
+    sectionGeometry,
     pressureWindow,
+    influxLocalization,
+    annulusPhaseState,
     kickDiagnostics,
     currentFormation,
     conditionLabel,
