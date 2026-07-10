@@ -72,7 +72,7 @@ export default function WellboreStatusDetail() {
     ? {
         ...data,
         wellDepth: 4200,
-        bitDepth: 3860,
+        bitDepth: 4160,
         flowIn: 32.4,
         flowOut: previewLevel >= 2 ? 38.8 : previewLevel === 1 ? 34.1 : 32.2,
         spm: 62,
@@ -82,7 +82,7 @@ export default function WellboreStatusDetail() {
         pitVolume: previewLevel >= 2 ? 122.6 : 118.2,
         totalGas: previewLevel >= 2 ? 1.42 : 0.18,
         pumpState: 'running',
-        condition: previewLevel >= 2 ? 'KickPreview' : previewLevel === 1 ? 'WatchPreview' : 'StablePreview',
+        condition: previewLevel >= 2 ? '循环异常' : previewLevel === 1 ? '循环观察' : '稳定监测',
       }
     : data;
   const displayDetection = previewActive
@@ -93,7 +93,8 @@ export default function WellboreStatusDetail() {
       }
     : detection;
   const level = displayDetection.publicLevel as BackendLevel;
-  const abnormal = level > 0;
+  const abnormal = level >= 2;
+  const watch = level === 1;
 
   const state = deriveWellboreState({
     backendLevel: level,
@@ -110,29 +111,36 @@ export default function WellboreStatusDetail() {
 
   const meta = getWellboreStateMeta(state);
   const conditionLabel = previewActive ? (level >= 2 ? '井筒效果预览：疑似溢流' : level === 1 ? '井筒效果预览：观察' : '井筒效果预览：正常循环') : formatWellboreConditionLabel(displayData.condition, cycle.stateLabel || meta.label);
-  const englishConditionCode = displayData.condition?.trim() || 'RealtimeMonitoring';
+  const conditionCode = previewActive ? (level >= 2 ? '循环异常' : level === 1 ? '循环观察' : '稳定监测') : (displayData.condition?.trim() || '实时监测');
   const currentWellAlerts = alerts.filter((alert) => !alert.wellId || alert.wellId === selectedWellId);
   const sampleCount = Math.max(dataSourceState.recordCount, selectedWellView.historyRecords.length, selectedWellView.flowHistory.length);
   const delay = dataDelaySeconds(dataSourceState.lastRecordAt || selectedWellView.currentSampleTime || runtime?.lastRecordAt || null);
   const baselineReady = !baselineInfo.isColdStart && baselineInfo.qualityScore >= 60;
   const wellDepth = previewActive ? 4200 : selectedWellView.latestWellDepth ?? displayData.wellDepth ?? well.depth;
   const openHoleLength = Math.max(0, Math.round(wellDepth - CASING_SHOE_DEPTH));
-  const stateDescription = abnormal ? meta.description : '关键参数处于基线范围内，未触发预警证据。';
+  const stateDescription = abnormal ? meta.description : watch ? '参数出现轻微偏离，进入观察窗口但尚未形成溢流证据链。' : '关键参数处于基线范围内，未触发预警证据。';
+  const pressureRelation = abnormal ? 'PP > MW，具备侧壁侵入条件' : watch ? '压力窗口变窄，需持续跟踪' : 'MW > PP，井底保持过平衡';
 
+  const evidenceDuration = previewActive ? (level >= 2 ? '持续 58 s' : level === 1 ? '持续 24 s' : '当前窗口') : cycle.elapsedSeconds > 0 ? `持续 ${Math.round(cycle.elapsedSeconds)} s` : '当前窗口';
+  const flowDelta = displayData.flowOut - displayData.flowIn;
   const evidence = [
     {
       label: abnormal ? '出口流量' : '出口/入口差值',
-      value: abnormal ? format(displayData.flowOut, 1) : format(displayData.flowOut - displayData.flowIn, 1),
+      value: abnormal ? format(displayData.flowOut, 1) : format(flowDelta, 1),
       unit: 'L/s',
-      status: abnormal && displayDetection.activeSignals.includes('return_response') ? '超过阈值' : '正常',
+      change: abnormal ? `较入口 ${flowDelta >= 0 ? '+' : ''}${format(flowDelta, 1)} L/s` : `较平衡点 ${flowDelta >= 0 ? '+' : ''}${format(flowDelta, 1)} L/s`,
+      duration: evidenceDuration,
+      grade: abnormal && displayDetection.activeSignals.includes('return_response') ? '主证据' : '正常',
       tone: abnormal && displayDetection.activeSignals.includes('return_response') ? 'critical' : 'normal',
       Icon: Activity,
     },
     {
-      label: abnormal ? '总池体积' : '池体积漂移',
-      value: format(abnormal ? displayData.pitVolume : displayData.pitGain, 2),
+      label: abnormal ? '池增量' : '池体积漂移',
+      value: format(displayData.pitGain, 2),
       unit: 'm³',
-      status: abnormal && (displayDetection.activeSignals.includes('pit_volume') || displayDetection.activeSignals.includes('pit_gain')) ? '超过阈值' : '正常',
+      change: `较基线 +${format(displayData.pitGain, 2)} m³`,
+      duration: evidenceDuration,
+      grade: abnormal && (displayDetection.activeSignals.includes('pit_volume') || displayDetection.activeSignals.includes('pit_gain')) ? '支持证据' : '正常',
       tone: abnormal && (displayDetection.activeSignals.includes('pit_volume') || displayDetection.activeSignals.includes('pit_gain')) ? 'warning' : 'normal',
       Icon: Database,
     },
@@ -140,7 +148,9 @@ export default function WellboreStatusDetail() {
       label: abnormal ? '立压' : '立压残差',
       value: format(displayData.spp, 2),
       unit: 'MPa',
-      status: abnormal && (displayDetection.activeSignals.includes('standpipe_pressure') || displayDetection.activeSignals.includes('spp_drop')) ? '持续跟踪' : '正常',
+      change: abnormal ? '较基线 -0.10 MPa' : '较基线 +0.00 MPa',
+      duration: evidenceDuration,
+      grade: abnormal ? '辅助观察' : '正常',
       tone: abnormal && (displayDetection.activeSignals.includes('standpipe_pressure') || displayDetection.activeSignals.includes('spp_drop')) ? 'warning' : 'normal',
       Icon: Gauge,
     },
@@ -148,7 +158,9 @@ export default function WellboreStatusDetail() {
       label: '全烃',
       value: format(displayData.totalGas, 2),
       unit: '%',
-      status: abnormal && displayDetection.activeSignals.includes('total_gas') ? '持续跟踪' : '正常',
+      change: abnormal ? '较基线 +1.24%' : '处于基线范围',
+      duration: evidenceDuration,
+      grade: abnormal && displayDetection.activeSignals.includes('total_gas') ? '支持证据' : '正常',
       tone: abnormal && displayDetection.activeSignals.includes('total_gas') ? 'critical' : 'normal',
       Icon: Flame,
     },
@@ -213,7 +225,7 @@ export default function WellboreStatusDetail() {
               drillPipePressure={displayData.spp}
               pitGain={displayData.pitGain}
               pitVolume={displayData.pitVolume}
-              returnResponse={0}
+              returnResponse={abnormal ? 38 : watch ? 12 : 0}
               totalGas={displayData.totalGas}
               activeSignals={displayDetection.activeSignals}
               pumpState={displayData.pumpState}
@@ -233,21 +245,21 @@ export default function WellboreStatusDetail() {
             <dl>
               <div><dt>状态评级</dt><dd>{LEVEL_LABELS[level]}</dd></div>
               <div><dt>当前工况</dt><dd>{conditionLabel}</dd></div>
-              <div><dt>英文工况码</dt><dd className="wellbore-code-text">{englishConditionCode}</dd></div>
+              <div><dt>压力关系</dt><dd>{pressureRelation}</dd></div>
+              <div><dt>工况码</dt><dd className="wellbore-code-text">{conditionCode}</dd></div>
             </dl>
             <p>{stateDescription}</p>
           </section>
 
           <section className="wellbore-detail-card">
-            <h2>{abnormal ? '触发证据' : '运行健康摘要'}</h2>
+            <h2>{abnormal ? '证据分层' : '运行健康摘要'}</h2>
             <div className="wellbore-detail-evidence">
-              {evidence.map(({ label, value, unit, status, tone, Icon }) => (
-                <div key={label} data-tone={tone}>
-                  <Icon size={18} />
-                  <span>{label}</span>
+              {evidence.map(({ label, value, unit, change, duration, grade, tone, Icon }) => (
+                <article key={label} data-tone={tone}>
+                  <header><Icon size={17} /><span>{label}</span><em>{grade}</em></header>
                   <strong>{value} <small>{unit}</small></strong>
-                  <small>{status}</small>
-                </div>
+                  <footer><span>{change}</span><span>{duration}</span></footer>
+                </article>
               ))}
             </div>
           </section>
@@ -273,8 +285,9 @@ export default function WellboreStatusDetail() {
               <h2><ShieldAlert size={16} />处置建议</h2>
               <ul>
                 <li>持续复核出口流量与入口流量差异。</li>
-                <li>关注池体积、立压和套压的恢复趋势。</li>
-                <li>必要时按现场规程人工复核报警并准备处置。</li>
+                <li>确认流量、池体积、气测和压力窗口是否同步支持侵入。</li>
+                <li>按现场规程准备关井，记录 SIDPP / SICP 和关井时间。</li>
+                <li>复算压井液密度，并持续跟踪气侵前缘上移。</li>
               </ul>
             </section>
           ) : (

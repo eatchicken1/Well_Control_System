@@ -3045,6 +3045,19 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (authLoading) return;
+    const previewMode = window.location.pathname.includes('/wellbore-preview')
+      || (window.location.pathname.includes('/monitoring/wellbore-status') && new URLSearchParams(window.location.search).has('preview'));
+    if (previewMode) {
+      setWells([]);
+      setSelectedWellId('');
+      setRealtimeWellsLoaded(true);
+      setRawDataSourceState((prev) => ({
+        ...prev,
+        status: 'paused',
+        message: '预览模式使用 Mock 井筒参数，不读取实时井列表',
+      }));
+      return;
+    }
     if (!hasAccessToken) {
       setWells([]);
       setSelectedWellId('');

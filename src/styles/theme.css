@@ -2768,10 +2768,29 @@ body {
 .wellbore-schema-figure-thumbnail .wellbore-schema-overlay { transform: scale(1.02); }
 .wellbore-flow-path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 8; animation: wellboreDashFlow 1.8s linear infinite; }
 .wellbore-flow-path-normal { stroke: rgba(20, 184, 166, 0.6); stroke-width: 2; }
+.wellbore-flow-path-drill { stroke: rgba(37, 99, 235, 0.45); stroke-width: 1.8; stroke-dasharray: 4 10; animation-duration: 2.2s; }
 .wellbore-flow-path-warning { stroke: #f97316; stroke-width: 2.4; }
-.wellbore-flow-path-critical { stroke: #dc2626; stroke-width: 2.6; }
+.wellbore-flow-path-critical { stroke: #dc2626; stroke-width: 2.35; }
 .wellbore-flow-path-warning-level { stroke: #ef4444; opacity: 0.9; }
+.wellbore-flow-path-kick-return { stroke-width: 1.55; opacity: 0.38; stroke-dasharray: 3 17; }
+.wellbore-flow-segments { filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.08)); }
+.wellbore-flow-particle { opacity: 0.72; filter: drop-shadow(0 0 4px currentColor); }
 .wellbore-flow-path-subtle { opacity: 0.42; animation-duration: 2.6s; }
+.wellbore-slug-packets { filter: drop-shadow(0 2px 5px rgba(185, 28, 28, 0.12)); }
+.wellbore-gas-profile { filter: drop-shadow(0 1px 3px rgba(185, 28, 28, 0.08)); }
+.wellbore-pressure-window { filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.05)); }
+.wellbore-kick-diagnostics { filter: drop-shadow(0 4px 10px rgba(127, 29, 29, 0.05)); }
+.wellbore-bit-hydraulics { filter: drop-shadow(0 1px 3px rgba(37, 99, 235, 0.14)); }
+.wellbore-bit-nozzle-flow { fill: none; stroke: rgba(37, 99, 235, 0.66); stroke-width: 1.25; stroke-linecap: round; stroke-dasharray: 5 9; animation: wellboreDashFlow 1.5s linear infinite; }
+.wellbore-bit-nozzle-center { opacity: 0.58; }
+.wellbore-bit-bottom-sweep { fill: none; stroke-width: 1.2; stroke-linecap: round; stroke-dasharray: 4 10; animation: wellboreDashFlow 1.9s linear infinite; }
+.wellbore-influx-plume { filter: drop-shadow(0 0 6px rgba(220, 38, 38, 0.16)); transform-box: fill-box; transform-origin: center; animation: wellborePlume 2.8s ease-in-out infinite; }
+.wellbore-inset-influx-particle { stroke-dasharray: 7 18; animation: wellboreDashFlow 2.4s linear infinite; }
+.wellbore-gas-bubble { transform-box: fill-box; transform-origin: center; animation: wellboreBubble 2.8s ease-in-out infinite; }
+.wellbore-gas-bubble:nth-of-type(2n) { animation-delay: 0.45s; }
+.wellbore-local-inset { filter: drop-shadow(0 8px 18px rgba(127, 29, 29, 0.08)); }
+.wellbore-kick-tag { filter: drop-shadow(0 5px 12px rgba(127, 29, 29, 0.07)); }
+.wellbore-structure-labels { opacity: 0.78; }
 .wellbore-kick-pulse { transform-box: fill-box; transform-origin: center; animation: wellborePulse 1.6s ease-in-out infinite; }
 .wellbore-bit-pulse { transform-box: fill-box; transform-origin: center; animation: wellboreBitPulse 2.4s ease-in-out infinite; }
 .wellbore-status-breathe { animation: wellboreStatusBreathe 3s ease-in-out infinite; }
@@ -2814,15 +2833,23 @@ body {
 .wellbore-current-state-card[data-tone='critical'] .wellbore-status-hero span { background: #dc2626; }
 .wellbore-status-hero strong { color: #0f172a; font-size: 14px; }
 .wellbore-detail-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.wellbore-detail-evidence > div { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 1px 6px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; padding: 7px; }
-.wellbore-detail-evidence > div > svg { grid-row: 1 / span 3; color: #0f766e; }
-.wellbore-detail-evidence > div[data-tone='critical'] > svg,
-.wellbore-detail-evidence > div[data-tone='critical'] strong { color: #dc2626; }
-.wellbore-detail-evidence > div[data-tone='warning'] > svg,
-.wellbore-detail-evidence > div[data-tone='warning'] strong { color: #d97706; }
-.wellbore-detail-evidence span,
-.wellbore-detail-evidence small { display: block; grid-column: 2; color: #64748b; font-size: 9px; }
-.wellbore-detail-evidence strong { display: block; grid-column: 2; margin: 2px 0; color: #0f172a; font-size: 12px; font-variant-numeric: tabular-nums; }
+.wellbore-detail-evidence article { min-width: 0; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; padding: 7px 8px; }
+.wellbore-detail-evidence article[data-tone='critical'] { border-color: #fecaca; background: #fff8f8; }
+.wellbore-detail-evidence article[data-tone='warning'] { border-color: #fed7aa; background: #fffaf3; }
+.wellbore-detail-evidence header { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 5px; }
+.wellbore-detail-evidence header svg { color: #0f766e; }
+.wellbore-detail-evidence header span { overflow: hidden; color: #475569; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.wellbore-detail-evidence em { border-radius: 999px; background: #e2e8f0; padding: 2px 5px; color: #475569; font-size: 8px; font-style: normal; font-weight: 700; white-space: nowrap; }
+.wellbore-detail-evidence strong { display: block; margin: 5px 0 4px 23px; color: #0f172a; font-size: 14px; font-variant-numeric: tabular-nums; }
+.wellbore-detail-evidence strong small { color: #64748b; font-size: 9px; font-weight: 600; }
+.wellbore-detail-evidence footer { display: flex; min-width: 0; justify-content: space-between; gap: 6px; border-top: 1px solid #e2e8f0; padding-top: 4px; color: #64748b; font-size: 8px; }
+.wellbore-detail-evidence footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wellbore-detail-evidence article[data-tone='critical'] header svg,
+.wellbore-detail-evidence article[data-tone='critical'] strong { color: #dc2626; }
+.wellbore-detail-evidence article[data-tone='critical'] em { background: #fee2e2; color: #b91c1c; }
+.wellbore-detail-evidence article[data-tone='warning'] header svg,
+.wellbore-detail-evidence article[data-tone='warning'] strong { color: #d97706; }
+.wellbore-detail-evidence article[data-tone='warning'] em { background: #ffedd5; color: #c2410c; }
 .wellbore-timeline { display: grid; gap: 5px; }
 .wellbore-timeline > div { display: grid; grid-template-columns: 10px 36px minmax(0, 1fr); align-items: start; gap: 6px; color: #475569; font-size: 10px; }
 .wellbore-timeline i { position: relative; margin-top: 4px; width: 7px; height: 7px; border: 2px solid #d97706; border-radius: 999px; background: #fff; }
@@ -2850,14 +2877,49 @@ body {
 .wellbore-preview-side { display: grid; align-content: start; gap: 12px; }
 .wellbore-preview-side section,
 .wellbore-preview-metrics,
+.wellbore-preview-evidence,
+.wellbore-preview-actions,
+.wellbore-preview-audit,
 .wellbore-preview-note { border: 1px solid #dbe2ea; border-radius: 10px; background: #fff; padding: 14px; }
 .wellbore-preview-side h1 { margin: 0; color: #0f172a; font-size: 22px; }
 .wellbore-preview-side p { margin: 10px 0 0; color: #475569; font-size: 13px; line-height: 1.6; }
 .wellbore-preview-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .wellbore-preview-metrics div { min-width: 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 10px; }
 .wellbore-preview-metrics svg { color: #0f766e; }
+.wellbore-preview-metrics div[data-tone='warning'] svg,
+.wellbore-preview-metrics div[data-tone='warning'] strong { color: #d97706; }
+.wellbore-preview-metrics div[data-tone='critical'] svg,
+.wellbore-preview-metrics div[data-tone='critical'] strong { color: #dc2626; }
 .wellbore-preview-metrics span { display: block; margin-top: 6px; color: #64748b; font-size: 11px; }
 .wellbore-preview-metrics strong { display: block; margin-top: 3px; color: #0f172a; font-size: 14px; }
+.wellbore-preview-evidence { display: grid; gap: 8px; }
+.wellbore-preview-evidence h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 2px; color: #0f172a; font-size: 14px; }
+.wellbore-preview-evidence h2 svg { color: #0f766e; }
+.wellbore-preview-evidence div { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; padding: 7px 8px; }
+.wellbore-preview-evidence div[data-tone='critical'] { border-color: #fecaca; background: #fff7f7; }
+.wellbore-preview-evidence div[data-tone='warning'] { border-color: #fed7aa; background: #fff7ed; }
+.wellbore-preview-evidence span { color: #64748b; font-size: 11px; }
+.wellbore-preview-evidence strong { overflow: hidden; color: #0f172a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.wellbore-preview-evidence div[data-tone='critical'] strong { color: #dc2626; }
+.wellbore-preview-evidence div[data-tone='warning'] strong { color: #d97706; }
+.wellbore-preview-actions { display: grid; gap: 8px; }
+.wellbore-preview-actions h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 2px; color: #0f172a; font-size: 14px; }
+.wellbore-preview-actions h2 svg { color: #0f766e; }
+.wellbore-preview-actions div { display: grid; grid-template-columns: 22px 44px minmax(0, 1fr); align-items: center; gap: 7px; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; padding: 7px 8px; }
+.wellbore-preview-actions div[data-tone='critical'] { border-color: #fecaca; background: #fff7f7; }
+.wellbore-preview-actions div[data-tone='warning'] { border-color: #fed7aa; background: #fff7ed; }
+.wellbore-preview-actions i { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: 10px; font-style: normal; font-weight: 800; }
+.wellbore-preview-actions div[data-tone='critical'] i { background: #fee2e2; color: #b91c1c; }
+.wellbore-preview-actions div[data-tone='warning'] i { background: #ffedd5; color: #c2410c; }
+.wellbore-preview-actions span { color: #64748b; font-size: 11px; }
+.wellbore-preview-actions strong { min-width: 0; overflow: hidden; color: #334155; font-size: 11px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.wellbore-preview-actions div[data-tone='critical'] strong { color: #7f1d1d; }
+.wellbore-preview-actions div[data-tone='warning'] strong { color: #9a3412; }
+.wellbore-preview-audit { display: grid; gap: 8px; }
+.wellbore-preview-audit h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 2px; color: #0f172a; font-size: 14px; }
+.wellbore-preview-audit h2 svg { color: #0f766e; }
+.wellbore-preview-audit span { display: flex; align-items: flex-start; gap: 7px; color: #475569; font-size: 12px; line-height: 1.45; }
+.wellbore-preview-audit span svg { flex: 0 0 auto; margin-top: 1px; color: #0f766e; }
 .wellbore-preview-note { display: flex; align-items: flex-start; gap: 8px; color: #475569; font-size: 12px; line-height: 1.5; }
 .wellbore-preview-note svg { flex: 0 0 auto; color: #d97706; }
 .wellbore-preview-shell[data-tone='critical'] .wellbore-preview-side section { border-top: 3px solid #dc2626; }
@@ -2882,6 +2944,16 @@ body {
 @keyframes wellboreBitPulse {
   0%, 100% { opacity: 0.55; transform: scale(0.95); }
   50% { opacity: 0.85; transform: scale(1.08); }
+}
+
+@keyframes wellborePlume {
+  0%, 100% { opacity: 0.72; transform: scale(0.96); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+@keyframes wellboreBubble {
+  0%, 100% { opacity: 0.42; transform: translateY(3px) scale(0.92); }
+  50% { opacity: 0.88; transform: translateY(-3px) scale(1.08); }
 }
 
 @keyframes wellboreStatusBreathe {
@@ -4247,3 +4319,15 @@ body {
 
 
 
+
+.wellbore-schema-figure-detail .wellbore-formation-pressure-marker,
+.wellbore-schema-figure-detail .wellbore-local-inset,
+.wellbore-schema-figure-detail .wellbore-engineering-readouts,
+.wellbore-schema-figure-detail .wellbore-geometry-legend,
+.wellbore-schema-figure-detail .wellbore-channel-legend,
+.wellbore-schema-figure-detail .wellbore-pressure-window,
+.wellbore-schema-figure-detail .wellbore-kick-diagnostics { display: none; }
+.wellbore-schema-figure-detail .wellbore-engineering-callouts { filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.04)); }
+.wellbore-schema-figure[data-animation='low'] .wellbore-flow-particle { opacity: 0.72; }
+.wellbore-schema-figure[data-animation='medium'] .wellbore-flow-particle { opacity: 0.86; }
+.wellbore-schema-figure[data-animation='high'] .wellbore-flow-particle { opacity: 1; }

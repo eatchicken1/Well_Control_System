@@ -320,11 +320,15 @@ export function Layout() {
     critical: 'bg-red-500',
   };
   const backendLevel = safeBackendLevel(backendDetection.publicLevel);
-  const backendMeta = BACKEND_LEVEL_META[backendLevel];
+  const previewParams = new URLSearchParams(location.search);
+  const previewMode = location.pathname.includes('/monitoring/wellbore-status') && previewParams.has('preview');
+  const displayBackendLevel = previewMode ? safeBackendLevel(previewParams.get('level')) : backendLevel;
+  const displayAlertStatus = displayBackendLevel >= 4 ? 'critical' : displayBackendLevel >= 2 ? 'warning' : 'normal';
+  const backendMeta = BACKEND_LEVEL_META[displayBackendLevel];
   const sidebarWidth = sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[232px]';
   const isMonitoringRoute = location.pathname === '/monitoring';
   const currentWellBadge = `${wellInfo.wellName} · ${wellInfo.block || '实时监测井'}`;
-  const topbarBackendChip = <HeaderBackendLevelChip detection={backendDetection} />;
+  const topbarBackendChip = <HeaderBackendLevelChip detection={previewMode ? { ...backendDetection, publicLevel: displayBackendLevel, reason: `井筒预览模式 L${displayBackendLevel} ${backendMeta.label}` } : backendDetection} />;
   const topbarDataChip = <DataSourcePill state={dataSourceState} isStopped={selectedWellManuallyStopped} />;
   const showFleetStrip = false;
   const showOperationsStrip = isMonitoringRoute;
@@ -364,11 +368,11 @@ export function Layout() {
         <div className={`control-tower-status-wrap relative z-10 border-b ${sidebarCollapsed ? 'px-3 py-3' : 'px-3 py-3'}`}>
           <div className={`control-tower-status-card rounded-md border p-2 shadow-inner ${sidebarCollapsed ? 'control-tower-status-card-collapsed flex justify-center' : ''}`}>
             <div className={`flex items-center gap-2 ${sidebarCollapsed ? 'justify-center' : ''}`}>
-              <div className={`ops-led h-2.5 w-2.5 rounded-full ${statusColors[alertStatus]}`} data-state={alertStatus} />
-              <span className={`text-xs text-slate-700 dark:text-slate-200 ${sidebarCollapsed ? 'hidden' : ''}`}>L{backendLevel} {backendMeta.shortLabel}</span>
+              <div className={`ops-led h-2.5 w-2.5 rounded-full ${statusColors[displayAlertStatus]}`} data-state={displayAlertStatus} />
+              <span className={`text-xs text-slate-700 dark:text-slate-200 ${sidebarCollapsed ? 'hidden' : ''}`}>L{displayBackendLevel} {backendMeta.shortLabel}</span>
               {!selectedWellIsRunning && !sidebarCollapsed && <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">{selectedWellManuallyStopped ? '已停' : '待启动'}</span>}
             </div>
-            <BackendLevelDots level={backendLevel} collapsed={sidebarCollapsed} />
+            <BackendLevelDots level={displayBackendLevel} collapsed={sidebarCollapsed} />
           </div>
           {shutInActive && !sidebarCollapsed && (
             <div className="mt-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-700">

@@ -72,6 +72,9 @@ export interface WellboreCasingShoe {
 export interface WellboreTubularString {
   key: string;
   label: string;
+  programLabel: string;
+  holeSizeLabel: string;
+  casingSizeLabel: string;
   topDepth: number;
   bottomDepth: number;
   outerWidth: number;
@@ -79,6 +82,21 @@ export interface WellboreTubularString {
   fill: string;
   stroke: string;
   cementOuterWidth: number;
+}
+
+export interface WellborePressureWindow {
+  mudWeight: number;
+  porePressureEquivalent: number;
+  margin: number;
+  status: 'overbalanced' | 'narrow' | 'underbalanced';
+}
+
+export interface WellboreKickDiagnostics {
+  severity: number;
+  influxRate: number;
+  gasFrontDepth: number;
+  gasColumnLength: number;
+  migrationVelocity: number;
 }
 
 export interface WellboreSimulationModel {
@@ -89,6 +107,9 @@ export interface WellboreSimulationModel {
   tubularStrings: WellboreTubularString[];
   openHoleStartDepth: number;
   openHoleLength: number;
+  openHoleSizeLabel: string;
+  pressureWindow: WellborePressureWindow;
+  kickDiagnostics: WellboreKickDiagnostics;
   currentFormation: string;
   conditionLabel: string;
   statusLabel: string;
@@ -180,6 +201,9 @@ function buildTubularStrings(wellDepth: number, deepestShoeDepth: number) {
     {
       key: 'conductor',
       label: '\u5bfc\u7ba1',
+      programLabel: '\u5bfc\u7ba1',
+      holeSizeLabel: '20 in',
+      casingSizeLabel: '13-3/8 in',
       topDepth: 0,
       bottomDepth: conductorDepth,
       outerWidth: 164,
@@ -191,6 +215,9 @@ function buildTubularStrings(wellDepth: number, deepestShoeDepth: number) {
     {
       key: 'surface',
       label: '\u8868\u5c42\u5957\u7ba1',
+      programLabel: '\u8868\u5957',
+      holeSizeLabel: '12-1/4 in',
+      casingSizeLabel: '9-5/8 in',
       topDepth: 0,
       bottomDepth: surfaceDepth,
       outerWidth: 128,
@@ -202,6 +229,9 @@ function buildTubularStrings(wellDepth: number, deepestShoeDepth: number) {
     {
       key: 'intermediate',
       label: '\u6280\u672f\u5957\u7ba1',
+      programLabel: '\u6280\u5957',
+      holeSizeLabel: '8-1/2 in',
+      casingSizeLabel: '7 in',
       topDepth: 0,
       bottomDepth: deepestShoeDepth,
       outerWidth: 86,
@@ -228,6 +258,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const { tubularStrings, casingShoes } = buildTubularStrings(wellDepth, casingShoeDepth);
   const openHoleStartDepth = casingShoeDepth;
   const openHoleLength = Math.max(0, Math.round(wellDepth - openHoleStartDepth));
+  const openHoleSizeLabel = '6 in';
   const currentFormation = inferFormationName(input.formation, wellDepth);
   const conditionLabel = formatWellboreConditionLabel(input.condition, input.cycleInfo?.stateLabel || '\u7a33\u5b9a\u76d1\u6d4b');
   const state = deriveWellboreState({
@@ -247,6 +278,15 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const flowDelta = finite(input.flowOut, 0) - finite(input.flowIn, 0);
   const circulationActive = finite(input.flowIn, 0) > 0.5 || finite(input.spm, 0) > 8;
   const returnActive = finite(input.flowOut, 0) > 0.5 || finite(input.returnResponse, 0) > 5;
+  const mudWeight = input.backendLevel >= 2 ? 1.18 : input.backendLevel === 1 ? 1.22 : 1.26;
+  const porePressureEquivalent = input.backendLevel >= 4 ? 1.32 : input.backendLevel >= 2 ? 1.28 : input.backendLevel === 1 ? 1.21 : 1.18;
+  const pressureMargin = Number((mudWeight - porePressureEquivalent).toFixed(2));
+  const pressureWindow: WellborePressureWindow = {
+    mudWeight,
+    porePressureEquivalent,
+    margin: pressureMargin,
+    status: pressureMargin < 0 ? 'underbalanced' : pressureMargin <= 0.03 ? 'narrow' : 'overbalanced',
+  };
 
   const gasSupport = finite(input.totalGas, 0) >= 0.8 || hasSignal(input.activeSignals, ['total_gas', 'gas_support']);
   const pitSupport = finite(input.pitGain, 0) >= 0.8 || hasSignal(input.activeSignals, ['pit_gain', 'pit_volume', 'pool_delta', 'pool_window_increase']);
@@ -255,6 +295,20 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
 
   const kickPointDepth = clamp(bitDepth - Math.max(80, openHoleLength * 0.12), openHoleStartDepth + 40, wellDepth - 40);
   const observationDepth = clamp(bitDepth - Math.max(50, openHoleLength * 0.08), openHoleStartDepth + 30, bitDepth - 12);
+  const evidenceScore = (returnSupport ? 0.28 : 0) + (pitSupport ? 0.22 : 0) + (gasSupport ? 0.26 : 0) + (pressureMargin < 0 ? 0.24 : 0);
+  const levelBase = input.backendLevel >= 4 ? 0.76 : input.backendLevel === 3 ? 0.62 : input.backendLevel === 2 ? 0.48 : 0;
+  const severity = input.backendLevel >= 2 ? clamp(levelBase + evidenceScore * 0.18, 0.35, 0.96) : input.backendLevel === 1 ? 0.18 : 0;
+  const gasColumnLength = input.backendLevel >= 2 ? clamp(openHoleLength * (0.22 + severity * 0.36), 120, Math.max(160, openHoleLength * 0.72)) : 0;
+  const gasFrontDepth = input.backendLevel >= 2 ? clamp(kickPointDepth - gasColumnLength, openHoleStartDepth + 35, kickPointDepth - 30) : 0;
+  const influxRate = input.backendLevel >= 2 ? clamp(Math.max(flowDelta, 0) * 0.78 + finite(input.pitGain, 0) * 0.42 + finite(input.totalGas, 0) * 0.34, 0.4, 8.8) : 0;
+  const migrationVelocity = input.backendLevel >= 2 ? clamp(12 + severity * 36 + Math.max(flowDelta, 0) * 1.2, 10, 58) : 0;
+  const kickDiagnostics: WellboreKickDiagnostics = {
+    severity: Number(severity.toFixed(2)),
+    influxRate: Number(influxRate.toFixed(1)),
+    gasFrontDepth: Math.round(gasFrontDepth),
+    gasColumnLength: Math.round(gasColumnLength),
+    migrationVelocity: Math.round(migrationVelocity),
+  };
 
   const formationBands = buildFormationBands(wellDepth);
   const evidenceBands: WellboreZoneBand[] = [];
@@ -271,6 +325,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
       lane: 'annulus',
     });
     evidenceNotes.push('\u672a\u89e6\u53d1\u5f02\u5e38\u4fb5\u5165\u8bc1\u636e');
+    evidenceNotes.push(`\u4e95\u5e95\u538b\u529b\u7a97\u53e3\u5904\u4e8e\u8fc7\u5e73\u8861\uff0c\u0394\u03c1 ${formatSigned(pressureMargin, 2, 'g/cm\u00b3')}`);
     if (circulationActive) evidenceNotes.push(`\u5165\u53e3 / \u8fd4\u51fa\u57fa\u672c\u5e73\u8861\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}`);
   } else if (input.backendLevel === 1) {
     evidenceBands.push({
@@ -283,6 +338,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
       lane: 'annulus',
     });
     evidenceNotes.push('\u5f02\u5e38\u89c2\u5bdf\u4e2d');
+    evidenceNotes.push(`\u538b\u529b\u7a97\u53e3\u53d8\u7a84\uff0c\u0394\u03c1 ${formatSigned(pressureMargin, 2, 'g/cm\u00b3')}`);
     evidenceNotes.push(returnSupport ? `\u8fd4\u51fa\u54cd\u5e94\u8f7b\u5fae\u62ac\u5347\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}` : '\u5173\u6ce8\u8fd4\u51fa\u4e0e\u6c60\u4f53\u79ef\u5fae\u5c0f\u6ce2\u52a8');
   } else {
     const annulusTone = input.backendLevel >= 4 ? 'critical' : 'warning';
@@ -305,6 +361,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
       lane: 'formation',
     });
     if (returnSupport) evidenceNotes.push(`\u51fa\u53e3\u6d41\u91cf\u9ad8\u4e8e\u5165\u53e3\u6d41\u91cf\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}`);
+    if (pressureMargin < 0) evidenceNotes.push(`\u6ce5\u6d46\u5f53\u91cf\u4f4e\u4e8e\u5730\u5c42\u538b\u529b\u5f53\u91cf\uff0c\u0394\u03c1 ${formatSigned(pressureMargin, 2, 'g/cm\u00b3')}`);
     if (pitSupport) evidenceNotes.push(`\u6c60\u589e\u91cf ${formatValue(finite(input.pitGain, 0), 2, 'm\u00b3')}\uff0c\u603b\u6c60\u4f53\u79ef ${formatValue(finite(input.pitVolume, 0), 2, 'm\u00b3')}`);
     if (pressureSupport) evidenceNotes.push(`\u7acb\u538b ${formatValue(finite(input.drillPipePressure, 0), 2, 'MPa')} / \u5957\u538b ${formatValue(finite(input.casingPressure, 0), 2, 'MPa')}`);
     if (gasSupport) evidenceNotes.push(`\u5168\u70c3 ${formatValue(finite(input.totalGas, 0), 2, '%')}\uff0c\u652f\u6301\u4e95\u5e95\u4fb5\u5165\u5224\u65ad`);
@@ -324,7 +381,6 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
 
   const depthMarkers: WellboreDepthMarker[] = [
     { key: 'wellhead', label: '\u4e95\u53e3', depth: 0 },
-    { key: 'bop', label: 'BOP', depth: 0 },
     ...casingShoes.map((shoe) => ({ key: shoe.key, label: `${shoe.label} ${Math.round(shoe.depth)} m`, depth: shoe.depth })),
     { key: 'bit', label: `\u94bb\u5934 ${Math.round(bitDepth)} m`, depth: bitDepth, tone: input.backendLevel >= 2 ? 'critical' : input.backendLevel === 1 ? 'warning' : 'normal' },
     { key: 'td', label: `\u4e95\u6df1 ${Math.round(wellDepth)} m`, depth: wellDepth },
@@ -338,6 +394,9 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
     tubularStrings,
     openHoleStartDepth,
     openHoleLength,
+    openHoleSizeLabel,
+    pressureWindow,
+    kickDiagnostics,
     currentFormation,
     conditionLabel,
     statusLabel: statusMeta.label,
