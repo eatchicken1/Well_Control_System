@@ -603,6 +603,19 @@ export default function Settings() {
             </form>
           </section>
 
+          <section className="ops-surface p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-base text-slate-800 dark:text-slate-100">
+              <Info className="h-4 w-4 text-cyan-500" />
+              事件系统解释
+            </h3>
+            <div className="grid gap-2 text-sm">
+              <div className="ops-inline-tile flex items-center justify-between px-3 py-2"><span className="ops-muted">事件系统解释</span><span className="font-medium text-emerald-700 dark:text-emerald-300">已启用</span></div>
+              <div className="ops-inline-tile flex items-center justify-between px-3 py-2"><span className="ops-muted">解释方式</span><span>系统规则</span></div>
+              <div className="ops-inline-tile flex items-center justify-between px-3 py-2"><span className="ops-muted">大模型辅助解释</span><span className="ops-muted">暂未启用</span></div>
+            </div>
+            <p className="mt-2 text-[11px] leading-5 ops-muted">解释层只读投影检测事实，不改变报警等级、Candidate 状态、Evidence 或监测 Session。</p>
+          </section>
+
           <ThresholdGroup title="出口流量响应曲线参考">
             <ThresholdInput label="参考线 1" value={draft.returnResponseWarning} activeValue={thresholds.returnResponseWarning} unit="%" onChange={set('returnResponseWarning')} min={0} max={60} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="warning" />
             <ThresholdInput label="参考线 2" value={draft.returnResponseCritical} activeValue={thresholds.returnResponseCritical} unit="%" onChange={set('returnResponseCritical')} min={0} max={100} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="critical" />
