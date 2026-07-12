@@ -3,6 +3,68 @@ import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta
 
 export type WellboreTone = 'normal' | 'watch' | 'warning' | 'critical';
 
+export interface WellboreStructureSection {
+  sectionId: number;
+  wellboreName?: string;
+  spudSequence: string;
+  casingName: string;
+  bottomDepthM?: number;
+  formation: string;
+  holeSizeMm?: number;
+  kind?: 'casing' | 'openHole';
+}
+
+const WELLBORE_STRUCTURE_NAME = /套管|导管|悬挂|回接|衬管|筛管|裸眼|casing|conductor|liner|open\s*hole/i;
+const OPEN_HOLE_NAME = /裸眼|open\s*hole/i;
+const WELLBORE_PROGRAM_SEQUENCE = /(?:^|\s)(?:\d+\s*开|导眼|侧钻|加深|分支)/;
+
+function usableText(value: string | undefined) {
+  return value?.trim() || '';
+}
+
+/**
+ * The imported wellbore_section table can contain both program rows and
+ * casing-specification fragments. Keep only program rows, merge duplicates,
+ * and make an explicit casing/open-hole distinction before any drawing logic.
+ */
+export function normalizeWellboreStructureSections(rawSections: WellboreStructureSection[]): WellboreStructureSection[] {
+  const deduped = new Map<string, WellboreStructureSection>();
+  rawSections.forEach((section) => {
+    const bottomDepthM = Number(section.bottomDepthM);
+    const spudSequence = usableText(section.spudSequence);
+    const casingName = usableText(section.casingName);
+    const formation = usableText(section.formation);
+    const looksLikeProgram = WELLBORE_PROGRAM_SEQUENCE.test(spudSequence) || WELLBORE_STRUCTURE_NAME.test(casingName);
+    if (!Number.isFinite(bottomDepthM) || bottomDepthM <= 20 || !looksLikeProgram) return;
+    const holeSizeMm = Number(section.holeSizeMm);
+    const kind = OPEN_HOLE_NAME.test(casingName) || !casingName ? 'openHole' : 'casing';
+    const key = `${Math.round(bottomDepthM * 10)}|${spudSequence || '未命名'}|${kind}`;
+    const existing = deduped.get(key);
+    const normalized: WellboreStructureSection = {
+      sectionId: section.sectionId,
+      wellboreName: usableText(section.wellboreName),
+      spudSequence,
+      casingName,
+      bottomDepthM,
+      formation,
+      holeSizeMm: Number.isFinite(holeSizeMm) && holeSizeMm > 50 ? holeSizeMm : undefined,
+      kind,
+    };
+    if (!existing) {
+      deduped.set(key, normalized);
+      return;
+    }
+    deduped.set(key, {
+      ...existing,
+      casingName: existing.casingName || normalized.casingName,
+      formation: existing.formation || normalized.formation,
+      holeSizeMm: existing.holeSizeMm ?? normalized.holeSizeMm,
+      kind: existing.kind === 'casing' || normalized.kind === 'casing' ? 'casing' : 'openHole',
+    });
+  });
+  return [...deduped.values()].sort((a, b) => Number(a.bottomDepthM) - Number(b.bottomDepthM));
+}
+
 export interface WellboreSimulationInput {
   backendLevel: BackendLevel;
   flowIn: number;
@@ -16,12 +78,14 @@ export interface WellboreSimulationInput {
   spm?: number;
   wellDepth?: number;
   bitDepth?: number;
+  casingShoeDepth?: number;
   drillPipeOD?: number;
   bhaOD?: number;
   bitOD?: number;
   casingID?: number;
   openHoleDiameter?: number;
   formation?: string;
+  wellboreSections?: WellboreStructureSection[];
   mudWeight?: number;
   ecd?: number;
   porePressureEquivalent?: number;
@@ -246,6 +310,28 @@ function buildFormationBands(wellDepth: number): WellboreFormationBand[] {
   ].filter((item) => item.to > item.from + 1);
 }
 
+function buildFormationBandsFromSections(sections: WellboreStructureSection[], wellDepth: number): WellboreFormationBand[] {
+  const palette = [
+    { fill: '#f3eee4', accent: '#9a7b4f' },
+    { fill: '#e7edf1', accent: '#64748b' },
+    { fill: '#eee5d5', accent: '#8a5f2a' },
+    { fill: '#dcfce7', accent: '#047857' },
+  ];
+  let top = 0;
+  return sections.flatMap((section, index) => {
+    const bottom = clamp(finite(section.bottomDepthM, top), top, wellDepth);
+    const band = bottom > top + 1 ? [{
+      key: `section-${section.sectionId || index}`,
+      label: section.formation?.trim() || section.spudSequence?.trim() || `井段 ${index + 1}`,
+      from: top,
+      to: bottom,
+      ...palette[index % palette.length],
+    }] : [];
+    top = Math.max(top, bottom);
+    return band;
+  });
+}
+
 function buildTubularStrings(wellDepth: number, deepestShoeDepth: number) {
   const conductorDepth = clampRange(wellDepth * 0.14, 260, Math.min(680, deepestShoeDepth - 920));
   const surfaceDepth = clampRange(
@@ -308,11 +394,61 @@ function buildTubularStrings(wellDepth: number, deepestShoeDepth: number) {
   return { tubularStrings, casingShoes };
 }
 
+function buildTubularStringsFromSections(sections: WellboreStructureSection[], wellDepth: number) {
+  const validSections = sections
+    .filter((section) => Number.isFinite(section.bottomDepthM) && Number(section.bottomDepthM) > 20)
+    .sort((a, b) => Number(a.bottomDepthM) - Number(b.bottomDepthM));
+  const strings = validSections.map((section, index) => {
+    const outerWidth = clamp(164 - index * Math.max(22, 76 / Math.max(validSections.length, 1)), 72, 164);
+    const casingName = section.casingName?.trim() || section.spudSequence?.trim() || `第 ${index + 1} 开`;
+    const holeSizeLabel = Number.isFinite(section.holeSizeMm) && Number(section.holeSizeMm) > 0
+      ? `${Math.round(Number(section.holeSizeMm))} mm`
+      : '井眼尺寸未录入';
+    return {
+      key: `db-section-${section.sectionId || index}`,
+      label: casingName,
+      programLabel: section.spudSequence?.trim() || casingName,
+      holeSizeLabel,
+      casingSizeLabel: casingName,
+      topDepth: 0,
+      bottomDepth: clamp(Number(section.bottomDepthM), 20, wellDepth),
+      outerWidth,
+      innerWidth: Math.max(outerWidth - 28, 34),
+      fill: ['#94a3b8', '#64748b', '#475569', '#334155'][index % 4],
+      stroke: ['#475569', '#334155', '#1f2937', '#0f172a'][index % 4],
+      cementOuterWidth: outerWidth + 18,
+    } satisfies WellboreTubularString;
+  });
+  return {
+    tubularStrings: strings,
+    casingShoes: strings.map((item) => ({ key: `${item.key}-shoe`, label: `${item.label}鞋`, depth: item.bottomDepth })),
+  };
+}
+
 export function buildWellboreSimulationModel(input: WellboreSimulationInput): WellboreSimulationModel {
   const wellDepth = Math.max(finite(input.wellDepth, 4200), 2600);
   const bitDepth = clamp(finite(input.bitDepth, wellDepth - 80), 300, wellDepth);
-  const casingShoeDepth = clamp(Math.min(DEFAULT_CASING_SHOE_DEPTH, wellDepth - 140), 1200, Math.max(wellDepth - 160, 1400));
-  const { tubularStrings, casingShoes } = buildTubularStrings(wellDepth, casingShoeDepth);
+  const realSections = normalizeWellboreStructureSections(input.wellboreSections || []);
+  // A wellbore-section row can describe a planned open-hole section extending below the
+  // live bit position. Only a completed section above the bit can be a casing shoe.
+  const casingSections = realSections.filter((section) => section.kind !== 'openHole');
+  const completedCasingSections = casingSections.filter((section) => Number(section.bottomDepthM) <= bitDepth - 120);
+  const activeCasingSections = completedCasingSections.length > 0 ? completedCasingSections : casingSections.filter((section) => Number(section.bottomDepthM) < bitDepth);
+  const deepestSectionDepth = activeCasingSections.length > 0
+    ? Number(activeCasingSections[activeCasingSections.length - 1].bottomDepthM)
+    : undefined;
+  const fallbackShoeDepth = Math.min(DEFAULT_CASING_SHOE_DEPTH, Math.max(900, bitDepth - 320));
+  const suppliedShoeDepth = Number.isFinite(input.casingShoeDepth) && Number(input.casingShoeDepth) <= bitDepth - 120
+    ? Number(input.casingShoeDepth)
+    : undefined;
+  const casingShoeDepth = clamp(
+    finite(deepestSectionDepth ?? suppliedShoeDepth, fallbackShoeDepth),
+    Math.min(900, Math.max(280, bitDepth - 180)),
+    Math.max(900, Math.min(bitDepth - 120, wellDepth - 160)),
+  );
+  const { tubularStrings, casingShoes } = activeCasingSections.length > 0
+    ? buildTubularStringsFromSections(activeCasingSections, wellDepth)
+    : buildTubularStrings(wellDepth, casingShoeDepth);
   const openHoleStartDepth = casingShoeDepth;
   const openHoleLength = Math.max(0, Math.round(wellDepth - openHoleStartDepth));
   const hydraulicGeometry: WellboreHydraulicGeometry = {
@@ -322,14 +458,17 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
     casingID: finite(input.casingID, tubularStrings[tubularStrings.length - 1]?.innerWidth ?? 58),
     openHoleDiameter: finite(input.openHoleDiameter, 66),
   };
-  const openHoleSizeLabel = '8-1/2 in';
-  const bhaTopDepth = Math.max(openHoleStartDepth + 80, bitDepth - 620);
-  const bitTopDepth = Math.max(bhaTopDepth + 40, bitDepth - 80);
+  const activeSection = realSections.find((section) => Number(section.bottomDepthM) >= bitDepth) || realSections[realSections.length - 1];
+  const openHoleSizeLabel = Number.isFinite(activeSection?.holeSizeMm) && Number(activeSection.holeSizeMm) > 0
+    ? `${Math.round(Number(activeSection.holeSizeMm))} mm`
+    : '8-1/2 in';
+  const bhaTopDepth = clamp(bitDepth - 620, openHoleStartDepth + 80, Math.max(openHoleStartDepth + 120, bitDepth - 40));
+  const bitTopDepth = clamp(bitDepth - 80, bhaTopDepth + 40, bitDepth - 8);
   const sectionGeometry: WellboreSectionGeometry[] = [
     { fromDepth: 0, toDepth: openHoleStartDepth, boreInnerWidth: hydraulicGeometry.casingID, drillOuterWidth: hydraulicGeometry.drillPipeOD, sectionType: 'cased' },
     { fromDepth: openHoleStartDepth, toDepth: bhaTopDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.drillPipeOD, sectionType: 'openHole' },
     { fromDepth: bhaTopDepth, toDepth: bitTopDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bhaOD, sectionType: 'bha' },
-    { fromDepth: bitTopDepth, toDepth: wellDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bitOD, sectionType: 'bit' },
+    { fromDepth: bitTopDepth, toDepth: bitDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bitOD, sectionType: 'bit' },
   ].filter((section) => section.toDepth > section.fromDepth + 1);
   const currentFormation = inferFormationName(input.formation, wellDepth);
   const conditionLabel = formatWellboreConditionLabel(input.condition, input.cycleInfo?.stateLabel || '\u7a33\u5b9a\u76d1\u6d4b');
@@ -408,7 +547,9 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
     highSideBias: hasDirectionalBasis ? clamp(Number(input.inclination) / 90, 0, 1) : undefined,
   };
 
-  const formationBands = buildFormationBands(wellDepth);
+  const formationBands = (realSections.length > 0 ? buildFormationBandsFromSections(realSections, wellDepth) : buildFormationBands(wellDepth)).map((band) => (
+    band.key === 'target' ? { ...band, label: currentFormation } : band
+  ));
   const evidenceBands: WellboreZoneBand[] = [];
   const evidenceNotes: string[] = [];
 

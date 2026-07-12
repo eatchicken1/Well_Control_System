@@ -2704,16 +2704,20 @@ body {
 .wellbore-thumbnail-card { padding: 10px; }
 .wellbore-thumbnail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .wellbore-thumbnail-head h2 { margin: 2px 0 0; color: #0f172a; font-size: 14px; font-weight: 700; }
+.wellbore-thumbnail-title-row { display: flex; align-items: center; gap: 7px; }
+.wellbore-thumbnail-level { display: inline-flex; min-width: 28px; height: 18px; align-items: center; justify-content: center; margin-top: 2px; border-radius: 999px; background: #ccfbf1; color: #0f766e; font-size: 9px; font-weight: 800; }
+.wellbore-thumbnail-level[data-tone='warning'] { background: #ffedd5; color: #c2410c; }
+.wellbore-thumbnail-level[data-tone='critical'] { background: #fee2e2; color: #b91c1c; }
 .wellbore-eyebrow { color: #64748b; font-size: 10px; }
 .wellbore-ghost-button,
 .wellbore-back-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #475569; font-size: 11px; font-weight: 600; }
 .wellbore-ghost-button { height: 28px; padding: 0 8px; }
-.wellbore-thumbnail-figure { display: block; width: 100%; height: 238px; overflow: hidden; border: 0; border-radius: 7px; background: #f8fafc; padding: 0; text-align: initial; }
+.wellbore-thumbnail-figure { display: block; width: 100%; height: 280px; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 0; text-align: initial; }
 .wellbore-thumbnail-figure .well-schematic-status-head,
 .wellbore-thumbnail-figure .well-schematic-readouts { display: none; }
 .wellbore-thumbnail-figure .well-schematic-card { padding: 0; box-shadow: none; }
 .wellbore-thumbnail-figure .well-schematic-figure { border: 0; }
-.wellbore-thumbnail-figure svg { display: block; width: auto; max-width: 278px; margin: 0 auto; }
+.wellbore-thumbnail-figure svg { display: block; width: 100%; height: 100%; max-width: none; margin: 0 auto; }
 .wellbore-thumbnail-figure .wellbore-schema-overlay { position: absolute; width: 100%; max-width: none; margin: 0; }
 .wellbore-thumbnail-figure:hover { outline: 2px solid rgba(15, 118, 110, 0.18); }
 .wellbore-status-line { display: grid; grid-template-columns: auto minmax(0, 1fr) 1px auto minmax(0, 1fr); align-items: center; gap: 7px; min-height: 32px; margin-top: 7px; border: 1px solid #e2e8f0; border-left: 3px solid #0f766e; border-radius: 7px; padding: 5px 8px; white-space: nowrap; }
@@ -2722,6 +2726,10 @@ body {
 .wellbore-status-line span { color: #64748b; font-size: 9px; }
 .wellbore-status-line strong { min-width: 0; overflow: hidden; color: #0f172a; font-size: 10px; text-overflow: ellipsis; }
 .wellbore-status-line i { width: 1px; height: 14px; background: #e2e8f0; }
+.wellbore-thumbnail-readouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-top: 7px; overflow: hidden; border: 1px solid #dbe2ea; border-left: 3px solid #0f766e; border-radius: 7px; background: #e2e8f0; }
+.wellbore-thumbnail-readouts div { min-width: 0; background: #fff; padding: 6px 7px; }
+.wellbore-thumbnail-readouts span { display: block; color: #64748b; font-size: 8.5px; }
+.wellbore-thumbnail-readouts strong { display: block; min-width: 0; overflow: hidden; margin-top: 2px; color: #0f172a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .wellbore-status-card { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 3px 8px; margin-top: 8px; border: 1px solid #e2e8f0; border-left: 3px solid #0f766e; border-radius: 7px; padding: 8px 9px; }
 .wellbore-status-card[data-tone='warning'] { border-left-color: #d97706; }
 .wellbore-status-card[data-tone='critical'] { border-left-color: #dc2626; }
@@ -2738,7 +2746,7 @@ body {
 .wellbore-evidence-tile[data-tone='pressure'] strong { color: #0f766e; }
 .wellbore-expand-button { display: inline-flex; width: 100%; height: 34px; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; border: 1px solid #0f766e; border-radius: 7px; background: #f0fdfa; color: #0f766e; font-size: 11px; font-weight: 700; }
 
-.wellbore-detail-page { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; background: #f6f8fb; padding: 8px; }
+.wellbore-detail-page { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: auto; background: #f6f8fb; padding: 8px; }
 .wellbore-detail-toolbar { display: flex; min-height: 42px; align-items: center; gap: 12px; border: 1px solid #dbe2ea; border-radius: 8px; background: #fff; padding: 6px 10px; }
 .wellbore-back-button { height: 32px; padding: 0 10px; }
 .wellbore-detail-title { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: #475569; font-size: 11px; }
@@ -2746,6 +2754,7 @@ body {
 .wellbore-detail-title span { padding-left: 10px; border-left: 1px solid #e2e8f0; white-space: nowrap; }
 .wellbore-state-badge,
 .wellbore-mode-badge { border: 1px solid #cbd5e1; border-radius: 999px; background: #f8fafc; padding: 4px 9px; color: #334155; font-size: 10px; white-space: nowrap; }
+.wellbore-level-source { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; border: 1px solid #99f6e4; border-radius: 999px; background: #f0fdfa; padding: 5px 9px; color: #0f766e; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .wellbore-state-badge[data-tone='critical'] { border-color: #fca5a5; background: #fff7f7; color: #dc2626; }
 .wellbore-state-badge[data-tone='warning'],
 .wellbore-mode-badge { border-color: #fdba74; background: #fffaf0; color: #c2410c; }
@@ -2754,18 +2763,18 @@ body {
 .wellbore-preview-levels button:hover,
 .wellbore-preview-levels button.is-active { background: #334155; color: #fff; box-shadow: 0 2px 8px rgba(51, 65, 85, 0.18); }
 .wellbore-online { display: none; }
-.wellbore-detail-grid { display: grid; min-height: 0; flex: 1 1 auto; gap: 8px; margin-top: 8px; overflow: hidden; align-items: stretch; }
-.wellbore-detail-main { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
-.wellbore-detail-figure { width: 100%; height: 100%; min-height: 620px; border: 1px solid #dde5ec; border-radius: 12px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+.wellbore-detail-grid { display: grid; min-height: 0; flex: 1 1 auto; gap: 8px; margin-top: 8px; overflow: visible; align-items: stretch; }
+.wellbore-detail-main { display: flex; min-width: 0; min-height: 0; overflow: visible; }
+.wellbore-detail-figure { width: 100%; height: clamp(560px, calc(100dvh - 154px), 820px); min-height: 0; border: 1px solid #dde5ec; border-radius: 12px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
 .wellbore-detail-figure img { object-fit: contain; object-position: center; }
 .wellbore-hifi-figure { position: relative; display: flex; width: 100%; height: 100%; min-height: 620px; align-items: center; justify-content: center; border-radius: 12px; overflow: hidden; background: #ffffff; }
 .wellbore-hifi-base { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center center; pointer-events: none; user-select: none; }
 .wellbore-hifi-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .wellbore-schema-figure { position: relative; display: flex; width: 100%; height: 100%; min-height: 238px; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: #ffffff; }
-.wellbore-schema-figure-detail { min-height: 620px; border-radius: 12px; }
+.wellbore-schema-figure-detail { min-height: 0; border-radius: 12px; }
 .wellbore-schema-base { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center center; pointer-events: none; user-select: none; }
 .wellbore-schema-overlay { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
-.wellbore-schema-figure-thumbnail .wellbore-schema-overlay { transform: scale(1.02); }
+.wellbore-schema-figure-thumbnail .wellbore-schema-overlay { transform: none; }
 .wellbore-flow-path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 8; animation: wellboreDashFlow 1.8s linear infinite; }
 .wellbore-flow-path-normal { stroke: rgba(20, 184, 166, 0.6); stroke-width: 2; }
 .wellbore-flow-motion-guide { stroke-dasharray: none; opacity: 0.18; animation: none; }
@@ -2793,6 +2802,7 @@ body {
 .wellbore-local-inset { filter: drop-shadow(0 8px 18px rgba(127, 29, 29, 0.08)); }
 .wellbore-kick-tag { filter: drop-shadow(0 5px 12px rgba(127, 29, 29, 0.07)); }
 .wellbore-structure-labels { opacity: 0.78; }
+.wellbore-engineering-callouts text { paint-order: stroke; stroke: rgba(255, 255, 255, 0.96); stroke-width: 2.8px; stroke-linejoin: round; }
 .wellbore-kick-pulse { transform-box: fill-box; transform-origin: center; animation: wellborePulse 1.6s ease-in-out infinite; }
 .wellbore-bit-pulse { transform-box: fill-box; transform-origin: center; animation: wellboreBitPulse 2.4s ease-in-out infinite; }
 .wellbore-status-breathe { animation: wellboreStatusBreathe 3s ease-in-out infinite; }
@@ -2816,7 +2826,7 @@ body {
 .well-schematic-legend .legend-return { border-top-color: #0d9488; }
 .well-schematic-legend .legend-watch { border-top-color: #f59e0b; }
 .well-schematic-legend .legend-influx { width: 7px; height: 7px; border: 0; border-radius: 999px; background: #dc2626; }
-.wellbore-detail-side { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto auto auto auto; align-content: start; gap: 7px; overflow: hidden; }
+.wellbore-detail-side { display: grid; min-width: 0; min-height: 0; max-height: clamp(560px, calc(100dvh - 154px), 820px); grid-template-rows: auto auto auto auto; align-content: start; gap: 7px; overflow-x: hidden; overflow-y: auto; padding-right: 2px; }
 .wellbore-detail-card { padding: 9px 10px; }
 .wellbore-detail-card[data-tone='critical'] { border-top: 2px solid #dc2626; }
 .wellbore-detail-card[data-tone='warning'] { border-top: 2px solid #d97706; }
@@ -4346,12 +4356,212 @@ body {
 .event-projection-row > b { display: flex; align-items: center; padding: 4px 8px; border-right: 1px solid #e2e8f0; color: #475569; background: rgba(241, 245, 249, .8); }
 .event-projection-row > div { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 3px 6px; }
 .event-projection-row span, .event-projection-row em { flex: 0 0 auto; border: 1px solid #dbe3ea; border-radius: 4px; background: #fff; padding: 2px 6px; color: #475569; font-style: normal; white-space: nowrap; }
-.event-projection-row span.is-warning { border-color: #fdba74; background: #fff7ed; color: #c2410c; }
-.event-projection-row span.is-critical { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
-.event-projection-row span.is-recovering { border-color: #67e8f9; background: #ecfeff; color: #0e7490; }
-.event-projection-row span.is-hypothesis { border-color: #a5b4fc; background: #eef2ff; color: #4338ca; }
+.event-projection-row span.is-warning { border-color: #f97316; background: #ffedd5; color: #9a3412; }
+.event-projection-row span.is-critical { border-color: #ef4444; background: #fee2e2; color: #991b1b; }
+.event-projection-row span.is-recovering { border-color: #06b6d4; background: #cffafe; color: #155e75; }
+.event-projection-row span.is-hypothesis { border-color: #818cf8; background: #e0e7ff; color: #3730a3; }
 .dark .event-projection-lanes { border-color: #334155; background: #0f172a; color: #cbd5e1; }
 .dark .event-projection-head, .dark .event-projection-row > b { border-color: #334155; background: #111827; color: #cbd5e1; }
 .dark .event-projection-row { border-color: #273449; }
 .dark .event-projection-row > b { border-right-color: #334155; }
 .dark .event-projection-row span, .dark .event-projection-row em { border-color: #334155; background: #111827; color: #cbd5e1; }
+.dark .event-projection-row span.is-warning { border-color: #fb923c; background: #7c2d12; color: #ffedd5; }
+.dark .event-projection-row span.is-critical { border-color: #f87171; background: #7f1d1d; color: #fee2e2; }
+.dark .event-projection-row span.is-recovering { border-color: #22d3ee; background: #164e63; color: #cffafe; }
+.dark .event-projection-row span.is-hypothesis { border-color: #a5b4fc; background: #312e81; color: #e0e7ff; }
+
+/* Compact multi-well overview: keep operational controls without repeating status data. */
+.multiwell-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+
+.multiwell-card {
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 5px 16px rgba(15, 23, 42, 0.055);
+}
+
+.multiwell-card h2 { font-size: 16px; }
+.multiwell-card-top { grid-template-columns: minmax(0, 1fr) auto 28px; gap: 6px; }
+.multiwell-card .dashboard-chip { min-height: 21px; padding: 0 7px; font-size: 9.5px; }
+.multiwell-icon-button { width: 28px; height: 28px; }
+
+.multiwell-card-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 9px;
+  border-radius: 8px;
+}
+
+.multiwell-card-metric {
+  min-height: 48px;
+  padding: 7px 8px;
+  border-top: 0 !important;
+  border-left: 1px solid rgba(226, 232, 240, 0.92) !important;
+}
+
+.multiwell-card-metric:first-child { border-left: 0 !important; }
+.multiwell-card-metric:nth-child(odd) { border-left: 0 !important; }
+.multiwell-card-metric:nth-child(n + 3) { border-top: 1px solid rgba(226, 232, 240, 0.92) !important; }
+.multiwell-card-metric-head svg { width: 11px; height: 11px; }
+.multiwell-card-metric-head span { font-size: 9px; }
+.multiwell-card-metric strong { margin-top: 5px; font-size: 12px; }
+.multiwell-card-metric[data-emphasis='true'] strong { font-size: 15px; }
+
+.multiwell-card-sample {
+  display: grid;
+  grid-template-columns: 14px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  color: #64748b;
+  font-size: 9.5px;
+}
+
+.multiwell-card-sample strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiwell-mode-panel-compact {
+  grid-template-columns: minmax(116px, 0.9fr) minmax(0, 1.1fr);
+  align-items: end;
+  gap: 6px;
+  min-height: 0;
+  margin-top: 7px;
+  padding: 8px;
+}
+
+.multiwell-mode-panel-compact .multiwell-mode-field { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+.multiwell-mode-panel-history { grid-template-columns: 88px minmax(0, 1fr); align-items: end; }
+.multiwell-mode-panel-compact .multiwell-mode-field > span { overflow: visible; font-size: 10px; line-height: 1.2; text-overflow: clip; white-space: normal; }
+.multiwell-mode-panel-compact .multiwell-mode-control { min-height: 30px; padding: 0 7px; font-size: 11px; }
+.multiwell-mode-panel-compact .multiwell-date-control .multiwell-mode-control { padding-right: 28px; font-size: 10.5px; letter-spacing: -0.02em; }
+.multiwell-mode-panel-compact .multiwell-date-control svg { right: 7px; width: 13px; height: 13px; }
+.multiwell-mode-panel-compact .multiwell-date-control input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }
+.multiwell-mode-panel-compact .multiwell-mode-field small { grid-column: 1; font-size: 8.5px; }
+.multiwell-mode-panel-compact .multiwell-mode-realtime-copy { align-self: center; overflow: visible; padding: 0 1px; font-size: 9.5px; line-height: 1.25; text-overflow: clip; white-space: normal; }
+.multiwell-card-progress { margin-top: 6px; padding: 4px 7px; }
+
+.multiwell-card-toolbar {
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.multiwell-card-action,
+.multiwell-card-action-primary { min-height: 31px; font-size: 10.5px; }
+.multiwell-card-action svg { width: 14px; height: 14px; }
+
+.dark .multiwell-card-sample strong { color: #e2e8f0; }
+.dark .multiwell-card-metric { border-left-color: rgba(51, 65, 85, 0.86) !important; }
+.dark .multiwell-card-metric:nth-child(n + 3) { border-top-color: rgba(51, 65, 85, 0.86) !important; }
+
+@media (max-width: 1320px) {
+  .multiwell-card-grid { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+}
+
+@media (max-width: 1023px) {
+  .wellbore-detail-grid { grid-template-columns: 1fr; }
+  .wellbore-detail-figure { height: min(760px, calc(100dvh - 150px)); min-height: 560px; }
+  .wellbore-detail-side { max-height: none; overflow: visible; }
+}
+
+@media (max-width: 640px) {
+  .wellbore-detail-toolbar { flex-wrap: wrap; }
+  .wellbore-level-source { width: 100%; justify-content: center; }
+  .wellbore-detail-figure { height: 580px; min-height: 580px; }
+  .wellbore-thumbnail-figure { height: 260px; }
+  .multiwell-mode-panel-compact { grid-template-columns: 1fr; }
+}
+
+/* Wellbore detail: one compact operator overview with no side-panel pagination. */
+.wellbore-detail-page { overflow: hidden; padding: 8px; }
+.wellbore-detail-toolbar { min-height: 44px; gap: 10px; padding: 5px 9px; }
+.wellbore-detail-title-compact { gap: 7px 10px; }
+.wellbore-detail-title-compact strong { font-size: 15px; }
+.wellbore-detail-title-compact span { padding-left: 10px; font-weight: 700; }
+.wellbore-detail-title-compact small { color: #64748b; font-size: 10px; white-space: nowrap; }
+.wellbore-detail-grid { overflow: hidden; }
+.wellbore-detail-side { display: block; height: clamp(560px, calc(100dvh - 154px), 820px); max-height: none; overflow: hidden; padding: 0; }
+.wellbore-detail-side-card { display: flex; height: 100%; box-sizing: border-box; flex-direction: column; justify-content: flex-start; gap: 8px; overflow: hidden; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; padding: 10px; }
+.wellbore-detail-side-card[data-tone='warning'] { border-top: 2px solid #d97706; }
+.wellbore-detail-side-card[data-tone='critical'] { border-top: 2px solid #dc2626; }
+.wellbore-detail-summary-top { display: grid; min-height: 58px; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 9px; }
+.wellbore-detail-summary-top .wellbore-status-hero { display: grid; grid-template-columns: 1fr; gap: 4px; margin: 0; padding: 6px; text-align: center; }
+.wellbore-detail-summary-top .wellbore-status-hero span { height: 28px; font-size: 13px; }
+.wellbore-detail-summary-top .wellbore-status-hero strong { font-size: 12px; }
+.wellbore-detail-side-card dl { margin: 0; }
+.wellbore-detail-side-card dl div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 5px; padding: 2px 0; border-bottom: 1px solid #f1f5f9; font-size: 9px; }
+.wellbore-detail-side-card dt { color: #64748b; }
+.wellbore-detail-side-card dd { min-width: 0; margin: 0; overflow: hidden; color: #0f172a; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.wellbore-detail-summary-copy { min-height: 24px; margin: -2px 0 0; color: #64748b; font-size: 9px; line-height: 1.35; }
+.wellbore-detail-section-head { display: flex; min-height: 16px; align-items: center; justify-content: space-between; gap: 7px; }
+.wellbore-detail-section-head h2 { display: flex; align-items: center; gap: 5px; margin: 0; color: #0f172a; font-size: 11px; }
+.wellbore-detail-section-head > span { color: #64748b; font-size: 8.5px; white-space: nowrap; }
+.wellbore-detail-side-card .wellbore-detail-evidence { gap: 5px; }
+.wellbore-detail-side-card .wellbore-detail-evidence article { min-height: 55px; padding: 5px 6px; }
+.wellbore-detail-side-card .wellbore-detail-evidence strong { margin: 3px 0 2px 21px; font-size: 13px; }
+.wellbore-detail-side-card .wellbore-detail-evidence footer { padding-top: 3px; }
+.wellbore-detail-side-card .wellbore-detail-evidence footer span:last-child { display: none; }
+.wellbore-detail-insights { display: grid; height: 300px; flex: 0 0 300px; grid-template-columns: 1fr; grid-template-rows: minmax(0, 1.2fr) minmax(0, 1fr); gap: 6px; }
+.wellbore-detail-insights > section { display: flex; min-width: 0; min-height: 0; flex-direction: column; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; padding: 6px; }
+.wellbore-detail-insights .wellbore-trend-grid { display: grid; min-height: 0; flex: 1 1 auto; grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.wellbore-detail-insights .wellbore-trend-grid > div { display: flex; min-height: 0; flex-direction: column; justify-content: space-between; padding: 5px; }
+.wellbore-detail-insights .wellbore-mini-sparkline { height: 42px; }
+.wellbore-detail-insights .wellbore-event-list { min-height: 0; flex: 1 1 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.wellbore-detail-insights .wellbore-event-list span { display: flex; align-items: center; padding: 5px; font-size: 8.5px; }
+.wellbore-action-list { display: grid; gap: 3px; margin: 4px 0 0; padding-left: 14px; color: #475569; font-size: 8.5px; line-height: 1.3; }
+.wellbore-detail-insights .wellbore-timeline { gap: 3px; margin-top: 4px; }
+.wellbore-detail-insights .wellbore-timeline > div { grid-template-columns: 8px 32px minmax(0, 1fr); gap: 4px; font-size: 8.5px; }
+.wellbore-detail-data-strip { display: grid; min-height: 78px; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; border: 1px solid #dbe2ea; border-radius: 7px; background: #e2e8f0; }
+.wellbore-detail-data-strip > div { min-width: 0; background: #fff; padding: 5px 6px; }
+.wellbore-detail-data-strip span, .wellbore-detail-data-strip strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wellbore-detail-data-strip span { color: #64748b; font-size: 8px; }
+.wellbore-detail-data-strip strong { margin-top: 2px; color: #0f172a; font-size: 9px; }
+.wellbore-detail-side-card .wellbore-detail-note { margin-top: 0; border: 0; border-top: 1px solid #e2e8f0; border-radius: 0; background: transparent; padding: 5px 0 0; }
+
+@media (max-width: 1023px) {
+  .wellbore-detail-page { overflow: auto; }
+  .wellbore-detail-side { height: auto; overflow: visible; }
+  .wellbore-detail-side-card { height: auto; overflow: visible; }
+}
+
+/* Wellbore workspace: keep the engineering drawing readable without shrinking the operator panel. */
+@media (min-width: 1261px) {
+  .wellbore-detail-grid {
+    grid-template-columns: minmax(620px, 1fr) clamp(400px, 25vw, 480px);
+    gap: 10px;
+  }
+
+  .wellbore-detail-figure,
+  .wellbore-detail-side {
+    height: clamp(600px, calc(100dvh - 148px), 840px);
+  }
+
+  .wellbore-schema-figure-detail {
+    padding-inline: clamp(0px, 1vw, 16px);
+  }
+
+  .wellbore-detail-side-card { padding: 11px; gap: 9px; }
+  .wellbore-detail-summary-top { min-height: 62px; grid-template-columns: 78px minmax(0, 1fr); }
+  .wellbore-detail-side-card dl div { padding: 2.5px 0; font-size: 9.5px; }
+  .wellbore-detail-side-card .wellbore-detail-evidence article { min-height: 59px; padding: 6px 7px; }
+  .wellbore-detail-side-card .wellbore-detail-evidence strong { font-size: 14px; }
+  .wellbore-detail-insights { height: 310px; flex-basis: 310px; }
+  .wellbore-detail-data-strip { min-height: 80px; }
+}
+
+@media (max-width: 1260px) {
+  .wellbore-detail-page { height: auto; overflow: auto; }
+  .wellbore-detail-grid { grid-template-columns: 1fr; overflow: visible; }
+  .wellbore-detail-figure { height: clamp(560px, 72dvh, 740px); }
+  .wellbore-detail-side { height: auto; max-height: none; overflow: visible; }
+  .wellbore-detail-side-card { height: auto; overflow: visible; }
+}

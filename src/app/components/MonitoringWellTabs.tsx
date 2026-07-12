@@ -11,6 +11,8 @@ function safeLevel(value: unknown) {
 function statusLabel(status?: string) {
   if (status === 'connected') return '在线';
   if (status === 'connecting') return '接入中';
+  if (status === 'reconnecting') return '重连中';
+  if (status === 'catchingUp') return '补齐中';
   if (status === 'error') return '离线';
   return '待启动';
 }
@@ -51,7 +53,15 @@ export function MonitoringWellTabs({ className = '', rightSlot }: { className?: 
           const active = selectedWellId === well.wellId;
           const level = safeLevel(runtime?.backendLevel);
           const status = statusLabel(runtime?.status);
-          const dot = level >= 4 ? 'bg-red-500' : level >= 2 ? 'bg-amber-500' : runtime?.status === 'connected' ? 'bg-emerald-500' : 'bg-slate-400';
+          const dot = level >= 4
+            ? 'bg-red-500'
+            : level >= 2
+              ? 'bg-amber-500'
+              : runtime?.status === 'connected'
+                ? 'bg-emerald-500'
+                : runtime?.status === 'connecting' || runtime?.status === 'reconnecting' || runtime?.status === 'catchingUp'
+                  ? 'bg-cyan-500'
+                  : 'bg-slate-400';
           return (
             <button
               key={well.wellId}

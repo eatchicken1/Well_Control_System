@@ -453,12 +453,24 @@ function VerticalTrack({
       const y1 = yForIndex(band.start);
       const y2 = yForIndex(Math.min(points.length - 1, band.end + 1));
       const height = Math.max(2, y2 - y1);
-      ctx.fillStyle = band.level >= 4
-        ? 'rgba(239, 68, 68, 0.075)'
+      const bandColor = band.level >= 4
+        ? (isDark ? 'rgba(248, 113, 113, 0.24)' : 'rgba(239, 68, 68, 0.16)')
         : band.level >= 3
-          ? 'rgba(249, 115, 22, 0.045)'
-          : 'rgba(245, 158, 11, 0.032)';
+          ? (isDark ? 'rgba(251, 146, 60, 0.20)' : 'rgba(249, 115, 22, 0.13)')
+          : (isDark ? 'rgba(251, 191, 36, 0.16)' : 'rgba(245, 158, 11, 0.10)');
+      const edgeColor = band.level >= 4
+        ? (isDark ? 'rgba(252, 165, 165, 0.92)' : 'rgba(220, 38, 38, 0.82)')
+        : band.level >= 3
+          ? (isDark ? 'rgba(253, 186, 116, 0.88)' : 'rgba(234, 88, 12, 0.76)')
+          : (isDark ? 'rgba(253, 224, 71, 0.82)' : 'rgba(202, 138, 4, 0.70)');
+      ctx.fillStyle = bandColor;
       ctx.fillRect(plotX, y1, plotW, height);
+      ctx.strokeStyle = edgeColor;
+      ctx.lineWidth = 1.15;
+      ctx.beginPath();
+      ctx.moveTo(plotX, y1 + 0.5);
+      ctx.lineTo(plotX + plotW, y1 + 0.5);
+      ctx.stroke();
     });
 
     ctx.lineWidth = 0.7;

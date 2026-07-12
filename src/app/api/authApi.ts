@@ -1,4 +1,4 @@
-import { authHeaders, clearAuthTokens, getRefreshToken, setAuthTokens } from './authToken';
+import { authHeaders, authenticatedFetchWithRefresh, clearAuthTokens, getRefreshToken, setAuthTokens, unauthenticatedFetch } from './authToken';
 
 export interface AuthUser {
   id: string;
@@ -10,7 +10,7 @@ export interface AuthUser {
 }
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
+  const response = await authenticatedFetchWithRefresh(url, {
     ...init,
     credentials: 'same-origin',
     headers: {
@@ -53,10 +53,13 @@ export async function changePassword(oldPassword: string, newPassword: string, c
 }
 
 export async function refreshToken() {
-  const data = await apiJson<{ ok: boolean; user: AuthUser; accessToken: string; refreshToken: string }>('/api/auth/refresh', {
+  const response = await unauthenticatedFetch('/api/auth/refresh', {
     method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-wcs-csrf': '1' },
     body: JSON.stringify({ refreshToken: getRefreshToken() }),
   });
+  const data = await response.json().catch(() => ({})) as { ok?: boolean; user: AuthUser; accessToken: string; refreshToken: string; error?: string };
+  if (!response.ok || !data.accessToken || !data.refreshToken) throw new Error(data.error || `HTTP ${response.status}`);
   setAuthTokens(data.accessToken, data.refreshToken);
   return data.user;
 }

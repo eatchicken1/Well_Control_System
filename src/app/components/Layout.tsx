@@ -62,7 +62,7 @@ function DataSourcePill({
     ? 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
     : effectiveStatus === 'connected'
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/25 dark:text-emerald-200'
-    : effectiveStatus === 'connecting'
+    : effectiveStatus === 'connecting' || effectiveStatus === 'reconnecting' || effectiveStatus === 'catchingUp'
       ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200'
       : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300';
   return (
@@ -70,7 +70,7 @@ function DataSourcePill({
       <RadioTower className="h-3.5 w-3.5 shrink-0" />
       <div className="min-w-0">
         <div className="truncate">{effectiveStatus === 'connected' ? '真实数据' : '数据源'}</div>
-        <div className="truncate text-[10px] opacity-70">{isStopped ? '已停' : effectiveStatus === 'connected' ? '已连接' : effectiveStatus === 'connecting' ? '接入中' : effectiveStatus === 'paused' ? '待启动' : '离线'} · {state.recordCount}</div>
+        <div className="truncate text-[10px] opacity-70">{isStopped ? '已停' : effectiveStatus === 'connected' ? '已连接' : effectiveStatus === 'connecting' ? '接入中' : effectiveStatus === 'reconnecting' ? '重连中' : effectiveStatus === 'catchingUp' ? '补齐中' : effectiveStatus === 'paused' ? '待启动' : '离线'} · {state.recordCount}</div>
       </div>
     </div>
   );
@@ -92,6 +92,8 @@ function qualityLabel(grade?: string) {
 function statusLabel(status: string) {
   if (status === 'connected') return '在线';
   if (status === 'connecting') return '接入中';
+  if (status === 'reconnecting') return '重连中';
+  if (status === 'catchingUp') return '补齐中';
   if (status === 'paused') return '待启动';
   if (status === 'error') return '离线';
   return '未知';
@@ -301,17 +303,25 @@ export function Layout() {
     selectedWellRuntime?.isRunning
     || selectedWellRuntime?.status === 'connected'
     || selectedWellRuntime?.status === 'connecting'
+    || selectedWellRuntime?.status === 'reconnecting'
+    || selectedWellRuntime?.status === 'catchingUp'
     || dataSourceState.status === 'connected'
-    || dataSourceState.status === 'connecting')
+    || dataSourceState.status === 'connecting'
+    || dataSourceState.status === 'reconnecting'
+    || dataSourceState.status === 'catchingUp')
   );
   const selectedWellIsRecovering = !latestSampleTime && flowHistory.length === 0 && historyRecords.length === 0 && Boolean(
     !selectedWellManuallyStopped && (
     selectedWellRuntime?.status === 'connecting'
+    || selectedWellRuntime?.status === 'reconnecting'
+    || selectedWellRuntime?.status === 'catchingUp'
     || selectedWellRuntime?.isRunning
     || selectedWellRuntime?.startedSampleTime
     || selectedWellRuntime?.lastRecordAt
     || selectedWellView.fromSnapshotFallback
-    || dataSourceState.status === 'connecting')
+    || dataSourceState.status === 'connecting'
+    || dataSourceState.status === 'reconnecting'
+    || dataSourceState.status === 'catchingUp')
   );
 
   const statusColors = {
@@ -320,15 +330,12 @@ export function Layout() {
     critical: 'bg-red-500',
   };
   const backendLevel = safeBackendLevel(backendDetection.publicLevel);
-  const previewParams = new URLSearchParams(location.search);
-  const previewMode = location.pathname.includes('/monitoring/wellbore-status') && previewParams.has('preview');
-  const displayBackendLevel = previewMode ? safeBackendLevel(previewParams.get('level')) : backendLevel;
-  const displayAlertStatus = displayBackendLevel >= 4 ? 'critical' : displayBackendLevel >= 2 ? 'warning' : 'normal';
-  const backendMeta = BACKEND_LEVEL_META[displayBackendLevel];
+  const displayAlertStatus = backendLevel >= 4 ? 'critical' : backendLevel >= 2 ? 'warning' : 'normal';
+  const backendMeta = BACKEND_LEVEL_META[backendLevel];
   const sidebarWidth = sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[232px]';
   const isMonitoringRoute = location.pathname === '/monitoring';
   const currentWellBadge = `${wellInfo.wellName} · ${wellInfo.block || '实时监测井'}`;
-  const topbarBackendChip = <HeaderBackendLevelChip detection={previewMode ? { ...backendDetection, publicLevel: displayBackendLevel, reason: `井筒预览模式 L${displayBackendLevel} ${backendMeta.label}` } : backendDetection} />;
+  const topbarBackendChip = <HeaderBackendLevelChip detection={backendDetection} />;
   const topbarDataChip = <DataSourcePill state={dataSourceState} isStopped={selectedWellManuallyStopped} />;
   const showFleetStrip = false;
   const showOperationsStrip = isMonitoringRoute;
@@ -369,10 +376,10 @@ export function Layout() {
           <div className={`control-tower-status-card rounded-md border p-2 shadow-inner ${sidebarCollapsed ? 'control-tower-status-card-collapsed flex justify-center' : ''}`}>
             <div className={`flex items-center gap-2 ${sidebarCollapsed ? 'justify-center' : ''}`}>
               <div className={`ops-led h-2.5 w-2.5 rounded-full ${statusColors[displayAlertStatus]}`} data-state={displayAlertStatus} />
-              <span className={`text-xs text-slate-700 dark:text-slate-200 ${sidebarCollapsed ? 'hidden' : ''}`}>L{displayBackendLevel} {backendMeta.shortLabel}</span>
+              <span className={`text-xs text-slate-700 dark:text-slate-200 ${sidebarCollapsed ? 'hidden' : ''}`}>L{backendLevel} {backendMeta.shortLabel}</span>
               {!selectedWellIsRunning && !sidebarCollapsed && <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">{selectedWellManuallyStopped ? '已停' : '待启动'}</span>}
             </div>
-            <BackendLevelDots level={displayBackendLevel} collapsed={sidebarCollapsed} />
+            <BackendLevelDots level={backendLevel} collapsed={sidebarCollapsed} />
           </div>
           {shutInActive && !sidebarCollapsed && (
             <div className="mt-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-700">

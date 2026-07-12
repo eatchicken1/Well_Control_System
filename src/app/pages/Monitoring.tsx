@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { VerticalCurveDeck } from '../components/VerticalCurveDeck';
-import { EventProjectionLanes } from '../components/EventProjectionLanes';
 import { WellboreStatusThumbnail } from '../components/WellboreStatusThumbnail';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
@@ -172,7 +171,6 @@ export default function Monitoring() {
     selectedWellView,
     selectedWellManuallyStopped,
     eventSpans,
-    lifecycleNodes,
     eventProjectionState,
   } = useWellControl();
   const activeWellIds = monitoredWellIds.length > 0
@@ -198,6 +196,8 @@ export default function Monitoring() {
       || selectedRuntime?.isRunning
       || selectedRuntime?.status === 'connected'
       || selectedRuntime?.status === 'connecting'
+      || selectedRuntime?.status === 'reconnecting'
+      || selectedRuntime?.status === 'catchingUp'
     ),
   );
   const stopButtonText = selectedWellManuallyStopped
@@ -219,6 +219,8 @@ export default function Monitoring() {
   const isRecovering = !hasSamples && Boolean(
     !selectedWellManuallyStopped && (
     selectedRuntime?.status === 'connecting'
+    || selectedRuntime?.status === 'reconnecting'
+    || selectedRuntime?.status === 'catchingUp'
     || selectedRuntime?.isRunning
     || selectedRuntime?.startedSampleTime
     || selectedRuntime?.lastRecordAt)
@@ -274,12 +276,6 @@ export default function Monitoring() {
                   eventProjectionState={eventProjectionState}
                 />
               </div>
-              <EventProjectionLanes
-                eventSpans={eventSpans}
-                lifecycleNodes={lifecycleNodes}
-                hypothesisState={viewCycleInfo.hypothesisState}
-                projectionState={eventProjectionState}
-              />
             </div>
           </section>
 

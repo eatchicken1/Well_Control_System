@@ -1,16 +1,19 @@
 import type { BackendLevel, CycleInfo } from '../context/WellControlContext';
-import { buildWellboreSimulationModel, type WellboreSimulationModel, type WellboreTone } from '../lib/wellboreSimulation';
+import { buildWellboreSimulationModel, type WellboreSimulationModel, type WellboreStructureSection, type WellboreTone } from '../lib/wellboreSimulation';
 
 interface WellboreSchemaFigureProps {
   mode?: 'thumbnail' | 'detail';
   backendLevel: BackendLevel;
   wellDepth?: number;
   bitDepth?: number;
+  casingShoeDepth?: number;
   drillPipeOD?: number;
   bhaOD?: number;
   bitOD?: number;
   casingID?: number;
   openHoleDiameter?: number;
+  formation?: string;
+  wellboreSections?: WellboreStructureSection[];
   flowIn: number;
   flowOut: number;
   spm?: number;
@@ -68,7 +71,7 @@ type WellboreVisualState = {
   animationIntensity: 'none' | 'low' | 'medium' | 'high';
 };
 
-const DETAIL: Geometry = { viewBox: '0 0 660 640', width: 660, height: 640, top: 78, bottom: 584, centerX: 282, axisX: 38, labelX: 418, formationX: 536, formationW: 46, scale: 1.68 };
+const DETAIL: Geometry = { viewBox: '0 0 660 640', width: 660, height: 640, top: 56, bottom: 584, centerX: 282, axisX: 38, labelX: 418, formationX: 536, formationW: 46, scale: 1.68 };
 const THUMB: Geometry = { viewBox: '0 0 520 640', width: 520, height: 640, top: 70, bottom: 584, centerX: 246, axisX: 48, labelX: 354, formationX: 416, formationW: 44, scale: 0.64 };
 
 const LEVEL_LABEL: Record<BackendLevel, string> = { 0: '正常循环', 1: '异常观察', 2: '溢流预警', 3: '疑似溢流', 4: '溢流确认' };
@@ -91,7 +94,6 @@ function hydraulicWidth(width: number, g: Geometry, kind: 'bore' | 'pipe' | 'bha
 }
 function depth(value: number) { return `${Math.round(value)} m`; }
 function short(value: string, max = 18) { return value.length > max ? `${value.slice(0, max - 2)}...` : value; }
-function levelColor(level: BackendLevel) { if (level >= 4) return '#dc2626'; if (level >= 2) return '#ef4444'; if (level === 1) return '#f97316'; return '#0f766e'; }
 function toneColor(tone: WellboreTone) { if (tone === 'critical') return '#dc2626'; if (tone === 'warning') return '#ef4444'; if (tone === 'watch') return '#f97316'; return '#0f766e'; }
 
 function sectionLanes(model: WellboreSimulationModel, g: Geometry) {
@@ -159,22 +161,17 @@ function Defs({ id }: { id: string }) {
   );
 }
 
-function Header() {
-  return (
-    <g fontFamily="Microsoft YaHei, PingFang SC, Arial">
-      <text x="38" y="42" fill="#0f172a" fontSize="15" fontWeight="800">井筒工程剖面</text>
-      <text x="38" y="61" fill="#64748b" fontSize="9.5">固定井身结构底图 · 状态仅通过流动与风险覆盖层表达</text>
-    </g>
-  );
-}
-
 function Axis({ model, g, compact }: { model: WellboreSimulationModel; g: Geometry; compact: boolean }) {
   const ticks = Array.from(new Set([...Array.from({ length: Math.floor(model.wellDepth / 1000) + 1 }, (_, i) => i * 1000), Math.round(model.wellDepth)])).filter((v) => v <= model.wellDepth).sort((a, b) => a - b);
-  return <g fontFamily="Microsoft YaHei, PingFang SC, Arial" aria-label="深度轴"><line x1={g.axisX} y1={g.top} x2={g.axisX} y2={g.bottom} stroke="#64748b" strokeWidth="1.2" />{ticks.map((d) => { const y = yOf(d, model, g); return <g key={d}><line x1={g.axisX - 6} y1={y} x2={g.axisX + 6} y2={y} stroke="#64748b" /><line x1={g.axisX + 16} y1={y} x2={g.formationX + g.formationW + 12} y2={y} stroke="#cbd5e1" strokeWidth="0.7" strokeDasharray="4 7" opacity="0.68" />{!compact ? <text x={g.axisX - 10} y={y + 4} fill="#64748b" fontSize="10" textAnchor="end">{d}</text> : null}</g>; })}</g>;
+  const headingSize = compact ? '14' : '9';
+  const tickSize = compact ? '13' : '10';
+  return <g fontFamily="Microsoft YaHei, PingFang SC, Arial" aria-label="深度轴"><text x={g.axisX} y={g.top - 13} fill="#475569" fontSize={headingSize} fontWeight="700" textAnchor="middle">井深 / m</text><line x1={g.axisX} y1={g.top} x2={g.axisX} y2={g.bottom} stroke="#475569" strokeWidth="1.35" />{ticks.map((d) => { const y = yOf(d, model, g); return <g key={d}><line x1={g.axisX - 6} y1={y} x2={g.axisX + 6} y2={y} stroke="#475569" strokeWidth="1.1" /><line x1={g.axisX + 16} y1={y} x2={g.formationX + g.formationW + 12} y2={y} stroke="#cbd5e1" strokeWidth="0.7" strokeDasharray="4 7" opacity="0.68" /><text x={g.axisX - 9} y={y + 4} fill="#475569" fontSize={tickSize} fontWeight={compact ? '700' : '500'} textAnchor="end">{d}</text></g>; })}</g>;
 }
 
 function Formations({ model, g, compact, id }: { model: WellboreSimulationModel; g: Geometry; compact: boolean; id: string }) {
-  return <g aria-label="地层柱" fontFamily="Microsoft YaHei, PingFang SC, Arial"><rect x={g.formationX} y={g.top} width={g.formationW} height={g.bottom - g.top} fill="#fff" stroke="#cbd5e1" />{model.formationBands.map((band) => { const y = yOf(band.from, model, g); const h = Math.max(8, yOf(band.to, model, g) - y); return <g key={band.key}><rect x={g.formationX} y={y} width={g.formationW} height={h} fill={band.fill} /><rect x={g.formationX} y={y} width={g.formationW} height={h} fill={band.key === 'mudstone' ? `url(#shale-${id})` : `url(#sand-${id})`} opacity="0.62" />{!compact && h > 34 ? <text x={g.formationX + g.formationW / 2} y={y + Math.min(h / 2 + 4, h - 8)} fill={band.accent} fontSize="9" fontWeight="700" textAnchor="middle">{band.label}</text> : null}</g>; })}</g>;
+  const headingSize = compact ? '14' : '9';
+  const labelSize = compact ? '12' : '9';
+  return <g aria-label="地层柱" fontFamily="Microsoft YaHei, PingFang SC, Arial"><text x={g.formationX + g.formationW / 2} y={g.top - 13} fill="#475569" fontSize={headingSize} fontWeight="700" textAnchor="middle">地层</text><rect x={g.formationX} y={g.top} width={g.formationW} height={g.bottom - g.top} fill="#fff" stroke="#94a3b8" />{model.formationBands.map((band) => { const y = yOf(band.from, model, g); const h = Math.max(8, yOf(band.to, model, g) - y); return <g key={band.key}><rect x={g.formationX} y={y} width={g.formationW} height={h} fill={band.fill} /><rect x={g.formationX} y={y} width={g.formationW} height={h} fill={band.key === 'mudstone' ? `url(#shale-${id})` : `url(#sand-${id})`} opacity="0.62" />{h > (compact ? 60 : 34) ? <text x={g.formationX + g.formationW / 2} y={y + Math.min(h / 2 + 4, h - 8)} fill={band.accent} fontSize={labelSize} fontWeight="800" textAnchor="middle">{band.label}</text> : null}</g>; })}</g>;
 }
 
 function Tubulars({ model, g, id }: { model: WellboreSimulationModel; g: Geometry; id: string }) {
@@ -402,35 +399,38 @@ function Flow({ model, g, level, id, visual }: { model: WellboreSimulationModel;
 }
 
 function EngineeringCallouts({ model, g, compact }: { model: WellboreSimulationModel; g: Geometry; compact: boolean }) {
-  if (compact) return null;
   const shoeY = yOf(model.casingShoeDepth, model, g);
   const bitY = yOf(model.bitDepth, model, g);
   const tdY = yOf(model.wellDepth, model, g);
+  if (compact) {
+    return (
+      <g className="wellbore-engineering-callouts" fontFamily="Microsoft YaHei, PingFang SC, Arial">
+        <path d={`M ${g.centerX + wOf(42, g)} ${shoeY} H ${g.centerX + 66}`} stroke="#334155" strokeWidth="1.2" />
+        <text x={g.centerX + 70} y={shoeY + 5} fill="#334155" fontSize="13.5" fontWeight="800">套管鞋 {Math.round(model.casingShoeDepth)} m</text>
+        <path d={`M ${g.centerX - wOf(18, g)} ${bitY} H ${g.centerX - 62}`} stroke="#2563eb" strokeWidth="1.2" />
+        <text x={g.centerX - 66} y={bitY + 5} fill="#1d4ed8" fontSize="13.5" fontWeight="800" textAnchor="end">钻头 {Math.round(model.bitDepth)} m</text>
+      </g>
+    );
+  }
   const right = g.centerX + wOf(52, g);
   return (
     <g className="wellbore-engineering-callouts" fontFamily="Microsoft YaHei, PingFang SC, Arial">
       <path d={`M ${g.centerX + wOf(43, g)} ${shoeY} H ${right - 6}`} stroke="#475569" strokeWidth="1" />
-      <text x={right} y={shoeY + 3} fill="#475569" fontSize="8.5" fontWeight="700">技术套管鞋 {depth(model.casingShoeDepth)}</text>
-      <text x={right} y={shoeY + 18} fill="#64748b" fontSize="8">裸眼起点</text>
+      <text x={right} y={shoeY + 3} fill="#334155" fontSize="10" fontWeight="800">技术套管鞋 {depth(model.casingShoeDepth)}</text>
+      <text x={right} y={shoeY + 18} fill="#64748b" fontSize="9">裸眼起点</text>
       <path d={`M ${g.centerX - 26} ${bitY} H ${g.centerX - 76}`} stroke="#475569" strokeWidth="1" />
-      <text x={g.centerX - 80} y={bitY + 3} fill="#334155" fontSize="8.5" fontWeight="700" textAnchor="end">钻头 {depth(model.bitDepth)}</text>
+      <text x={g.centerX - 80} y={bitY + 3} fill="#1d4ed8" fontSize="10" fontWeight="800" textAnchor="end">钻头 {depth(model.bitDepth)}</text>
       <path d={`M ${g.centerX + 16} ${tdY} H ${g.centerX + 60}`} stroke="#94a3b8" strokeWidth="1" />
-      <text x={g.centerX + 66} y={tdY - 2} fill="#64748b" fontSize="8.5">TD {depth(model.wellDepth)}</text>
+      <text x={g.centerX + 66} y={tdY - 2} fill="#475569" fontSize="9.5" fontWeight="700">TD {depth(model.wellDepth)}</text>
     </g>
   );
 }
 
-function Status({ model, g, level, color, compact }: { model: WellboreSimulationModel; g: Geometry; level: BackendLevel; color: string; compact: boolean }) {
-  if (!compact) return null;
-  const x = compact ? 22 : 34; const y = compact ? 528 : 505; return <g className="wellbore-status-breathe" fontFamily="Microsoft YaHei, PingFang SC, Arial"><rect x={x} y={y} width={compact ? 150 : 198} height={compact ? 50 : 58} rx="8" fill="#fff" stroke={color} strokeWidth="1.3" /><circle cx={x + 17} cy={y + 20} r="4.6" fill={color} /><text x={x + 31} y={y + 21} fill={color} fontSize={compact ? '10' : '12'} fontWeight="800">L{level} {LEVEL_LABEL[level]}</text><text x={x + 13} y={y + 40} fill="#475569" fontSize={compact ? '8.5' : '9.5'}>{short(model.conditionLabel, compact ? 13 : 18)}</text>{!compact ? <text x={x + 13} y={y + 52} fill="#64748b" fontSize="8.5">{short(model.statusDescription, 24)}</text> : null}</g>;
-}
-
-export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDepth, bitDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, flowIn, flowOut, spm = 0, casingPressure, drillPipePressure, pitGain, pitVolume, returnResponse = 0, totalGas = 0, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals = [], pumpState, condition, cycleInfo, hasSamples = true, isRecovering = false, isStopped = false }: WellboreSchemaFigureProps) {
-  const model = buildWellboreSimulationModel({ backendLevel, flowIn, flowOut, returnResponse, pitGain, pitVolume: pitVolume ?? pitGain, drillPipePressure, casingPressure, totalGas, spm, wellDepth, bitDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals, pumpState, condition, cycleInfo, hasSamples, isRecovering, isStopped });
+export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, flowIn, flowOut, spm = 0, casingPressure, drillPipePressure, pitGain, pitVolume, returnResponse = 0, totalGas = 0, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals = [], pumpState, condition, cycleInfo, hasSamples = true, isRecovering = false, isStopped = false }: WellboreSchemaFigureProps) {
+  const model = buildWellboreSimulationModel({ backendLevel, flowIn, flowOut, returnResponse, pitGain, pitVolume: pitVolume ?? pitGain, drillPipePressure, casingPressure, totalGas, spm, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals, pumpState, condition, cycleInfo, hasSamples, isRecovering, isStopped });
   const compact = mode !== 'detail';
   const g = compact ? THUMB : DETAIL;
   const id = compact ? 'thumb' : 'detail';
-  const color = levelColor(backendLevel);
   const visual = VISUAL_STATES[backendLevel];
   return (
     <div className={`wellbore-schema-figure wellbore-schema-figure-${mode}`} data-animation={visual.animationIntensity}>
@@ -439,7 +439,6 @@ export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDep
         <defs><marker id={`arrow-critical-${backendLevel}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill={visual.returnFlowColor} /></marker><marker id="arrow-influx" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill="#f97316" /></marker></defs>
         <rect width="100%" height="100%" fill={`url(#panel-${id})`} />
         <rect x={compact ? 14 : 24} y={compact ? 16 : 18} width={g.width - (compact ? 28 : 48)} height={g.height - (compact ? 32 : 36)} rx="10" fill={`url(#grid-${id})`} opacity="0.24" />
-        {!compact ? <Header /> : null}
         <Axis model={model} g={g} compact={compact} />
         <Formations model={model} g={g} compact={compact} id={id} />
         <Tubulars model={model} g={g} id={id} />
@@ -451,7 +450,6 @@ export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDep
         <BitHydraulics model={model} g={g} level={backendLevel} />
         <Flow model={model} g={g} level={backendLevel} id={id} visual={visual} />
         <EngineeringCallouts model={model} g={g} compact={compact} />
-        <Status model={model} g={g} level={backendLevel} color={color} compact={compact} />
       </svg>
     </div>
   );

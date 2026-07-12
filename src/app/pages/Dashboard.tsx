@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Activity,
   AlertTriangle,
   ArrowRight,
-  Bell,
   CalendarDays,
   CheckCircle2,
   Clock3,
@@ -16,7 +15,6 @@ import {
   PlayCircle,
   RadioTower,
   Search,
-  SlidersHorizontal,
   Square,
   X,
 } from 'lucide-react';
@@ -49,6 +47,8 @@ function toDatetimeLocalValue(value?: string | null) {
 function statusLabel(runtime?: WellRuntimeState) {
   if (runtime?.status === 'connected') return '监测中';
   if (runtime?.status === 'connecting') return '接入中';
+  if (runtime?.status === 'reconnecting') return '重连中';
+  if (runtime?.status === 'catchingUp') return '补齐中';
   if (runtime?.status === 'error') return '离线';
   return '待启动';
 }
@@ -108,12 +108,15 @@ function runtimeProgressTone({
   return 'multiwell-card-progress-idle';
 }
 
-function runtimeDot(runtime?: WellRuntimeState) {
+function runtimeDot(runtime?: WellRuntimeState, isStopped = false) {
+  if (isStopped || runtime?.backendRuntimeStatus === 'Stopped' || runtime?.isBackendRunning === false) {
+    return 'bg-slate-400';
+  }
   const level = safeBackendLevel(runtime?.backendLevel);
   if (level >= 4) return 'bg-red-500';
   if (level >= 2) return 'bg-amber-500';
   if (runtime?.status === 'connected') return 'bg-emerald-500';
-  if (runtime?.status === 'connecting') return 'bg-cyan-500';
+  if (runtime?.status === 'connecting' || runtime?.status === 'reconnecting' || runtime?.status === 'catchingUp') return 'bg-cyan-500';
   return 'bg-slate-400';
 }
 
@@ -132,35 +135,12 @@ function cleanLayerLabel(value?: string | null) {
   return text;
 }
 
-function parseTimeMs(value?: string | null) {
-  if (!value) return Number.NaN;
-  const variants = value.includes('T') ? [value] : [value, value.replace(' ', 'T')];
-  for (const variant of variants) {
-    const parsed = new Date(variant).getTime();
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return Number.NaN;
-}
-
-function formatDuration(startedAt?: string | null, running?: boolean, tick = Date.now(), endAt?: string | null) {
-  if (!startedAt) return '--';
-  const start = parseTimeMs(startedAt);
-  if (!Number.isFinite(start)) return '--';
-  const end = running ? tick : parseTimeMs(endAt || undefined);
-  if (!Number.isFinite(end)) return '--';
-  const seconds = Math.max(0, Math.floor((end - start) / 1000));
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const rest = seconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${rest}s`;
-  return `${rest}s`;
-}
-
 function formatConnectionHint(runtime?: WellRuntimeState) {
   if (!runtime) return '等待启动';
   if (runtime.status === 'connected') return runtime.message || `已接收 ${runtime.recordCount} 帧`;
   if (runtime.status === 'connecting') return runtime.message || '正在接入检测流';
+  if (runtime.status === 'reconnecting') return runtime.message || '检测流重连中';
+  if (runtime.status === 'catchingUp') return runtime.message || '正在补齐断线期间样本';
   if (runtime.status === 'paused') return runtime.message || '待启动';
   if (runtime.status === 'error') return runtime.message || '连接异常';
   return runtime.message || '待启动';
@@ -272,20 +252,14 @@ function MonitoredWellCard({
     selectedWellView,
     openRealtimeWell,
     startWellMonitoring,
+    restartHistoryReplay,
     stopWellMonitoring,
-    pauseWellMonitoring,
     resumeWellMonitoring,
     removeMonitoredWell,
     updateWellMonitoringMode,
     updateWellReplayStartTime,
     isWellManuallyStopped,
   } = useWellControl();
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!runtime?.isRunning) return undefined;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [runtime?.isRunning]);
   const isActiveWell = selectedWellId === well.wellId;
   const activeCurrent = isActiveWell ? selectedWellView.currentData : null;
   const activeSampleTime = isActiveWell ? (selectedWellView.currentSampleTime || currentSampleTime) : currentSampleTime;
@@ -295,15 +269,14 @@ function MonitoredWellCard({
     ?? alert?.backendLevel
     ?? 0,
   );
-  const isRunning = Boolean(runtime?.isRunning || (isActiveWell && runtime?.status === 'connected'));
-  const isConnecting = runtime?.status === 'connecting';
   const isStopped = isWellManuallyStopped(well.wellId);
+  const isRunning = !isStopped && Boolean(runtime?.isRunning || (isActiveWell && runtime?.status === 'connected'));
+  const isConnecting = !isStopped && (runtime?.status === 'connecting' || runtime?.status === 'reconnecting' || runtime?.status === 'catchingUp');
   const monitoringMode = runtime?.monitoringMode || 'realtime';
   const replayStartValue = toDatetimeLocalValue(runtime?.selectedReplayStartTime || runtime?.startedSampleTime || well.discoveryTime || well.startTime);
   const replayMin = toDatetimeLocalValue(well.sampleStartTime || well.startTime);
   const replayMax = toDatetimeLocalValue(well.sampleEndTime || well.endTime);
   const canStop = isRunning || isConnecting;
-  const canPause = isRunning || isConnecting;
   const canStart = !isRunning && !isConnecting;
   const canRemove = !isRunning && !isConnecting;
   const hasStarted = Boolean(runtime?.monitoringStartedAt || runtime?.startedSampleTime || runtime?.recordCount);
@@ -324,7 +297,6 @@ function MonitoredWellCard({
     || cleanLayerLabel(alert?.formation)
     || wellLayer(well);
   const latestTime = isActiveWell ? activeSampleTime || runtime?.lastRecordAt : runtime?.lastRecordAt || alert?.time;
-  const warningText = alert ? '有预警事件' : level >= 2 ? '预警跟踪' : '未见预警';
   const statusText = isStopped ? '已停止' : statusLabel(runtime);
   const statusTone = runtimeStatusTone({ isRunning, isConnecting, isStopped, hasStarted });
   const cardStateTone = runtimeCardStateTone({ level, isRunning, isConnecting, isStopped });
@@ -347,30 +319,22 @@ function MonitoredWellCard({
       ? '监测中'
       : monitoringMode === 'historyReplay'
         ? (hasStarted ? '重新回放' : '开始回放')
-        : (hasStarted ? '重新监测' : '实时监测');
+        : '开始监测';
   const startButtonTitle = isConnecting
     ? '正在接入检测流，请等待连接完成'
     : isRunning
       ? '当前井已在监测中'
-      : hasStarted
-        ? '从新的自动起点重新建立监测会话'
-        : '自动选择现场发现前 1 小时并开始监测';
-  const startButtonLabel = `${well.wellName}${isConnecting ? '正在接入' : isRunning ? '已在监测中' : hasStarted ? '重新监测' : '开始自动监测'}`;
+      : monitoringMode === 'historyReplay'
+        ? '从选择的历史起点创建新的回放会话'
+        : '从当前最新数据点创建新的实时监测会话';
+  const startButtonLabel = `${well.wellName}${isConnecting ? '正在接入' : isRunning ? '已在监测中' : monitoringMode === 'historyReplay' ? '开始历史回放' : '开始实时监测'}`;
   const sampleCountText = sampleCountLabel(runtime, well.recordCount || 0);
-  const resumeButtonText = isStopped ? '继续监测' : '继续';
-  const showRestartButton = !isStopped && !isRunning && !isConnecting && hasStarted;
-  const showResumeButton = !isStopped && !isRunning && !isConnecting && hasStarted;
-  const showAutoStartButton = !isRunning && !isConnecting && (!hasStarted || isStopped);
-  const showPauseButton = canPause;
-  const showStopButton = canStop;
-  const monitorStartText = runtime?.startedSampleTime || '--';
-  const durationAnchor = isRunning ? null : (runtime?.updatedAt || null);
   const isHistoryMode = monitoringMode === 'historyReplay';
-  const replayRangeText = (well.sampleStartTime || well.startTime || '--') + ' 至 ' + (well.sampleEndTime || well.endTime || '--');
-  const modeNotice = isHistoryMode
-    ? '已切换为历史回放，可选择历史时间'
-    : '实时监测将从数据库最新点接入，恢复时补齐暂停期间的新点';
-  const modeNoticeTone = isHistoryMode ? 'history' : 'realtime';
+  const resumeButtonText = '继续回放';
+  const showResumeButton = isHistoryMode && isStopped && canStart && Boolean(runtime?.sessionCode);
+  const showAutoStartButton = canStart && (!isHistoryMode || !hasStarted);
+  const showHistoryRestartButton = isHistoryMode && isStopped && canStart && hasStarted;
+  const showStopButton = canStop;
   const primaryAction = showResumeButton
     ? {
       text: resumeButtonText,
@@ -394,17 +358,11 @@ function MonitoredWellCard({
     { label: '钻头位置', value: formatNumber(bitDepth, ' m'), Icon: MapPin },
     { label: '层位', value: latestLayer, Icon: Layers3 },
     { label: dataVolumeLabel(runtime), value: sampleCountText, Icon: Database, emphasis: true },
-    { label: '监测时长', value: formatDuration(runtime?.monitoringStartedAt, isRunning, now, durationAnchor), Icon: Clock3 },
-    { label: '报警状态', value: warningText, Icon: Bell, tone: level >= 4 ? 'critical' : level >= 2 ? 'warning' : 'normal' },
   ];
 
   const enterRealtime = () => {
     openRealtimeWell(well.wellId);
     navigate('/monitoring');
-  };
-
-  const startOrResume = () => {
-    startWellMonitoring(well.wellId);
   };
 
   const changeMode = (value: string) => {
@@ -416,7 +374,7 @@ function MonitoredWellCard({
       <div className="multiwell-card-top">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <span className={`multiwell-card-led ${runtimeDot(runtime)}`} />
+            <span className={`multiwell-card-led ${runtimeDot(runtime, isStopped)}`} />
             <h2 className="truncate text-lg font-semibold text-slate-950 dark:text-slate-100">{well.wellName}</h2>
           </div>
           <div className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{well.wellId} · {wellLayer(well)}</div>
@@ -438,22 +396,6 @@ function MonitoredWellCard({
       </div>
 
       <div className="multiwell-card-metrics">
-        <div className="multiwell-card-metric multiwell-card-time-pair">
-          <div className="multiwell-time-item">
-            <div className="multiwell-card-metric-head">
-              <span>最新样本</span>
-              <SlidersHorizontal className="h-4 w-4" />
-            </div>
-            <strong>{latestTime || '--'}</strong>
-          </div>
-          <div className="multiwell-time-item">
-            <div className="multiwell-card-metric-head">
-              <span>监测起点</span>
-              <Clock3 className="h-4 w-4" />
-            </div>
-            <strong>{monitorStartText}</strong>
-          </div>
-        </div>
         {metricItems.map(({ label, value, Icon, emphasis, tone }) => (
           <div key={label} className="multiwell-card-metric" data-emphasis={emphasis ? 'true' : undefined} data-tone={tone}>
             <div className="multiwell-card-metric-head">
@@ -465,12 +407,13 @@ function MonitoredWellCard({
         ))}
       </div>
 
-      <div className="multiwell-card-notice" data-tone={modeNoticeTone}>
-        <CheckCircle2 className="h-4 w-4" />
-        <span>{modeNotice}</span>
+      <div className="multiwell-card-sample">
+        <Clock3 className="h-3.5 w-3.5" />
+        <span>最新样本</span>
+        <strong>{latestTime || '--'}</strong>
       </div>
 
-      <div className="multiwell-mode-panel">
+      <div className={`multiwell-mode-panel multiwell-mode-panel-compact${isHistoryMode ? ' multiwell-mode-panel-history' : ''}`}>
         <label className="multiwell-mode-field">
           <span>监测模式</span>
           <select
@@ -479,8 +422,8 @@ function MonitoredWellCard({
             onChange={(event) => changeMode(event.target.value)}
             className="multiwell-mode-control"
           >
-            <option value="realtime">实时监测（最新点）</option>
-            <option value="historyReplay">历史回放（可选时间）</option>
+            <option value="realtime">实时监测</option>
+            <option value="historyReplay">历史回放</option>
           </select>
         </label>
         {isHistoryMode ? (
@@ -499,23 +442,19 @@ function MonitoredWellCard({
               />
               <CalendarDays className="h-4 w-4" />
             </div>
-            <small>范围：{replayRangeText}</small>
           </label>
         ) : (
-          <div className="multiwell-mode-field multiwell-mode-field-note">
-            <span>接入说明</span>
-            <small>启动后从数据库最新点接入。</small>
-          </div>
+          <span className="multiwell-mode-realtime-copy">从最新数据点接入</span>
         )}
       </div>
 
       <div className={`multiwell-card-progress ${progressTone}`}>
-        <span className={`ops-led h-2 w-2 rounded-full ${runtimeDot(runtime)}`} />
+        <span className={`ops-led h-2 w-2 rounded-full ${runtimeDot(runtime, isStopped)}`} />
         <span className="truncate">{hintText}</span>
       </div>
 
       <div className="multiwell-card-toolbar">
-        {(showResumeButton || showAutoStartButton || isRunning || isConnecting) ? (
+        {(showResumeButton || showAutoStartButton) ? (
           <button
             type="button"
             onClick={primaryAction.onClick}
@@ -528,29 +467,23 @@ function MonitoredWellCard({
             {primaryAction.text}
           </button>
         ) : null}
+        {showHistoryRestartButton ? (
+          <button
+            type="button"
+            onClick={() => restartHistoryReplay(well.wellId)}
+            className="ops-button-secondary multiwell-card-action"
+            title="从选择的历史起点创建新的回放会话"
+            aria-label={`${well.wellName}重新历史回放`}
+          >
+            <PlayCircle className="h-5 w-5" />
+            重新回放
+          </button>
+        ) : null}
         <button type="button" onClick={enterRealtime} className="ops-button-secondary multiwell-card-action" aria-label={`进入 ${well.wellName} 实时监测`}>
           <ArrowRight className="h-5 w-5" />
-          实时监测
+          查看监测
         </button>
-      </div>
-
-      <div className="multiwell-card-run-actions" data-empty={showPauseButton || showStopButton || showRestartButton ? undefined : 'true'}>
-        {(showPauseButton || showStopButton || showRestartButton) ? (
-          <>
-          {showPauseButton ? (
-            <button
-              type="button"
-              onClick={() => pauseWellMonitoring(well.wellId)}
-              disabled={!canPause}
-              className="ops-button-secondary multiwell-card-action"
-              title="暂停当前监测，保留游标和曲线"
-              aria-label={`${well.wellName}暂停监测`}
-            >
-              <Pause className="h-4 w-4" />
-              暂停
-            </button>
-          ) : null}
-          {showStopButton ? (
+        {showStopButton ? (
             <button
               type="button"
               onClick={() => stopWellMonitoring(well.wellId)}
@@ -563,21 +496,6 @@ function MonitoredWellCard({
               {stopButtonText}
             </button>
           ) : null}
-          {showRestartButton ? (
-            <button
-              type="button"
-              onClick={startOrResume}
-              disabled={!canStart}
-              className="ops-button-secondary multiwell-card-action"
-              title="从新的自动起点重新建立监测会话"
-              aria-label={`${well.wellName}重新监测`}
-            >
-              <PlayCircle className="h-4 w-4" />
-              重新监测
-            </button>
-          ) : null}
-          </>
-        ) : null}
       </div>
     </article>
   );
@@ -649,17 +567,20 @@ function EventOverview({ selectedAlerts }: { selectedAlerts: Alert[] }) {
 }
 
 export default function Dashboard() {
-  const { wells, monitoredWellIds, wellRuntimeStates, alerts } = useWellControl();
-  const monitoredWells = useMemo(
-    () => monitoredWellIds.map((wellId) => wells.find((well) => well.wellId === wellId)).filter(Boolean) as WellInfo[],
-    [monitoredWellIds, wells],
-  );
+  const { wells, monitoredWellIds, wellRuntimeStates, alerts, isWellManuallyStopped } = useWellControl();
   const monitoredSet = useMemo(() => new Set(monitoredWellIds), [monitoredWellIds]);
+  const monitoredWells = useMemo(
+    // Always retain the source/default well order. Runtime state must never affect card placement.
+    () => wells.filter((well) => monitoredSet.has(well.wellId)),
+    [monitoredSet, wells],
+  );
   const activeMonitoringCount = useMemo(
     () => Object.values(wellRuntimeStates).filter(
-      (item) => monitoredSet.has(item.wellId) && (item.isRunning || item.status === 'connected' || item.status === 'connecting'),
+      (item) => monitoredSet.has(item.wellId)
+        && !isWellManuallyStopped(item.wellId)
+        && (item.isRunning || item.status === 'connected' || item.status === 'connecting' || item.status === 'reconnecting' || item.status === 'catchingUp'),
     ).length,
-    [monitoredSet, wellRuntimeStates],
+    [isWellManuallyStopped, monitoredSet, wellRuntimeStates],
   );
   const selectedAlerts = useMemo(
     () => alerts.filter((alert) => !alert.wellId || monitoredSet.has(alert.wellId)),

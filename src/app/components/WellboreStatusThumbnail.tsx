@@ -4,6 +4,10 @@ import type { BackendLevel, CycleInfo } from '../context/WellControlContext';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
 import { WellboreSchemaFigure } from './WellboreSchemaFigure';
 
+function formatDepth(value?: number) {
+  return Number.isFinite(value) ? `${Math.round(value as number).toLocaleString('zh-CN')} m` : '--';
+}
+
 export interface WellboreStatusViewProps {
   wellName: string;
   wellDepth?: number;
@@ -52,7 +56,10 @@ export function WellboreStatusThumbnail(props: WellboreStatusViewProps) {
       <header className="wellbore-thumbnail-head">
         <div>
           <div className="wellbore-eyebrow">{props.wellName} · {props.formation || '层位待定'}</div>
-          <h2>井筒状态缩略图</h2>
+          <div className="wellbore-thumbnail-title-row">
+            <h2>井筒状态缩略图</h2>
+            <span className="wellbore-thumbnail-level" data-tone={meta.tone}>L{props.backendLevel}</span>
+          </div>
         </div>
         <button type="button" className="wellbore-ghost-button" onClick={openDetail}><Maximize2 size={14} />点击放大</button>
       </header>
@@ -83,12 +90,11 @@ export function WellboreStatusThumbnail(props: WellboreStatusViewProps) {
         />
       </button>
 
-      <div className="wellbore-status-line" data-tone={meta.tone}>
-        <span>当前工况</span><strong>{conditionLabel}</strong>
-        <i aria-hidden="true" />
-        <span>状态评估</span><strong>{meta.label}</strong>
+      <div className="wellbore-thumbnail-readouts">
+        <div><span>井深</span><strong>{formatDepth(props.wellDepth)}</strong></div>
+        <div><span>钻头</span><strong>{formatDepth(props.bitDepth)}</strong></div>
+        <div><span>当前工况</span><strong>{conditionLabel || meta.label}</strong></div>
       </div>
-
     </section>
   );
 }
