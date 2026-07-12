@@ -3,6 +3,7 @@ import { AlertTriangle, Check, CheckCheck, Clock3, Eye, Filter, ShieldAlert, Sir
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
+import { EventExplanationDrawer } from '../components/EventExplanationDrawer';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 
 type BackendLevelFilter = 'all' | '2' | '3' | '4';
@@ -96,6 +97,7 @@ export default function Alerts() {
     wellInfo,
     selectedWellId,
     wells,
+    realtimeEndpoint,
   } = useWellControl();
   const [levelFilter, setLevelFilter] = useState<BackendLevelFilter>('all');
   const [ackFilter, setAckFilter] = useState<AckFilter>('all');
@@ -348,7 +350,7 @@ export default function Alerts() {
         </div>
       </div>
 
-      {selectedAlert && (
+      {false && selectedAlert && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={() => setSelectedAlertId(null)}>
           <div
             className="ops-panel w-full max-w-xl overflow-hidden"
@@ -429,6 +431,14 @@ export default function Alerts() {
             </div>
           </div>
         </div>
+      )}
+      {selectedAlert && (
+        <EventExplanationDrawer
+          alert={selectedAlert}
+          wellKey={currentWellId || wellInfo.wellId}
+          endpoint={realtimeEndpoint}
+          onClose={() => setSelectedAlertId(null)}
+        />
       )}
     </div>
   );
