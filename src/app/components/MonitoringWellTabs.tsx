@@ -8,7 +8,10 @@ function safeLevel(value: unknown) {
   return Number.isFinite(level) && level >= 0 && level <= 4 ? level : 0;
 }
 
-function statusLabel(status?: string) {
+function statusLabel(status?: string, backendStatus?: string) {
+  if (backendStatus === 'Stopped') return '后端已停止';
+  if (backendStatus === 'Recovering') return '后端恢复中';
+  if (backendStatus === 'Faulted') return '后端故障';
   if (status === 'connected') return '在线';
   if (status === 'connecting') return '接入中';
   if (status === 'reconnecting') return '重连中';
@@ -52,12 +55,14 @@ export function MonitoringWellTabs({ className = '', rightSlot }: { className?: 
           const runtime = wellRuntimeStates[well.wellId];
           const active = selectedWellId === well.wellId;
           const level = safeLevel(runtime?.backendLevel);
-          const status = statusLabel(runtime?.status);
+          const status = statusLabel(runtime?.status, runtime?.backendRuntimeStatus);
           const dot = level >= 4
             ? 'bg-red-500'
             : level >= 2
               ? 'bg-amber-500'
-              : runtime?.status === 'connected'
+              : runtime?.backendRuntimeStatus === 'Stopped' || runtime?.isBackendRunning === false
+                ? 'bg-slate-400'
+                : runtime?.status === 'connected'
                 ? 'bg-emerald-500'
                 : runtime?.status === 'connecting' || runtime?.status === 'reconnecting' || runtime?.status === 'catchingUp'
                   ? 'bg-cyan-500'

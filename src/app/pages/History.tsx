@@ -33,6 +33,11 @@ type DbHistoryRecord = {
   highest_level?: BackendLevel;
   cycle_resolution?: string;
   reference_learning_action?: string;
+  evidence_severity?: string;
+  primary_hypothesis?: string;
+  lifecycle_state?: string;
+  data_quality?: string;
+  missing_observations?: string[];
 };
 
 type HistoryPayload = {
@@ -41,6 +46,11 @@ type HistoryPayload = {
   configVersion?: string;
   sessionCode?: string;
   resultMode?: 'original' | 'replay' | string;
+  processingStartTime?: string;
+  warmupMinutes?: number;
+  source?: string;
+  frameCount?: number;
+  processingNote?: string;
   page: number;
   pageSize: number;
   total: number;
@@ -118,33 +128,72 @@ function backendLevelText(value: unknown) {
   return `L${level} ${BACKEND_LEVEL_META[level]?.label || ''}`.trim();
 }
 
+function resultModeText(value?: string) {
+  if (value === 'replay') return '独立算法回放';
+  if (value === 'algorithm_replay') return '窗口算法复演';
+  if (value === 'persisted_fact') return '持久化事实';
+  return '算法输出';
+}
+
 function normalizeHistoryRecord(value: unknown): DbHistoryRecord {
   const row = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const read = (...keys: string[]) => keys.map((key) => row[key]).find((item) => item !== undefined && item !== null);
-  const activeSignals = read('active_signals', 'activeSignals');
+  const alert = row.alert && typeof row.alert === 'object' ? row.alert as Record<string, unknown> : {};
+  const candidate = row.candidate && typeof row.candidate === 'object' ? row.candidate as Record<string, unknown> : {};
+  const evidence = row.evidence && typeof row.evidence === 'object' ? row.evidence as Record<string, unknown> : {};
+  const operation = row.operation && typeof row.operation === 'object' ? row.operation as Record<string, unknown> : {};
+  const quality = row.dataQuality && typeof row.dataQuality === 'object' ? row.dataQuality as Record<string, unknown> : {};
+  const readNested = (source: Record<string, unknown>, ...keys: string[]) => keys.map((key) => source[key]).find((item) => item !== undefined && item !== null);
+  const qualityValue = read('data_quality', 'dataQuality');
+  const alertLevel = read('public_level', 'publicLevel') ?? readNested(alert, 'level', 'publicLevel');
+  const highestLevel = read('highest_level', 'highestLevel') ?? readNested(candidate, 'highestLevel', 'highest_level');
+  const nestedFamilies = readNested(evidence, 'families');
+  const activeSignals = read('active_signals', 'activeSignals')
+    ?? (Array.isArray(nestedFamilies)
+      ? nestedFamilies
+        .filter((item) => item && typeof item === 'object' && Boolean((item as Record<string, unknown>).available))
+        .map((item) => String((item as Record<string, unknown>).family || ''))
+        .filter(Boolean)
+        .join(',')
+      : readNested(evidence, 'supportingSignals'));
   return {
     ...row,
     id: Number(read('id')) || undefined,
     frame: Number(read('frame')) || undefined,
     source_row_no: Number(read('source_row_no', 'sourceRowNo')) || undefined,
-    timestamp: String(read('timestamp', 'sample_time', 'sampleTime') || ''),
-    sample_time: String(read('sample_time', 'sampleTime', 'timestamp') || ''),
-    public_level: hasFiniteValue(read('public_level', 'publicLevel')) ? finite(read('public_level', 'publicLevel')) as BackendLevel : undefined,
+    timestamp: String(read('timestamp', 'sample_time', 'sampleTime') ?? row.sampleTime ?? ''),
+    sample_time: String(read('sample_time', 'sampleTime', 'timestamp') ?? row.sampleTime ?? ''),
+    public_level: hasFiniteValue(alertLevel) ? finite(alertLevel) as BackendLevel : undefined,
     formal_eval_level: hasFiniteValue(read('formal_eval_level', 'formalEvalLevel')) ? finite(read('formal_eval_level', 'formalEvalLevel')) as BackendLevel : undefined,
-    highest_level: hasFiniteValue(read('highest_level', 'highestLevel')) ? finite(read('highest_level', 'highestLevel')) as BackendLevel : undefined,
-    event_id: String(read('event_id', 'eventId') || ''),
-    reason: String(read('reason') || ''),
+    highest_level: hasFiniteValue(highestLevel) ? finite(highestLevel) as BackendLevel : undefined,
+    event_id: String(read('event_id', 'eventId') ?? readNested(candidate, 'candidateId', 'candidate_id') ?? ''),
+    reason: String(read('reason') ?? readNested(alert, 'reason') ?? ''),
     active_signals: Array.isArray(activeSignals) ? activeSignals.join(',') : String(activeSignals || ''),
     cycle_resolution: String(read('cycle_resolution', 'cycleResolution') || ''),
     reference_learning_action: String(read('reference_learning_action', 'referenceLearningAction') || ''),
-    inlet_smooth: Number(read('inlet_smooth', 'inletSmooth')) || undefined,
-    outlet_smooth: Number(read('outlet_smooth', 'outletSmooth')) || undefined,
-    pool_smooth: Number(read('pool_smooth', 'poolSmooth')) || undefined,
+    evidence_severity: String(read('evidence_severity', 'evidenceSeverity') ?? readNested(evidence, 'severity') ?? ''),
+    primary_hypothesis: String(read('primary_hypothesis', 'primaryHypothesis') ?? readNested(evidence, 'primaryHypothesis') ?? ''),
+    lifecycle_state: String(read('lifecycle_state', 'lifecycleState', 'event_state', 'eventState') ?? row.lifecycleState ?? ''),
+    data_quality: typeof qualityValue === 'string' || typeof qualityValue === 'number'
+      ? String(qualityValue)
+      : String(readNested(quality, 'level') ?? ''),
+    missing_observations: Array.isArray(readNested(quality, 'missingChannels'))
+      ? (readNested(quality, 'missingChannels') as unknown[]).map(String)
+      : Array.isArray(read('missing_observations', 'missingObservations'))
+        ? (read('missing_observations', 'missingObservations') as unknown[]).map(String)
+        : [],
+    inlet_smooth: Number(read('inlet_smooth', 'inletSmooth') ?? row.inletRaw) || undefined,
+    outlet_smooth: Number(read('outlet_smooth', 'outletSmooth') ?? row.outletRaw) || undefined,
+    pool_smooth: Number(read('pool_smooth', 'poolSmooth') ?? row.poolRaw) || undefined,
     pool_delta_abs: Number(read('pool_delta_abs', 'poolDeltaAbs')) || undefined,
     standpipe_change_mpa: Number(read('standpipe_change_mpa', 'standpipeChangeMpa')) || undefined,
     return_response_pct: Number(read('return_response_pct', 'returnResponsePct')) || undefined,
-    cp: Number(read('cp', 'casingPressure')) || undefined,
-    gas: Number(read('gas', 'totalGas')) || undefined,
+    cp: Number(read('cp', 'casingPressure') ?? row.cp) || undefined,
+    spp: Number(read('spp', 'standpipePressure') ?? row.spp) || undefined,
+    spm: Number(read('spm', 'pumpStrokeRate') ?? row.spm) || undefined,
+    gas: Number(read('gas', 'totalGas') ?? row.gas) || undefined,
+    pump_state: String(read('pump_state', 'pumpState') ?? readNested(operation, 'pumpState') ?? ''),
+    condition: String(read('condition') ?? readNested(operation, 'context') ?? ''),
   };
 }
 
@@ -170,11 +219,17 @@ export default function History() {
   const [replayMessage, setReplayMessage] = useState('');
   const [replayResult, setReplayResult] = useState<HistoryPayload | null>(null);
   const currentSampleTimeRef = useRef(currentSampleTime);
+  const selectedStartTimeRef = useRef(selectedStartTime);
+  const timeBoundsRef = useRef(timeBounds);
+  const wellEndTimeRef = useRef(wellInfo?.endTime || '');
+  const historyStartTimeRef = useRef('');
+  const historyWellRef = useRef('');
   const requestAbortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    currentSampleTimeRef.current = currentSampleTime;
-  }, [currentSampleTime]);
+  currentSampleTimeRef.current = currentSampleTime;
+  selectedStartTimeRef.current = selectedStartTime;
+  timeBoundsRef.current = timeBounds;
+  wellEndTimeRef.current = wellInfo?.endTime || '';
 
   const loadPage = useCallback(async (nextPage = pageRef.current) => {
     if (!wellInfo?.wellId) return;
@@ -182,6 +237,11 @@ export default function History() {
     requestAbortRef.current?.abort();
     const controller = new AbortController();
     requestAbortRef.current = controller;
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 45_000);
     setLoading(true);
     setError('');
     try {
@@ -189,10 +249,11 @@ export default function History() {
         page: String(nextPage),
         pageSize: String(PAGE_SIZE),
       });
-      const selectedStartQueryTime = toQueryDateTime(selectedStartTime);
+      const selectedStartQueryTime = toQueryDateTime(historyStartTimeRef.current || selectedStartTimeRef.current);
       if (selectedStartQueryTime) params.set('startTime', selectedStartQueryTime);
-      const replayEndTime = currentSampleTimeRef.current || wellInfo.endTime || timeBounds.lastTime || selectedStartQueryTime;
+      const replayEndTime = wellEndTimeRef.current || timeBoundsRef.current.lastTime || currentSampleTimeRef.current || selectedStartQueryTime;
       if (replayEndTime) params.set('endTime', replayEndTime);
+      params.set('warmupMinutes', '60');
       const url = buildRealtimeApiUrl(`/wells/${encodeURIComponent(wellInfo.wellId)}/history?${params.toString()}`);
       const response = await authenticatedFetch(url, { cache: 'no-store', signal: controller.signal });
       const data = await response.json();
@@ -204,30 +265,42 @@ export default function History() {
       setPage(resolvedPage);
       setLastLoadedAt(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : String(err));
+      if ((err instanceof DOMException && err.name === 'AbortError') || (err instanceof Error && err.name === 'AbortError')) {
+        if (!timedOut) return;
+        setError('历史算法查询超过 45 秒，后端可能仍在复演当前窗口。请缩小时间窗口后重试。');
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       if (requestAbortRef.current === controller) {
         requestAbortRef.current = null;
         setLoading(false);
       }
     }
-  }, [buildRealtimeApiUrl, selectedStartTime, timeBounds.lastTime, wellInfo?.endTime, wellInfo?.wellId]);
+  }, [buildRealtimeApiUrl, wellInfo?.wellId]);
 
   useEffect(() => () => requestAbortRef.current?.abort(), []);
 
   useEffect(() => {
+    if (!wellInfo?.wellId || historyWellRef.current === wellInfo.wellId) return;
+    const initialStartTime = selectedStartTimeRef.current || timeBoundsRef.current.firstTime;
+    if (!initialStartTime) return;
+    historyWellRef.current = wellInfo.wellId;
+    historyStartTimeRef.current = initialStartTime;
     pageRef.current = 1;
     setPage(1);
     setSelected(null);
     setPayload(null);
+    setReplayResult(null);
+    setReplayMessage('');
+    setReviewMode('facts');
     setError('');
     loadPage(1);
-  }, [wellInfo?.wellId, selectedStartTime]);
+  }, [loadPage, selectedStartTime, timeBounds.firstTime, wellInfo?.wellId]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => loadPage(pageRef.current), 30_000);
+    const timer = window.setInterval(() => loadPage(pageRef.current), 60_000);
     return () => window.clearInterval(timer);
   }, [loadPage]);
 
@@ -246,6 +319,12 @@ export default function History() {
 
   const visiblePayload = reviewMode === 'replay' && replayResult ? replayResult : payload;
   const records = visiblePayload?.records || [];
+  const visiblePage = visiblePayload?.page || 1;
+  const visibleTotalPages = visiblePayload?.totalPages || 1;
+  const refreshHistory = () => {
+    historyStartTimeRef.current = selectedStartTimeRef.current;
+    loadPage(pageRef.current);
+  };
   const requestReplay = async () => {
     if (!wellInfo?.wellId) return;
     setReplayMessage('正在创建独立算法回放 Session…');
@@ -253,7 +332,7 @@ export default function History() {
       const response = await authenticatedFetch(buildRealtimeApiUrl(`/wells/${encodeURIComponent(wellInfo.wellId)}/replay`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startTime: toQueryDateTime(selectedStartTime), endTime: currentSampleTime || timeBounds.lastTime || wellInfo.endTime || null }),
+        body: JSON.stringify({ startTime: toQueryDateTime(selectedStartTime), endTime: wellInfo.endTime || timeBounds.lastTime || currentSampleTime || null, warmupMinutes: 60 }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -262,13 +341,15 @@ export default function History() {
         algorithmVersion: data.algorithmVersion || data.algorithm_version,
         configVersion: data.configVersion || data.config_version,
         sessionCode: data.sessionCode || data.session_code,
+        processingStartTime: data.processingStartTime || data.processing_start_time,
+        warmupMinutes: Number(data.warmupMinutes ?? data.warmup_minutes ?? 60),
         startTime: data.startTime || data.start_time || toQueryDateTime(selectedStartTime),
-        endTime: data.endTime || data.end_time || currentSampleTime || timeBounds.lastTime || wellInfo.endTime,
+        endTime: data.endTime || data.end_time || wellInfo.endTime || timeBounds.lastTime || currentSampleTime,
         resultMode: 'replay',
         records: (Array.isArray(data.records) ? data.records : (Array.isArray(data.outcomes) ? data.outcomes : [])).map(normalizeHistoryRecord),
       };
       setReplayResult(replayPayload);
-      setReplayMessage(`回放 Session ${replayPayload.sessionCode || '已创建'} · 算法 ${replayPayload.algorithmVersion || '--'}`);
+      setReplayMessage(`回放 Session ${replayPayload.sessionCode || '已创建'} · 算法 ${replayPayload.algorithmVersion || '--'} · 已预热 ${replayPayload.warmupMinutes || 0} 分钟`);
     } catch (error) {
       setReplayMessage(`回放创建失败：${error instanceof Error ? error.message : '未知错误'}`);
     }
@@ -278,25 +359,26 @@ export default function History() {
   const replayEndLabel = displayTime(visiblePayload?.endTime || currentSampleTime || wellInfo.endTime || timeBounds.lastTime || toQueryDateTime(selectedStartTime));
 
   const exportCSV = () => {
-    const headers = ['时间', '出口流量响应(%)', '入口流量', '出口流量', '总池体积', '总池体积变化', '立压变化量', '套压', '全烃', '报警等级', '原因'];
+    const headers = ['时间', '工况', '入口流量(L/s)', '出口流量(L/s)', '总池体积(m3)', 'SPM', '立管压力(MPa)', '套管压力(MPa)', '全烃(%)', '报警等级', '证据', '原因'];
     const rows = records.map((record) => [
       displayTime(record.timestamp || record.sample_time),
-      formatDbNumber(record.return_response_pct, 1, ''),
+      record.condition || record.pump_state || '',
       formatDbNumber(record.inlet_smooth, 2, ''),
       formatDbNumber(record.outlet_smooth, 2, ''),
       formatDbNumber(record.pool_smooth, 2, ''),
-      formatDbNumber(record.pool_delta_abs, 2, ''),
-      formatDbNumber(record.standpipe_change_mpa, 2, ''),
+      formatDbNumber(record.spm, 1, ''),
+      formatDbNumber(record.spp, 3, ''),
       formatDbNumber(record.cp, 2, ''),
       formatDbNumber(record.gas, 2, ''),
       hasFiniteValue(record.public_level) ? `L${finite(record.public_level)}` : '',
+      record.evidence_severity || record.active_signals || '',
       record.reason || '',
     ].map(csvCell).join(','));
     const blob = new Blob(['\uFEFF' + [headers.map(csvCell).join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `well_db_review_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `well_algorithm_replay_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -307,17 +389,17 @@ export default function History() {
       <div className="ops-page-header">
         <div className="ops-page-header-copy">
           <div className="ops-eyebrow">历史与回放</div>
-          <h1 className="ops-title">历史事实复核</h1>
+          <h1 className="ops-title">历史算法复盘</h1>
           <p className="text-sm ops-muted">
-            历史事实直接读取数据库持久化结果；算法重新回放由后端创建独立 Session，前端不重新计算等级。
+            复盘结果由后端统一检测引擎生成；请求窗口前自动预热，报警等级、候选状态和证据链均以算法输出为准。
           </p>
         </div>
         <div className="ops-page-toolbar">
           <div className="ops-segment" aria-label="历史查询模式">
-            <button type="button" className={reviewMode === 'facts' ? 'is-active' : ''} onClick={() => setReviewMode('facts')}>历史事实复核</button>
+            <button type="button" className={reviewMode === 'facts' ? 'is-active' : ''} onClick={() => setReviewMode('facts')}>窗口算法复演</button>
             <button type="button" className={reviewMode === 'replay' ? 'is-active' : ''} onClick={() => setReviewMode('replay')}>算法重新回放</button>
           </div>
-          <button type="button" onClick={() => loadPage(pageRef.current)} className="ops-button-secondary" disabled={loading}>
+          <button type="button" onClick={refreshHistory} className="ops-button-secondary" disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             刷新
           </button>
@@ -344,8 +426,8 @@ export default function History() {
           <div className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{reviewWellLabel}</div>
         </div>
         <div className="ops-panel-soft p-3">
-          <div className="text-[11px] ops-muted">数据库记录</div>
-          <div className="mt-1 text-sm tabular-nums text-slate-900 dark:text-slate-100">{payload?.total ?? 0} 条</div>
+          <div className="text-[11px] ops-muted">算法输出记录</div>
+          <div className="mt-1 text-sm tabular-nums text-slate-900 dark:text-slate-100">{visiblePayload?.total ?? 0} 条</div>
         </div>
         <div className="ops-panel-soft p-3">
           <div className="text-[11px] ops-muted">当前页预警</div>
@@ -361,11 +443,14 @@ export default function History() {
         </div>
         <div className="ops-panel-soft p-3">
           <div className="text-[11px] ops-muted">Session / 结果来源</div>
-          <div className="mt-1 text-sm text-slate-900 dark:text-slate-100">{visiblePayload?.sessionCode || '--'} / {visiblePayload?.resultMode === 'replay' ? '重新回放' : '原始实时输出'}</div>
+          <div className="mt-1 text-sm text-slate-900 dark:text-slate-100">{visiblePayload?.sessionCode || '--'} / {resultModeText(visiblePayload?.resultMode)}</div>
         </div>
         <div className="ops-panel-soft p-3 lg:col-span-2">
           <div className="text-[11px] ops-muted">数据时间范围</div>
           <div className="mt-1 text-sm tabular-nums text-slate-900 dark:text-slate-100">{displayTime(visiblePayload?.startTime)} → {replayEndLabel}</div>
+          {visiblePayload?.processingStartTime && (
+            <div className="mt-1 text-[11px] ops-muted">算法预热起点 {displayTime(visiblePayload.processingStartTime)} · {visiblePayload.warmupMinutes ?? 0} 分钟</div>
+          )}
         </div>
       </div>
 
@@ -373,12 +458,12 @@ export default function History() {
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-[#f6fafc] px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center gap-2 ops-muted">
             <Database className="h-4 w-4" />
-            <span>第 {payload?.page ?? page} / {payload?.totalPages ?? 1} 页</span>
+            <span>第 {visiblePage} / {visibleTotalPages} 页</span>
             <span>{loading ? '正在刷新...' : `最新刷新 ${lastLoadedAt || '--:--:--'}`}</span>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className="ops-button-secondary px-2 py-1 text-xs" disabled={page <= 1 || loading} onClick={() => loadPage(page - 1)}>上一页</button>
-            <button type="button" className="ops-button-secondary px-2 py-1 text-xs" disabled={page >= (payload?.totalPages ?? 1) || loading} onClick={() => loadPage(page + 1)}>下一页</button>
+            <button type="button" className="ops-button-secondary px-2 py-1 text-xs" disabled={visiblePage <= 1 || loading || reviewMode === 'replay'} onClick={() => loadPage(visiblePage - 1)}>上一页</button>
+            <button type="button" className="ops-button-secondary px-2 py-1 text-xs" disabled={visiblePage >= visibleTotalPages || loading || reviewMode === 'replay'} onClick={() => loadPage(visiblePage + 1)}>下一页</button>
           </div>
         </div>
         {error ? (
@@ -391,12 +476,12 @@ export default function History() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 font-medium">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
-                  数据库复核查询失败
+                  历史算法查询失败
                 </div>
                 <div className="ops-break-text mt-1 text-xs opacity-90">{error}</div>
-                <div className="mt-2 text-xs opacity-80">请确认实时数据接口可访问、当前井已选择，并检查回放时间窗口。</div>
+                <div className="mt-2 text-xs opacity-80">请确认实时数据接口可访问、当前井已选择，并检查时间窗口或缩小复盘范围。</div>
               </div>
-              <button type="button" onClick={() => loadPage(pageRef.current)} className="ops-button-secondary shrink-0 px-2.5 py-1 text-xs" disabled={loading}>
+              <button type="button" onClick={refreshHistory} className="ops-button-secondary shrink-0 px-2.5 py-1 text-xs" disabled={loading}>
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
                 重试查询
               </button>
@@ -408,15 +493,16 @@ export default function History() {
               <thead>
                 <tr>
                   <th className="text-left">时间</th>
-                  <th className="text-right">出口流量响应</th>
-                  <th className="text-right">入口流量</th>
-                  <th className="text-right">出口流量</th>
-                  <th className="text-right">总池体积</th>
-                  <th className="text-right">总池体积变化</th>
-                  <th className="text-right">立压变化量</th>
-                  <th className="text-right">全烃</th>
-                  <th className="text-center">报警等级</th>
-                  <th className="text-right">详情</th>
+              <th className="text-left">工况</th>
+              <th className="text-right">入口流量</th>
+              <th className="text-right">出口流量</th>
+              <th className="text-right">总池体积</th>
+              <th className="text-right">SPM</th>
+              <th className="text-right">立管压力</th>
+              <th className="text-right">全烃</th>
+              <th className="text-center">报警等级</th>
+              <th className="text-left">证据</th>
+              <th className="text-right">详情</th>
                 </tr>
               </thead>
               <tbody>
@@ -430,18 +516,19 @@ export default function History() {
                         {displayTime(record.timestamp || record.sample_time)}
                         <span className="ml-1 text-[10px] text-slate-400">#{record.source_row_no || record.id || record.frame || index}</span>
                       </td>
-                      <td className="text-right tabular-nums">{formatDbNumberWithUnit(record.return_response_pct, 1, '%')}</td>
+                      <td className="max-w-[150px] truncate text-xs ops-muted" title={record.condition || record.pump_state || undefined}>{record.condition || record.pump_state || '--'}</td>
                       <td className="text-right tabular-nums text-emerald-600 dark:text-emerald-300">{formatDbNumber(record.inlet_smooth, 2)}</td>
                       <td className="text-right tabular-nums text-blue-600 dark:text-blue-300">{formatDbNumber(record.outlet_smooth, 2)}</td>
                       <td className="text-right tabular-nums">{formatDbNumber(record.pool_smooth, 2)}</td>
-                      <td className="text-right tabular-nums">{formatDbNumber(record.pool_delta_abs, 2)}</td>
-                      <td className="text-right tabular-nums">{formatDbNumber(record.standpipe_change_mpa, 2)}</td>
+                      <td className="text-right tabular-nums">{formatDbNumber(record.spm, 1)}</td>
+                      <td className="text-right tabular-nums">{formatDbNumber(record.spp, 3)}</td>
                       <td className="text-right tabular-nums">{formatDbNumber(record.gas, 2)}</td>
                       <td className="text-center">
                         <span className={`rounded px-2 py-0.5 text-xs ${hasLevel ? statusBadge(status) : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200'}`}>
                           {hasLevel ? `L${level} ${STATUS_LABELS[status]}` : '-- 未知'}
                         </span>
                       </td>
+                      <td className="max-w-[180px] truncate text-xs ops-muted" title={record.reason || undefined}>{record.evidence_severity || activeSignalList(record.active_signals).join('、') || '--'}</td>
                       <td className="text-right">
                         <button type="button" onClick={() => setSelected(record)} className="ops-button-secondary px-2 py-1 text-xs" aria-label={`查看 ${displayTime(record.timestamp || record.sample_time)} 复核详情`}>
                           <Eye className="h-3.5 w-3.5" />
@@ -479,16 +566,16 @@ export default function History() {
                         <div className="mt-1 tabular-nums text-blue-700 dark:text-blue-300">{formatDbNumber(record.outlet_smooth, 2)}</div>
                       </div>
                       <div className="ops-inline-tile min-w-0 p-2">
-                        <div className="ops-muted">出口响应</div>
-                        <div className="mt-1 tabular-nums">{formatDbNumberWithUnit(record.return_response_pct, 1, '%')}</div>
+                        <div className="ops-muted">SPM</div>
+                        <div className="mt-1 tabular-nums">{formatDbNumber(record.spm, 1)}</div>
                       </div>
                       <div className="ops-inline-tile min-w-0 p-2">
-                        <div className="ops-muted">池体积变化</div>
-                        <div className="mt-1 tabular-nums">{formatDbNumber(record.pool_delta_abs, 2)}</div>
+                        <div className="ops-muted">总池体积</div>
+                        <div className="mt-1 tabular-nums">{formatDbNumber(record.pool_smooth, 2)}</div>
                       </div>
                       <div className="ops-inline-tile min-w-0 p-2">
-                        <div className="ops-muted">立压变化量</div>
-                        <div className="mt-1 tabular-nums">{formatDbNumber(record.standpipe_change_mpa, 2)}</div>
+                        <div className="ops-muted">立管压力</div>
+                        <div className="mt-1 tabular-nums">{formatDbNumber(record.spp, 3)} MPa</div>
                       </div>
                       <div className="ops-inline-tile min-w-0 p-2">
                         <div className="ops-muted">全烃</div>
@@ -506,8 +593,8 @@ export default function History() {
             {records.length === 0 && (
               <div className="ops-empty-state m-3 min-h-[160px]">
                 <div>
-                  <div className="text-sm text-slate-700 dark:text-slate-200">{loading ? '正在加载复核记录' : '数据库当前没有可复核记录'}</div>
-                  <div className="mt-1 text-xs">{loading ? '请稍候，正在查询当前时间窗口。' : '请确认已选择开始时间，并且数据库接口可访问。'}</div>
+                  <div className="text-sm text-slate-700 dark:text-slate-200">{loading ? '正在加载算法输出' : '当前时间窗口没有算法输出'}</div>
+                  <div className="mt-1 text-xs">{loading ? '请稍候，后端正在预热并复演当前窗口。' : '请确认时间窗口内存在历史采样数据，或调整开始时间。'}</div>
                 </div>
               </div>
             )}
@@ -540,15 +627,25 @@ export default function History() {
               <div className="ops-inline-tile p-2"><span className="ops-muted">内部正式评估 </span>{backendLevelText(selected.formal_eval_level)}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">跨周期解析 </span>{selected.cycle_resolution || '--'}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">参考学习动作 </span>{selected.reference_learning_action || '--'}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">工况 </span>{selected.condition || selected.pump_state || '--'}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">生命周期 </span>{selected.lifecycle_state || '--'}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">证据强度 </span>{selected.evidence_severity || '--'}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">主导假设 </span>{selected.primary_hypothesis || '--'}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">入口流量 </span>{formatDbNumberWithSpacedUnit(selected.inlet_smooth, 2, 'L/s')}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">出口流量 </span>{formatDbNumberWithSpacedUnit(selected.outlet_smooth, 2, 'L/s')}</div>
-              <div className="ops-inline-tile p-2"><span className="ops-muted">总池体积变化 </span>{formatDbNumberWithSpacedUnit(selected.pool_delta_abs, 2, 'm3')}</div>
-              <div className="ops-inline-tile p-2"><span className="ops-muted">立压变化量 </span>{formatDbNumberWithSpacedUnit(selected.standpipe_change_mpa, 2, 'MPa')}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">总池体积 </span>{formatDbNumberWithSpacedUnit(selected.pool_smooth, 2, 'm3')}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">SPM </span>{formatDbNumberWithSpacedUnit(selected.spm, 1, 'spm')}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">立管压力 </span>{formatDbNumberWithSpacedUnit(selected.spp, 3, 'MPa')}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">套管压力 </span>{formatDbNumberWithSpacedUnit(selected.cp, 3, 'MPa')}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">全烃 </span>{formatDbNumberWithUnit(selected.gas, 2, '%')}</div>
+              <div className="ops-inline-tile p-2"><span className="ops-muted">数据质量 </span>{selected.data_quality || '--'}</div>
             </div>
             <div id="history-detail-summary" className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="font-medium text-slate-900 dark:text-slate-100">判定原因</div>
               <div className="ops-break-text mt-1 ops-muted">{selected.reason || '当前记录未触发报警事件原因。'}</div>
+              {selected.missing_observations && selected.missing_observations.length > 0 && (
+                <div className="mt-2 text-xs text-amber-700 dark:text-amber-200">缺失观测：{selected.missing_observations.join('、')}</div>
+              )}
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {activeSignalList(selected.active_signals).map((signal) => (
                   <span key={signal} className="ops-inline-tile px-2 py-1 text-xs">{backendSignalLabel(signal)}</span>

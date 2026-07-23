@@ -22,6 +22,12 @@ function usableText(value: string | undefined) {
   return value?.trim() || '';
 }
 
+function usableFormation(value: string | undefined) {
+  const normalized = usableText(value);
+  if (!normalized) return '';
+  return /^[-+]?\d+(?:\.\d+)?$/.test(normalized) ? '' : normalized;
+}
+
 /**
  * The imported wellbore_section table can contain both program rows and
  * casing-specification fragments. Keep only program rows, merge duplicates,
@@ -29,12 +35,15 @@ function usableText(value: string | undefined) {
  */
 export function normalizeWellboreStructureSections(rawSections: WellboreStructureSection[]): WellboreStructureSection[] {
   const deduped = new Map<string, WellboreStructureSection>();
-  rawSections.forEach((section) => {
+  rawSections.forEach((section, index) => {
     const bottomDepthM = Number(section.bottomDepthM);
     const spudSequence = usableText(section.spudSequence);
     const casingName = usableText(section.casingName);
-    const formation = usableText(section.formation);
-    const looksLikeProgram = WELLBORE_PROGRAM_SEQUENCE.test(spudSequence) || WELLBORE_STRUCTURE_NAME.test(casingName);
+    const sourceFormation = usableFormation(section.formation);
+    const formation = sourceFormation || String.fromCharCode(65 + Math.min(index, 25));
+    const looksLikeProgram = WELLBORE_PROGRAM_SEQUENCE.test(spudSequence)
+      || WELLBORE_STRUCTURE_NAME.test(casingName)
+      || sourceFormation.length > 0;
     if (!Number.isFinite(bottomDepthM) || bottomDepthM <= 20 || !looksLikeProgram) return;
     const holeSizeMm = Number(section.holeSizeMm);
     const kind = OPEN_HOLE_NAME.test(casingName) || !casingName ? 'openHole' : 'casing';
@@ -293,20 +302,20 @@ function levelTone(level: BackendLevel): WellboreTone {
 
 function inferFormationName(explicit: string | undefined, wellDepth: number) {
   if (explicit?.trim()) return explicit.trim();
-  if (wellDepth >= 5200) return '\u6df1\u5c42\u50a8\u96c6\u5c42';
-  if (wellDepth >= 4200) return '\u76ee\u7684\u5c42';
-  if (wellDepth >= 3200) return '\u7802\u5ca9\u50a8\u5c42';
-  return '\u6ce5\u5ca9\u6bb5';
+  if (wellDepth >= 5200) return 'E';
+  if (wellDepth >= 4200) return 'D';
+  if (wellDepth >= 3200) return 'C';
+  return 'A';
 }
 
 function buildFormationBands(wellDepth: number): WellboreFormationBand[] {
   const anchors = [0, 900, 2000, 3200, Math.max(wellDepth - 500, 3400), wellDepth];
   return [
-    { key: 'surface', label: '\u7b2c\u56db\u7cfb', from: anchors[0], to: Math.min(anchors[1], wellDepth), fill: '#f3eee4', accent: '#9a7b4f' },
-    { key: 'upper-sand', label: '\u4e0a\u90e8\u7802\u5ca9\u5c42', from: Math.min(anchors[1], wellDepth), to: Math.min(anchors[2], wellDepth), fill: '#ebe4d5', accent: '#986c32' },
-    { key: 'mudstone', label: '\u6ce5\u5ca9\u5c42', from: Math.min(anchors[2], wellDepth), to: Math.min(anchors[3], wellDepth), fill: '#e7edf1', accent: '#64748b' },
-    { key: 'reservoir', label: '\u7802\u5ca9\u5c42', from: Math.min(anchors[3], wellDepth), to: Math.min(anchors[4], wellDepth), fill: '#eee5d5', accent: '#8a5f2a' },
-    { key: 'target', label: '\u76ee\u7684\u5c42', from: Math.min(anchors[4], wellDepth), to: wellDepth, fill: '#dcfce7', accent: '#047857' },
+    { key: 'surface', label: 'A', from: anchors[0], to: Math.min(anchors[1], wellDepth), fill: '#f3eee4', accent: '#9a7b4f' },
+    { key: 'upper-sand', label: 'B', from: Math.min(anchors[1], wellDepth), to: Math.min(anchors[2], wellDepth), fill: '#ebe4d5', accent: '#986c32' },
+    { key: 'mudstone', label: 'C', from: Math.min(anchors[2], wellDepth), to: Math.min(anchors[3], wellDepth), fill: '#e7edf1', accent: '#64748b' },
+    { key: 'reservoir', label: 'D', from: Math.min(anchors[3], wellDepth), to: Math.min(anchors[4], wellDepth), fill: '#eee5d5', accent: '#8a5f2a' },
+    { key: 'target', label: 'E', from: Math.min(anchors[4], wellDepth), to: wellDepth, fill: '#dcfce7', accent: '#047857' },
   ].filter((item) => item.to > item.from + 1);
 }
 

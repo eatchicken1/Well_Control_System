@@ -1,6 +1,8 @@
 import { authHeaders } from './authToken';
 
 export interface WarningEventReviewItem {
+  eventId: string;
+  candidateId?: number | null;
   warningId: number;
   warningCode: string;
   sessionId: number;
@@ -13,6 +15,8 @@ export interface WarningEventReviewItem {
   highestLevel: number;
   currentLevel: number;
   status: string;
+  candidateState: string;
+  needsManualReview: boolean;
   primarySignal: string;
   activeSignals: string[];
   reason: string;
@@ -23,6 +27,53 @@ export interface WarningEventReviewItem {
   acknowledgementCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface WarningEventLatestFrame {
+  frameId: number;
+  sourceRowNo?: number | null;
+  sampleTime: string;
+  publicLevel: number;
+  formalEvalLevel: number;
+  eventState: string;
+  activeSignals: string;
+  reason: string;
+  cycleResolution: string;
+  cycleResolutionReason: string;
+  precursorLevel: string;
+  dominantHypothesis: string;
+  inletFlow?: number | null;
+  outletFlow?: number | null;
+  pitVolume?: number | null;
+  standpipePressure?: number | null;
+  casingPressure?: number | null;
+  bitDepth?: number | null;
+  wellDepth?: number | null;
+}
+
+export interface WarningEventLifecycleLog {
+  eventName: string;
+  publicLevel: number;
+  eventState: string;
+  revisionSequence: number;
+  reason: string;
+  sampleTime: string;
+}
+
+export interface WarningEventAcknowledgement {
+  acknowledgementId: number;
+  user: string;
+  action: string;
+  comment: string;
+  acknowledgedAt: string;
+}
+
+export interface WarningEventReviewDetail {
+  ok: boolean;
+  event: WarningEventReviewItem;
+  latestFrame?: WarningEventLatestFrame | null;
+  lifecycle: WarningEventLifecycleLog[];
+  acknowledgements: WarningEventAcknowledgement[];
 }
 
 export interface WarningEventReviewSummary {
@@ -54,6 +105,7 @@ export interface WarningEventQuery {
   includeAcknowledged?: boolean;
   page?: number;
   pageSize?: number;
+  maxCount?: number;
 }
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -88,6 +140,13 @@ export async function fetchWarningEvents(query: WarningEventQuery = {}, signal?:
   return apiJson<WarningEventReviewPage>(buildWarningEventsUrl(query), { cache: 'no-store', signal });
 }
 
+export async function fetchWarningEventDetail(eventId: string, signal?: AbortSignal) {
+  return apiJson<WarningEventReviewDetail>(
+    `/api/warnings/events/${encodeURIComponent(eventId)}/detail`,
+    { cache: 'no-store', signal },
+  );
+}
+
 export async function acknowledgeWarningEvent(warningId: number, comment?: string) {
   return apiJson<{ ok: boolean; warningId: number; acknowledged: boolean; message: string }>(
     `/api/warnings/events/${encodeURIComponent(String(warningId))}/acknowledge`,
@@ -108,6 +167,7 @@ export async function acknowledgeWarningEvents(query: WarningEventQuery = {}, co
         level: query.level,
         status: query.status,
         comment: comment || '',
+        maxCount: query.maxCount,
       }),
     },
   );

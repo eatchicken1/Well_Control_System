@@ -140,8 +140,11 @@ export function EventExplanationDrawer({ alert, wellKey, endpoint, onClose }: { 
     setEventExplanationCache(eventId, { ...cached, explanationRevision: cached?.explanationRevision || 0, factRevision: cached?.factRevision || 0, loadedAt: cached?.loadedAt || '', status: 'loading' });
     try {
       const next = await fetchEventExplanation(endpoint, wellKey, eventId);
-      setExplanation(next);
-      setEventExplanationCache(eventId, { explanation: next, explanationRevision: next.explanationRevision, factRevision: next.factRevision, loadedAt: new Date().toISOString(), status: next.generatorVersion.includes('fallback') ? 'fallback' : 'loaded' });
+      // Stored explanation revisions may retain a legacy frame event id.  The drawer is
+      // opened with the canonical lifecycle event id, so keep that identity in the UI/cache.
+      const canonical = { ...next, eventId };
+      setExplanation(canonical);
+      setEventExplanationCache(eventId, { explanation: canonical, explanationRevision: canonical.explanationRevision, factRevision: canonical.factRevision, loadedAt: new Date().toISOString(), status: canonical.generatorVersion.includes('fallback') ? 'fallback' : 'loaded' });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '解释加载失败');
       setExplanation(fallbackExplanation(alert));

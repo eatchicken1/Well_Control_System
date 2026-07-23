@@ -52,6 +52,19 @@ export interface WellboreProfile {
   bhaComponents: BhaComponentProfile[];
 }
 
+const profileCache = new Map<string, WellboreProfile>();
+const profileRequests = new Map<string, Promise<WellboreProfile>>();
+
+export function getCachedWellboreProfile(url: string) {
+  return profileCache.get(url) || null;
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+}
+
 function asArray<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
   if (value && typeof value === 'object') {
@@ -119,8 +132,31 @@ function normalizeProfile(payload: Record<string, unknown>): WellboreProfile {
 }
 
 export async function fetchWellboreProfile(url: string, signal?: AbortSignal): Promise<WellboreProfile> {
-  const response = await authenticatedFetch(url, { cache: 'no-store', signal });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-  return normalizeProfile(payload as Record<string, unknown>);
+  const cached = profileCache.get(url);
+  if (cached) {
+    throwIfAborted(signal);
+    return cached;
+  }
+
+  let request = profileRequests.get(url);
+  if (!request) {
+    request = authenticatedFetch(url, { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+        const profile = normalizeProfile(payload as Record<string, unknown>);
+        profileCache.set(url, profile);
+        return profile;
+      })
+      .finally(() => profileRequests.delete(url));
+    profileRequests.set(url, request);
+  }
+
+  const profile = await request;
+  throwIfAborted(signal);
+  return profile;
+}
+
+export function prefetchWellboreProfile(url: string) {
+  return fetchWellboreProfile(url).catch(() => null);
 }

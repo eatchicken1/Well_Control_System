@@ -72,7 +72,7 @@ type WellboreVisualState = {
 };
 
 const DETAIL: Geometry = { viewBox: '0 0 660 640', width: 660, height: 640, top: 56, bottom: 584, centerX: 282, axisX: 38, labelX: 418, formationX: 536, formationW: 46, scale: 1.68 };
-const THUMB: Geometry = { viewBox: '0 0 520 640', width: 520, height: 640, top: 70, bottom: 584, centerX: 246, axisX: 48, labelX: 354, formationX: 416, formationW: 44, scale: 0.64 };
+const THUMB: Geometry = { viewBox: '0 0 520 640', width: 520, height: 640, top: 70, bottom: 584, centerX: 246, axisX: 48, labelX: 344, formationX: 392, formationW: 78, scale: 0.64 };
 
 const LEVEL_LABEL: Record<BackendLevel, string> = { 0: '正常循环', 1: '异常观察', 2: '溢流预警', 3: '疑似溢流', 4: '溢流确认' };
 const TEXT = { aria: '井筒状态工程剖面', bit: '钻头', shoe: '套管鞋', influx: '推测侵入区', openHole: '裸眼段', casing: '套管', cement: '水泥环', drill: '钻柱 / BHA' };

@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router';
 import { useLocation } from 'react-router';
-import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, Gauge, Clock3, RadioTower, BarChart3, LogOut, UserCircle, MapPinned, ChevronRight, SignalHigh, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, RadioTower, BarChart3, LogOut, UserCircle, MapPinned, ChevronRight, SignalHigh, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
@@ -165,106 +165,45 @@ function WellFleetStrip() {
   );
 }
 
-function OperationsStrip({
+function MonitoringStatusChip({
   alertStatus,
   isRunning,
-  isRecovering,
   isStopped,
-  unacknowledgedCount,
-  latestSampleTime,
-  flowPointCount,
-  historyCount,
-  wellLabel,
-  baselineQuality,
 }: {
   alertStatus: 'normal' | 'warning' | 'critical';
   isRunning: boolean;
-  isRecovering: boolean;
   isStopped: boolean;
-  unacknowledgedCount: number;
-  latestSampleTime: string | null;
-  flowPointCount: number;
-  historyCount: number;
-  wellLabel: string;
-  baselineQuality: number;
 }) {
-  const baselineValue = Number.isFinite(baselineQuality) ? baselineQuality.toFixed(0) : '--';
-  const hasSamples = Boolean(latestSampleTime || flowPointCount > 0);
-  const isIdle = !isStopped && !isRunning && !isRecovering && !hasSamples;
-  const isPausedWithHistory = !isStopped && !isRunning && !isRecovering && hasSamples;
-  const riskText = isStopped
+  const isWaiting = !isStopped && !isRunning;
+  const label = isStopped
     ? '监测已停'
-    : isRecovering && !hasSamples
-      ? '恢复监测'
-      : isIdle
-        ? '等待接入'
-        : isPausedWithHistory
-          ? '待续监测'
-          : alertStatus === 'critical'
-            ? '红色风险'
-            : alertStatus === 'warning'
-              ? '预警复核'
-              : '监测稳定';
-  const sampleText = latestSampleTime ? `${latestSampleTime} · ${flowPointCount} 点` : flowPointCount > 0 ? `${flowPointCount} 点` : '0 点';
-  const collectorText = isStopped
-    ? hasSamples
-      ? `已停止 · ${sampleText}`
-      : '监测已停'
-    : isRunning
-      ? hasSamples
-        ? `采集中 · ${sampleText}`
-        : '恢复中 · 等待首个样本'
-      : isRecovering
-        ? '恢复中 · 等待首个样本'
-        : isPausedWithHistory
-          ? `待续监测 · ${sampleText}`
-          : `待启动 · ${sampleText}`;
-  const riskTone = isStopped
+    : isWaiting
+      ? '等待接入'
+      : alertStatus === 'critical'
+        ? '红色风险'
+        : alertStatus === 'warning'
+          ? '预警复核'
+          : '监测稳定';
+  const tone = isStopped || isWaiting
     ? 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
-    : isRecovering && !hasSamples
-      ? 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-950/25 dark:text-cyan-200'
-      : isIdle
-        ? 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
-        : isPausedWithHistory
-          ? 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-950/25 dark:text-cyan-200'
-          : alertStatus === 'critical'
-            ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-200'
-            : alertStatus === 'warning'
-              ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200';
-  const collectorTone = isRunning
-    ? 'text-emerald-700 dark:text-emerald-200'
-    : isStopped || isIdle
-      ? 'text-slate-700 dark:text-slate-200'
-      : 'text-cyan-700 dark:text-cyan-200';
-
-  const items = [
-    { label: '井场', value: wellLabel, icon: Gauge, tone: '', width: 'min-w-[150px] flex-[1.1]' },
-    { label: '采集', value: collectorText, icon: RadioTower, tone: collectorTone, width: 'min-w-[176px] flex-[1.35]' },
-    { label: '基线', value: `${baselineValue}% · ${historyCount} 条`, icon: Database, tone: historyCount > 0 ? '' : 'text-slate-500 dark:text-slate-400', width: 'min-w-[116px] flex-[0.72]' },
-    { label: '未确认', value: `${unacknowledgedCount} 条`, icon: Bell, tone: unacknowledgedCount > 0 ? 'text-red-700 dark:text-red-200' : '', width: 'min-w-[96px] flex-[0.62]' },
-    { label: '报警等级', value: riskText, icon: Clock3, tone: isStopped || isIdle ? 'text-slate-700 dark:text-slate-200' : isRecovering && !hasSamples || isPausedWithHistory ? 'text-cyan-700 dark:text-cyan-200' : alertStatus === 'critical' ? 'text-red-700 dark:text-red-200' : '', width: 'min-w-[112px] flex-[0.76]' },
-  ];
+    : alertStatus === 'critical'
+      ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-200'
+      : alertStatus === 'warning'
+        ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200'
+        : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200';
+  const led = isStopped || isWaiting
+    ? 'bg-slate-400'
+    : alertStatus === 'critical'
+      ? 'bg-red-500'
+      : alertStatus === 'warning'
+        ? 'bg-amber-500'
+        : 'bg-emerald-500';
 
   return (
-    <div className="hidden min-w-0 border-b border-slate-200 bg-slate-50 px-4 py-2 dark:border-slate-800 dark:bg-slate-950/95 lg:block">
-      <div className="flex min-w-0 items-center gap-2">
-        <div className={`flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${riskTone}`}>
-          <span className={`ops-led h-2 w-2 rounded-full ${
-            isStopped || isIdle ? 'bg-slate-400' : isRecovering && !hasSamples || isPausedWithHistory ? 'bg-cyan-500' : alertStatus === 'critical' ? 'bg-red-500' : alertStatus === 'warning' ? 'bg-amber-500' : 'bg-emerald-500'
-          }`} data-state={isStopped ? 'stopped' : isRecovering && !hasSamples ? 'normal' : alertStatus} />
-          {riskText}
-        </div>
-        <div className="ops-scroll flex min-w-0 flex-1 gap-2 overflow-x-auto xl:overflow-hidden">
-          {items.map(({ label, value, icon: Icon, tone, width }) => (
-            <div key={label} className={`ops-inline-tile flex ${width} min-w-0 items-center gap-1.5 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-200`}>
-              <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-              <span className="shrink-0 text-slate-500 dark:text-slate-400">{label}</span>
-              <span className={`ml-auto truncate tabular-nums text-slate-900 dark:text-slate-100 ${tone}`}>{value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+    <div className={`top-monitoring-status hidden shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs xl:flex ${tone}`} title="当前监测状态">
+      <span className={`ops-led h-2 w-2 rounded-full ${led}`} data-state={isStopped ? 'stopped' : isWaiting ? 'waiting' : alertStatus} />
+      <span className="hidden text-[10px] text-slate-500 dark:text-slate-400 2xl:inline">监测状态</span>
+      <strong>{label}</strong>
     </div>
   );
 }
@@ -277,14 +216,12 @@ export function Layout() {
   const {
     alertStatus,
     alerts,
-    isRunning,
     shutInActive,
     shutInStartedAt,
     wells,
     selectedWellId,
     selectWell,
     wellInfo,
-    baselineInfo,
     dataSourceState,
     currentSampleTime,
     wellRuntimeStates,
@@ -293,10 +230,7 @@ export function Layout() {
   } = useWellControl();
   const currentWellAlerts = alerts.filter((a) => !a.wellId || a.wellId === selectedWellId);
   const unacknowledgedCount = currentWellAlerts.filter((a) => !a.acknowledged && (a.level === 'critical' || a.level === 'warning')).length;
-  const flowHistory = selectedWellView.flowHistory;
-  const historyRecords = selectedWellView.historyRecords;
   const backendDetection = selectedWellView.backendDetection;
-  const latestSampleTime = selectedWellView.currentSampleTime || flowHistory.at(-1)?.time || historyRecords.at(-1)?.time || null;
   const selectedWellRuntime = wellRuntimeStates[selectedWellId] || wellRuntimeStates[wellInfo.wellId];
   const selectedWellIsRunning = Boolean(
     !selectedWellManuallyStopped && (
@@ -310,20 +244,6 @@ export function Layout() {
     || dataSourceState.status === 'reconnecting'
     || dataSourceState.status === 'catchingUp')
   );
-  const selectedWellIsRecovering = !latestSampleTime && flowHistory.length === 0 && historyRecords.length === 0 && Boolean(
-    !selectedWellManuallyStopped && (
-    selectedWellRuntime?.status === 'connecting'
-    || selectedWellRuntime?.status === 'reconnecting'
-    || selectedWellRuntime?.status === 'catchingUp'
-    || selectedWellRuntime?.isRunning
-    || selectedWellRuntime?.startedSampleTime
-    || selectedWellRuntime?.lastRecordAt
-    || selectedWellView.fromSnapshotFallback
-    || dataSourceState.status === 'connecting'
-    || dataSourceState.status === 'reconnecting'
-    || dataSourceState.status === 'catchingUp')
-  );
-
   const statusColors = {
     normal: 'bg-green-500',
     warning: 'bg-yellow-500',
@@ -334,11 +254,9 @@ export function Layout() {
   const backendMeta = BACKEND_LEVEL_META[backendLevel];
   const sidebarWidth = sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[232px]';
   const isMonitoringRoute = location.pathname === '/monitoring';
-  const currentWellBadge = `${wellInfo.wellName} · ${wellInfo.block || '实时监测井'}`;
   const topbarBackendChip = <HeaderBackendLevelChip detection={backendDetection} />;
   const topbarDataChip = <DataSourcePill state={dataSourceState} isStopped={selectedWellManuallyStopped} />;
   const showFleetStrip = false;
-  const showOperationsStrip = isMonitoringRoute;
 
   useEffect(() => {
     localStorage.setItem('wcs-sidebar-collapsed', String(sidebarCollapsed));
@@ -464,6 +382,13 @@ export function Layout() {
           </div>
           <div className="flex-1 min-w-0" />
           <div className="hidden min-w-0 items-center gap-2 xl:flex">
+            {isMonitoringRoute && (
+              <MonitoringStatusChip
+                alertStatus={alertStatus}
+                isRunning={selectedWellIsRunning}
+                isStopped={selectedWellManuallyStopped}
+              />
+            )}
             {topbarDataChip}
             {topbarBackendChip}
           </div>
@@ -477,20 +402,6 @@ export function Layout() {
         </header>
 
         {showFleetStrip && <WellFleetStrip />}
-        {showOperationsStrip && (
-        <OperationsStrip
-          alertStatus={alertStatus}
-          isRunning={selectedWellIsRunning}
-          isRecovering={selectedWellIsRecovering}
-          isStopped={selectedWellManuallyStopped}
-          unacknowledgedCount={unacknowledgedCount}
-          latestSampleTime={latestSampleTime}
-          flowPointCount={flowHistory.length}
-            historyCount={historyRecords.length}
-            wellLabel={currentWellBadge}
-            baselineQuality={baselineInfo.qualityScore}
-          />
-        )}
 
         {/* Page content */}
         <main className={`ops-scroll flex-1 p-3 lg:p-4 ${isMonitoringRoute ? 'overflow-auto lg:overflow-hidden' : 'overflow-auto'}`} data-current-sample-time={currentSampleTime}>

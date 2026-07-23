@@ -5,7 +5,7 @@ import { useWellControl, type BackendLevel } from '../context/WellControlContext
 import { WellboreSchemaFigure } from '../components/WellboreSchemaFigure';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
 import { normalizeWellboreStructureSections } from '../lib/wellboreSimulation';
-import { fetchWellboreProfile, type WellboreProfile } from '../api/wellboreProfileApi';
+import { fetchWellboreProfile, getCachedWellboreProfile, type WellboreProfile } from '../api/wellboreProfileApi';
 
 const LEVEL_LABELS: Record<BackendLevel, string> = {
   0: '正常',
@@ -64,8 +64,17 @@ export default function WellboreStatusDetail() {
     buildRealtimeApiUrl,
   } = useWellControl();
 
-  const [wellboreProfile, setWellboreProfile] = useState<WellboreProfile | null>(null);
-  const [wellboreProfileStatus, setWellboreProfileStatus] = useState<'loading' | 'ready' | 'empty' | 'fallback'>('loading');
+  const wellboreProfileUrl = selectedWellId
+    ? buildRealtimeApiUrl(`/wells/${encodeURIComponent(selectedWellId)}/wellbore`)
+    : '';
+  const cachedWellboreProfile = wellboreProfileUrl ? getCachedWellboreProfile(wellboreProfileUrl) : null;
+  const [wellboreProfile, setWellboreProfile] = useState<WellboreProfile | null>(() => cachedWellboreProfile);
+  const [wellboreProfileStatus, setWellboreProfileStatus] = useState<'loading' | 'ready' | 'empty' | 'fallback'>(() => {
+    if (!cachedWellboreProfile) return 'loading';
+    return cachedWellboreProfile.sections.length > 0 || cachedWellboreProfile.trajectory.length > 0 || cachedWellboreProfile.bhaComponents.length > 0
+      ? 'ready'
+      : 'empty';
+  });
 
   useEffect(() => {
     if (!selectedWellId) {
@@ -73,9 +82,16 @@ export default function WellboreStatusDetail() {
       setWellboreProfileStatus('empty');
       return;
     }
+    const cached = getCachedWellboreProfile(wellboreProfileUrl);
+    if (cached) {
+      const hasStructure = cached.sections.length > 0 || cached.trajectory.length > 0 || cached.bhaComponents.length > 0;
+      setWellboreProfile(cached);
+      setWellboreProfileStatus(hasStructure ? 'ready' : 'empty');
+      return;
+    }
     const controller = new AbortController();
     setWellboreProfileStatus('loading');
-    fetchWellboreProfile(buildRealtimeApiUrl(`/wells/${encodeURIComponent(selectedWellId)}/wellbore`), controller.signal)
+    fetchWellboreProfile(wellboreProfileUrl, controller.signal)
       .then((profile) => {
         if (controller.signal.aborted) return;
         const hasStructure = profile.sections.length > 0 || profile.trajectory.length > 0 || profile.bhaComponents.length > 0;
@@ -88,7 +104,7 @@ export default function WellboreStatusDetail() {
         setWellboreProfileStatus('fallback');
       });
     return () => controller.abort();
-  }, [buildRealtimeApiUrl, selectedWellId]);
+  }, [buildRealtimeApiUrl, selectedWellId, wellboreProfileUrl]);
 
   const well = wells.find((item) => item.wellId === selectedWellId) || wellInfo;
   const data = selectedWellView.currentData;
@@ -180,13 +196,32 @@ export default function WellboreStatusDetail() {
       : '压力关系：数据不足';
 
   const evidenceDuration = cycle.elapsedSeconds > 0 ? `持续 ${Math.round(cycle.elapsedSeconds)} s` : '当前窗口';
-  const flowDelta = displayData.flowOut - displayData.flowIn;
+  const outletSemantic = displayData.outletSemantic?.trim() || '';
+  const configuredOutletUnit = displayData.outletUnit?.trim() || '';
+  const valveOpening = /valve|opening|开度/i.test(outletSemantic) || configuredOutletUnit === '%';
+  const outletUnit = valveOpening
+    ? '%'
+    : configuredOutletUnit && !/^unknown$/i.test(configuredOutletUnit)
+      ? configuredOutletUnit
+      : /^true(volumetric|return)flow$/i.test(outletSemantic)
+        ? 'L/s'
+        : '--';
+  const outletLabel = valveOpening ? '出口阀门开度' : '出口流量';
+  const pressureResidual = Number.isFinite(displayData.spp) && Number.isFinite(displayData.sppPredicted)
+    ? displayData.spp - displayData.sppPredicted
+    : undefined;
+  const previousGas = selectedWellView.flowHistory.length > 1
+    ? selectedWellView.flowHistory[selectedWellView.flowHistory.length - 2]?.totalGas
+    : undefined;
+  const gasChange = Number.isFinite(previousGas) && Number.isFinite(displayData.totalGas)
+    ? displayData.totalGas - Number(previousGas)
+    : undefined;
   const evidence = [
     {
-      label: abnormal ? '出口流量' : '出口/入口差值',
-      value: abnormal ? format(displayData.flowOut, 1) : format(flowDelta, 1),
-      unit: 'L/s',
-      change: abnormal ? `较入口 ${flowDelta >= 0 ? '+' : ''}${format(flowDelta, 1)} L/s` : `较平衡点 ${flowDelta >= 0 ? '+' : ''}${format(flowDelta, 1)} L/s`,
+      label: outletLabel,
+      value: format(displayData.flowOut, 1),
+      unit: outletUnit,
+      change: valveOpening ? '当前通道语义：阀门开度' : '当前通道语义：真实出口值',
       duration: evidenceDuration,
       grade: abnormal && displayDetection.activeSignals.includes('return_response') ? '主证据' : '正常',
       tone: abnormal && displayDetection.activeSignals.includes('return_response') ? 'critical' : 'normal',
@@ -206,7 +241,9 @@ export default function WellboreStatusDetail() {
       label: abnormal ? '立压' : '立压残差',
       value: format(displayData.spp, 2),
       unit: 'MPa',
-      change: abnormal ? '较基线 -0.10 MPa' : '较基线 +0.00 MPa',
+      change: pressureResidual === undefined
+        ? '参考值不可用'
+        : `较参考 ${pressureResidual >= 0 ? '+' : ''}${format(pressureResidual, 2)} MPa`,
       duration: evidenceDuration,
       grade: abnormal ? '辅助观察' : '正常',
       tone: abnormal && (displayDetection.activeSignals.includes('standpipe_pressure') || displayDetection.activeSignals.includes('spp_drop')) ? 'warning' : 'normal',
@@ -216,7 +253,9 @@ export default function WellboreStatusDetail() {
       label: '全烃',
       value: format(displayData.totalGas, 2),
       unit: '%',
-      change: abnormal ? '较基线 +1.24%' : '处于基线范围',
+      change: gasChange === undefined
+        ? '等待上一有效样本'
+        : `较上一有效样本 ${gasChange >= 0 ? '+' : ''}${format(gasChange, 2)}%`,
       duration: evidenceDuration,
       grade: abnormal && displayDetection.activeSignals.includes('total_gas') ? '支持证据' : '正常',
       tone: abnormal && displayDetection.activeSignals.includes('total_gas') ? 'critical' : 'normal',
@@ -236,7 +275,7 @@ export default function WellboreStatusDetail() {
   }, [conditionLabel, currentWellAlerts, cycle.tStable, cycle.tStartPump, cycle.tStopPump, level, selectedWellView.currentSampleTime]);
 
   const trendSeries = [
-    { label: '出口流量', values: selectedWellView.flowHistory.map((item) => item.flowOut), color: '#dc2626' },
+    { label: `${outletLabel}${outletUnit === '--' ? '' : `（${outletUnit}）`}`, values: selectedWellView.flowHistory.map((item) => item.flowOut), color: '#dc2626' },
     { label: '池体积', values: selectedWellView.flowHistory.map((item) => item.pitVolume), color: '#d97706' },
     { label: '立压', values: selectedWellView.pressureHistory.map((item) => item.spp), color: '#0f766e' },
     { label: '全烃', values: selectedWellView.pressureHistory.map((item) => item.totalGas), color: '#0891b2' },

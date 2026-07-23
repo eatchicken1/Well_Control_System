@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle, Info, KeyRound, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Info, KeyRound, RadioTower, RotateCcw, Save, Server, SlidersHorizontal } from 'lucide-react';
 import { DEFAULT_REALTIME_ENDPOINT, DEFAULT_THRESHOLDS, useWellControl } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { useAuth } from '../context/AuthContext';
+import { fetchSystemSettings, type SystemSetting } from '../api/systemSettingsApi';
 
 function ThresholdInput({
   label, value, activeValue, unit, onChange, min, max, step, description, level,
@@ -338,6 +339,8 @@ export default function Settings() {
   const [passwordDraft, setPasswordDraft] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
   const [passwordState, setPasswordState] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [serverSettings, setServerSettings] = useState<SystemSetting[]>([]);
+  const [serverSettingsState, setServerSettingsState] = useState<'loading' | 'ready' | 'error'>('loading');
   const mountedRef = useRef(true);
   const savedResetTimeoutRef = useRef<number | null>(null);
   const passwordReady = passwordDraft.oldPassword.length > 0 && passwordDraft.newPassword.length >= 8 && passwordDraft.confirmPassword.length >= 8;
@@ -363,6 +366,20 @@ export default function Settings() {
   useEffect(() => () => {
     mountedRef.current = false;
     if (savedResetTimeoutRef.current != null) window.clearTimeout(savedResetTimeoutRef.current);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchSystemSettings(controller.signal)
+      .then((settings) => {
+        if (controller.signal.aborted) return;
+        setServerSettings(settings);
+        setServerSettingsState('ready');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setServerSettingsState('error');
+      });
+    return () => controller.abort();
   }, []);
 
   const handleSave = () => {
@@ -644,7 +661,40 @@ export default function Settings() {
           </ThresholdGroup>
         </div>
 
-        <aside className="ops-surface h-fit p-4 xl:sticky xl:top-4">
+        <aside className="settings-side-stack h-fit xl:sticky xl:top-4">
+          <section className="ops-surface settings-backend-card p-4">
+            <div className="mb-3 flex items-start gap-2">
+              <div className="settings-section-icon"><Server className="h-4 w-4" /></div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  后端运行配置
+                  <span className={`settings-sync-badge ${serverSettingsState}`}>
+                    <RadioTower className="h-3 w-3" />
+                    {serverSettingsState === 'ready' ? '已同步' : serverSettingsState === 'loading' ? '读取中' : '读取失败'}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] ops-muted">只读展示后端当前策略；不会覆盖检测算法或运行时状态。</p>
+              </div>
+            </div>
+            {serverSettingsState === 'ready' && serverSettings.length > 0 ? (
+              <div className="settings-backend-list">
+                {serverSettings.slice(0, 8).map((item) => (
+                  <div key={item.key} className="settings-backend-row">
+                    <div className="min-w-0">
+                      <span className="block truncate text-xs text-slate-700 dark:text-slate-200">{item.label}</span>
+                      <span className="block truncate text-[10px] ops-muted">{item.key}</span>
+                    </div>
+                    <strong>{item.value || '--'}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="settings-backend-empty">
+                {serverSettingsState === 'error' ? '暂时无法读取后端配置快照' : '正在读取后端配置快照'}
+              </div>
+            )}
+          </section>
+          <section className="ops-surface p-4">
           <div className="mb-3 flex items-center gap-2 text-sm text-slate-800 dark:text-slate-100">
             <SlidersHorizontal className="h-4 w-4 text-cyan-500" />
             阈值联锁面板
@@ -694,6 +744,7 @@ export default function Settings() {
             </div>
             此处参数仅控制曲线参考线和历史显示，不生成、升级或取消任何报警事件。
           </div>
+          </section>
         </aside>
       </div>
     </div>

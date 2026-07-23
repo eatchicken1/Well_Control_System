@@ -1,30 +1,42 @@
-import { Bell, Clock3, Square, X } from 'lucide-react';
-import { createPortal } from 'react-dom';
+import { Bell, Square } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { VerticalCurveDeck } from '../components/VerticalCurveDeck';
 import { WellboreStatusThumbnail } from '../components/WellboreStatusThumbnail';
+import { EventExplanationDrawer } from '../components/EventExplanationDrawer';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
+import { fetchWellboreProfile } from '../api/wellboreProfileApi';
+import { normalizeWellboreStructureSections, type WellboreStructureSection } from '../lib/wellboreSimulation';
 
 function safeBackendLevel(value: unknown): BackendLevel {
   const level = Number(value);
   return Number.isFinite(level) && level >= 0 && level <= 4 ? level as BackendLevel : 0;
 }
 
+function eventDisplayLevel(alert: ReturnType<typeof useWellControl>['alerts'][number] | null | undefined): BackendLevel {
+  const current = safeBackendLevel(alert?.backendLevel);
+  const peak = safeBackendLevel(alert?.peakBackendLevel ?? current);
+  return Math.max(current, peak) as BackendLevel;
+}
+
 function AlertQueueMini({
   alerts,
   wellName,
+  wellKey,
+  endpoint,
 }: {
   alerts: ReturnType<typeof useWellControl>['alerts'];
   wellName: string;
+  wellKey: string;
+  endpoint: string;
 }) {
   const criticalCount = alerts.filter((alert) => alert.level === 'critical').length;
   const warningCount = alerts.filter((alert) => alert.level === 'warning').length;
   const visibleAlerts = alerts.slice(0, 6);
   const [selectedAlertId, setSelectedAlertId] = useState<number | null>(null);
   const selectedAlert = selectedAlertId == null ? null : alerts.find((alert) => alert.id === selectedAlertId) ?? null;
-  const selectedBackendLevel = safeBackendLevel(selectedAlert?.backendLevel);
+  const selectedBackendLevel = eventDisplayLevel(selectedAlert);
 
   useEffect(() => {
     setSelectedAlertId(null);
@@ -63,7 +75,7 @@ function AlertQueueMini({
               key={alert.id}
               type="button"
               onClick={() => setSelectedAlertId(alert.id)}
-              aria-label={`查看 ${wellName} L${safeBackendLevel(alert.backendLevel)} 事件详情`}
+              aria-label={`查看 ${wellName} L${eventDisplayLevel(alert)} 事件详情`}
               className={`w-full rounded-md border px-2.5 py-2 text-left text-xs transition-colors hover:bg-white dark:hover:bg-slate-900 ${
                 alert.level === 'critical'
                   ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-200'
@@ -74,7 +86,7 @@ function AlertQueueMini({
             >
               <div className="flex min-w-0 items-center gap-2">
                 <span className={`h-2 w-2 flex-shrink-0 rounded-full ${alert.level === 'critical' ? 'bg-red-600' : alert.level === 'warning' ? 'bg-amber-500' : 'bg-blue-500'}`} />
-                <span className="ops-inline-tile rounded px-1.5 py-0.5 text-[10px] dark:bg-white/10">L{safeBackendLevel(alert.backendLevel)}</span>
+                <span className="ops-inline-tile rounded px-1.5 py-0.5 text-[10px] dark:bg-white/10">L{eventDisplayLevel(alert)}</span>
                 {safeBackendLevel(alert.peakBackendLevel ?? alert.backendLevel) > safeBackendLevel(alert.backendLevel) ? (
                   <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/30 dark:text-red-200">峰L{safeBackendLevel(alert.peakBackendLevel)}</span>
                 ) : null}
@@ -85,7 +97,7 @@ function AlertQueueMini({
           ))
         )}
       </div>
-      {selectedAlert ? createPortal(
+      {false && selectedAlert ? createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSelectedAlertId(null)}>
           <div
             className="ops-panel w-full max-w-xl overflow-hidden shadow-2xl"
@@ -143,6 +155,14 @@ function AlertQueueMini({
         </div>,
         document.body,
       ) : null}
+      {selectedAlert ? (
+        <EventExplanationDrawer
+          alert={selectedAlert}
+          wellKey={wellKey}
+          endpoint={endpoint}
+          onClose={() => setSelectedAlertId(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -170,9 +190,11 @@ export default function Monitoring() {
     wellRuntimeStates,
     selectedWellView,
     selectedWellManuallyStopped,
-    eventSpans,
-    eventProjectionState,
+    realtimeEndpoint,
+    buildRealtimeApiUrl,
   } = useWellControl();
+  const [thumbnailSections, setThumbnailSections] = useState<WellboreStructureSection[]>([]);
+  const [thumbnailRegisteredDepth, setThumbnailRegisteredDepth] = useState(0);
   const activeWellIds = monitoredWellIds.length > 0
     ? monitoredWellIds
     : realtimeTabWellIds.length > 0
@@ -181,6 +203,31 @@ export default function Monitoring() {
         ? [selectedWellId]
         : [];
   const activeWell = wells.find((well) => well.wellId === selectedWellId) || wells.find((well) => well.wellId === activeWellIds[0]) || wellInfo;
+
+  useEffect(() => {
+    if (!activeWell?.wellId) {
+      setThumbnailSections([]);
+      setThumbnailRegisteredDepth(0);
+      return undefined;
+    }
+    const controller = new AbortController();
+    setThumbnailSections([]);
+    setThumbnailRegisteredDepth(0);
+    fetchWellboreProfile(
+      buildRealtimeApiUrl(`/wells/${encodeURIComponent(activeWell.wellId)}/wellbore`),
+      controller.signal,
+    )
+      .then((profile) => {
+        if (!controller.signal.aborted) {
+          setThumbnailSections(normalizeWellboreStructureSections(profile.sections));
+          setThumbnailRegisteredDepth(profile.registeredDepthMax || 0);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setThumbnailSections([]);
+      });
+    return () => controller.abort();
+  }, [activeWell?.wellId, buildRealtimeApiUrl]);
   const selectedRuntime = wellRuntimeStates[selectedWellId] || wellRuntimeStates[activeWell?.wellId || ''];
   const viewCurrentData = selectedWellView.currentData;
   const viewBackendDetection = selectedWellView.backendDetection;
@@ -267,13 +314,14 @@ export default function Monitoring() {
                 flowData={trackFlowData}
                 pressureData={trackPressureData}
                 thresholds={thresholds}
-                wellDepth={selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? activeWell.depth}
+                wellDepth={Math.max(
+                  selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? activeWell.depth ?? 0,
+                  thumbnailRegisteredDepth,
+                )}
                 currentDepth={viewCurrentData.bitDepth}
                 isStopped={selectedWellManuallyStopped}
                 compact
                 fillViewport
-                eventSpans={eventSpans}
-                  eventProjectionState={eventProjectionState}
                 />
               </div>
             </div>
@@ -300,6 +348,7 @@ export default function Monitoring() {
                 activeSignals={viewBackendDetection.activeSignals}
                 pumpState={viewCurrentData.pumpState}
                 condition={viewCurrentData.condition}
+                wellboreSections={thumbnailSections}
                 cycleInfo={viewCycleInfo}
                 hasSamples={hasSamples}
                 isRecovering={isRecovering}
@@ -307,7 +356,12 @@ export default function Monitoring() {
               />
             </div>
             <div className="min-h-0 overflow-hidden">
-              <AlertQueueMini alerts={currentWellAlerts} wellName={activeWell.wellName} />
+              <AlertQueueMini
+                alerts={currentWellAlerts}
+                wellName={activeWell.wellName}
+                wellKey={activeWell.wellId}
+                endpoint={realtimeEndpoint}
+              />
             </div>
           </aside>
         </div>

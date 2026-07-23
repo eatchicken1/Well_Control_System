@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { BackendLevel, EventProjectionState, EventSpan, FlowDataPoint, PressureDataPoint, ThresholdSettings } from '../context/WellControlContext';
+import type { BackendLevel, FlowDataPoint, PressureDataPoint, ThresholdSettings } from '../context/WellControlContext';
 import { useIsDarkMode } from '../hooks/useChartTheme';
 
 interface VerticalCurveDeckProps {
@@ -12,8 +12,6 @@ interface VerticalCurveDeckProps {
   isStopped?: boolean;
   compact?: boolean;
   fillViewport?: boolean;
-  eventSpans?: EventSpan[];
-  eventProjectionState?: EventProjectionState;
 }
 
 interface CurvePoint {
@@ -338,24 +336,98 @@ function downsampleCurvePoints(points: CurvePoint[], maxPoints = MAX_RENDER_POIN
   return sampled;
 }
 
+interface FrameLevelBand {
+  startIndex: number;
+  endIndex: number;
+  startTimeMs?: number;
+  endTimeMs?: number;
+}
+
+function curvePointTimeMs(point: CurvePoint) {
+  if (Number.isFinite(point.timestampMs)) return Number(point.timestampMs);
+  const parsed = Date.parse(point.time);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+/**
+ * Match the canonical replay renderer: public-level backgrounds are built from
+ * frame-level levels, not from the candidate's highest level. A one-minute
+ * bridge is retained so a single missing frame does not split a real run.
+ */
+function buildFrameLevelBands(points: CurvePoint[], threshold: number, bridgeMs = 60_000): FrameLevelBand[] {
+  const active = points
+    .map((point, index) => ({ index, timeMs: curvePointTimeMs(point), active: point.level >= threshold }))
+    .filter((item) => item.active);
+  if (active.length === 0) return [];
+
+  const bands: FrameLevelBand[] = [];
+  let start = active[0];
+  let previous = active[0];
+
+  for (let cursor = 1; cursor < active.length; cursor += 1) {
+    const current = active[cursor];
+    const hasTimes = Number.isFinite(previous.timeMs) && Number.isFinite(current.timeMs);
+    const continuous = hasTimes
+      ? current.timeMs >= previous.timeMs && current.timeMs - previous.timeMs <= bridgeMs
+      : current.index - previous.index <= 1;
+
+    if (!continuous) {
+      bands.push({
+        startIndex: start.index,
+        endIndex: previous.index,
+        startTimeMs: Number.isFinite(start.timeMs) ? start.timeMs : undefined,
+        endTimeMs: Number.isFinite(previous.timeMs) ? previous.timeMs : undefined,
+      });
+      start = current;
+    }
+    previous = current;
+  }
+
+  bands.push({
+    startIndex: start.index,
+    endIndex: previous.index,
+    startTimeMs: Number.isFinite(start.timeMs) ? start.timeMs : undefined,
+    endTimeMs: Number.isFinite(previous.timeMs) ? previous.timeMs : undefined,
+  });
+  return bands;
+}
+
+function projectFrameBandToRenderedPoints(band: FrameLevelBand, sourcePoints: CurvePoint[], renderedPoints: CurvePoint[]) {
+  const renderedTimes = renderedPoints.map(curvePointTimeMs);
+  if (Number.isFinite(band.startTimeMs) && Number.isFinite(band.endTimeMs) && renderedTimes.some(Number.isFinite)) {
+    let start = renderedTimes.findIndex((time) => Number.isFinite(time) && time >= (band.startTimeMs as number));
+    let end = renderedTimes.findLastIndex((time) => Number.isFinite(time) && time <= (band.endTimeMs as number));
+    if (start < 0) start = 0;
+    if (end < 0) end = renderedPoints.length - 1;
+    return { start: Math.max(0, start), end: Math.max(start, Math.min(renderedPoints.length - 1, end)) };
+  }
+
+  const sourceLast = Math.max(1, sourcePoints.length - 1);
+  const renderedLast = Math.max(1, renderedPoints.length - 1);
+  return {
+    start: Math.round((band.startIndex / sourceLast) * renderedLast),
+    end: Math.round((band.endIndex / sourceLast) * renderedLast),
+  };
+}
+
 function VerticalTrack({
   config,
   points,
+  backgroundPoints,
   showAxis,
   isDark,
   compact = false,
   mobileDense = false,
   fillViewport = false,
-  eventSpans = [],
 }: {
   config: TrackConfig;
   points: CurvePoint[];
+  backgroundPoints: CurvePoint[];
   showAxis?: boolean;
   isDark: boolean;
   compact?: boolean;
   mobileDense?: boolean;
   fillViewport?: boolean;
-  eventSpans?: EventSpan[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [sizeTick, setSizeTick] = useState(0);
@@ -419,59 +491,32 @@ function VerticalTrack({
     const yForIndex = (index: number) => plotY + (index / (points.length - 1)) * plotH;
     const latest = points[points.length - 1];
 
-    const eventBandMap = new Map<string, { start: number; end: number; level: BackendLevel; eventId: string }>();
-    const pointTimes = points.map((point) => Number.isFinite(point.timestampMs) ? Number(point.timestampMs) : Number.isFinite(Date.parse(point.time)) ? Date.parse(point.time) : NaN);
-    const hasAbsoluteTimes = pointTimes.filter(Number.isFinite).length >= 2;
-    if (eventSpans.length > 0 && hasAbsoluteTimes) {
-      const firstTime = pointTimes.find(Number.isFinite) as number;
-      const lastTime = [...pointTimes].reverse().find(Number.isFinite) as number;
-      eventSpans.forEach((span) => {
-        const startMs = Date.parse(span.startTime);
-        const endMs = span.endTime ? Date.parse(span.endTime) : lastTime;
-        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < firstTime || startMs > lastTime) return;
-        const start = pointTimes.findIndex((value) => Number.isFinite(value) && value >= startMs);
-        let end = pointTimes.findLastIndex((value) => Number.isFinite(value) && value <= endMs);
-        if (start < 0) return;
-        if (end < start) end = start;
-        eventBandMap.set(span.eventId, { start, end, level: span.highestLevel, eventId: span.eventId });
-      });
-    } else {
-      points.forEach((point, index) => {
-        if (!point.eventId || point.level < 2) return;
-        const existing = eventBandMap.get(point.eventId);
-        if (existing) {
-          existing.start = Math.min(existing.start, index);
-          existing.end = Math.max(existing.end, index);
-          existing.level = Math.max(existing.level, point.level) as BackendLevel;
-          return;
-        }
-        eventBandMap.set(point.eventId, { start: index, end: index, level: point.level, eventId: point.eventId });
+    for (const threshold of [1, 2, 3]) {
+      const bandColor = threshold === 3
+        ? (isDark ? 'rgba(239, 91, 100, 0.19)' : 'rgba(217, 91, 100, 0.19)')
+        : threshold === 2
+          ? (isDark ? 'rgba(239, 155, 160, 0.26)' : 'rgba(239, 155, 160, 0.26)')
+          : (isDark ? 'rgba(243, 217, 139, 0.18)' : 'rgba(243, 217, 139, 0.18)');
+      const edgeColor = threshold === 3
+        ? (isDark ? 'rgba(239, 91, 100, 0.75)' : 'rgba(217, 91, 100, 0.70)')
+        : threshold === 2
+          ? (isDark ? 'rgba(239, 155, 160, 0.80)' : 'rgba(217, 91, 100, 0.60)')
+          : (isDark ? 'rgba(243, 217, 139, 0.78)' : 'rgba(202, 138, 4, 0.58)');
+      buildFrameLevelBands(backgroundPoints, threshold).forEach((band) => {
+        const projected = projectFrameBandToRenderedPoints(band, backgroundPoints, points);
+        const y1 = yForIndex(projected.start);
+        const y2 = yForIndex(Math.min(points.length - 1, projected.end + 1));
+        const height = Math.max(2, y2 - y1);
+        ctx.fillStyle = bandColor;
+        ctx.fillRect(plotX, y1, plotW, height);
+        ctx.strokeStyle = edgeColor;
+        ctx.lineWidth = 1.0;
+        ctx.beginPath();
+        ctx.moveTo(plotX, y1 + 0.5);
+        ctx.lineTo(plotX + plotW, y1 + 0.5);
+        ctx.stroke();
       });
     }
-    const eventBands = [...eventBandMap.values()].sort((a, b) => a.start - b.start);
-    eventBands.forEach((band) => {
-      const y1 = yForIndex(band.start);
-      const y2 = yForIndex(Math.min(points.length - 1, band.end + 1));
-      const height = Math.max(2, y2 - y1);
-      const bandColor = band.level >= 4
-        ? (isDark ? 'rgba(248, 113, 113, 0.24)' : 'rgba(239, 68, 68, 0.16)')
-        : band.level >= 3
-          ? (isDark ? 'rgba(251, 146, 60, 0.20)' : 'rgba(249, 115, 22, 0.13)')
-          : (isDark ? 'rgba(251, 191, 36, 0.16)' : 'rgba(245, 158, 11, 0.10)');
-      const edgeColor = band.level >= 4
-        ? (isDark ? 'rgba(252, 165, 165, 0.92)' : 'rgba(220, 38, 38, 0.82)')
-        : band.level >= 3
-          ? (isDark ? 'rgba(253, 186, 116, 0.88)' : 'rgba(234, 88, 12, 0.76)')
-          : (isDark ? 'rgba(253, 224, 71, 0.82)' : 'rgba(202, 138, 4, 0.70)');
-      ctx.fillStyle = bandColor;
-      ctx.fillRect(plotX, y1, plotW, height);
-      ctx.strokeStyle = edgeColor;
-      ctx.lineWidth = 1.15;
-      ctx.beginPath();
-      ctx.moveTo(plotX, y1 + 0.5);
-      ctx.lineTo(plotX + plotW, y1 + 0.5);
-      ctx.stroke();
-    });
 
     ctx.lineWidth = 0.7;
     for (let i = 0; i <= 6; i += 1) {
@@ -616,7 +661,7 @@ function VerticalTrack({
         ctx.fillText(`钻头 ${fmtDepthWithUnit(point.bitDepth)}`, 14, y + (mobileDense ? 27 : 31));
       });
     }
-  }, [config, points, showAxis, palette, compact, mobileDense, pad, sizeTick, eventSpans]);
+  }, [backgroundPoints, config, points, showAxis, palette, compact, mobileDense, pad, sizeTick]);
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -697,6 +742,7 @@ function AxisLane({ points, compact, mobileDense }: { points: CurvePoint[]; comp
         curves: [],
       }}
       points={points}
+      backgroundPoints={points}
       isDark={isDark}
       showAxis
       compact={compact}
@@ -715,32 +761,12 @@ export function VerticalCurveDeck({
   isStopped = false,
   compact = false,
   fillViewport = false,
-  eventSpans = [],
-  eventProjectionState,
 }: VerticalCurveDeckProps) {
   const isDark = useIsDarkMode();
   const mobileDense = useNarrowViewport() && compact;
   const fillTracks = fillViewport && !mobileDense;
   const points = useMemo(() => buildTrackData(flowData, pressureData, wellDepth ?? currentDepth ?? 3200, currentDepth), [flowData, pressureData, wellDepth, currentDepth]);
   const renderPoints = useMemo(() => downsampleCurvePoints(points), [points]);
-  const latestPoint = points.at(-1);
-  const isDownsampled = renderPoints.length < points.length;
-  const eventStats = useMemo(() => {
-    const byId = new Map<string, BackendLevel>();
-    if (eventSpans.length > 0) {
-      eventSpans.forEach((span) => byId.set(span.eventId, span.highestLevel));
-    } else {
-      points.forEach((point) => {
-        if (!point.eventId || point.level < 2) return;
-        byId.set(point.eventId, Math.max(byId.get(point.eventId) || 0, point.level) as BackendLevel);
-      });
-    }
-    const levels = [...byId.values()];
-    return {
-      warningCount: levels.filter((level) => level === 2 || level === 3).length,
-      criticalCount: levels.filter((level) => level >= 4).length,
-    };
-  }, [eventSpans, points]);
   const pitVolumeValues = points.map((point) => point.values.pitVolume);
   const flowValues = points.flatMap((point) => [point.values.flowIn, point.values.flowOut]);
   const casingValues = points.map((point) => point.values.casingPressure);
@@ -821,22 +847,6 @@ export function VerticalCurveDeck({
       className="vertical-curve-deck relative flex h-full min-h-[360px] flex-col overflow-hidden rounded-md border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950"
       data-fill-viewport={fillTracks ? 'true' : undefined}
     >
-      <div className="border-b border-slate-200 px-3 py-1.5 dark:border-slate-700">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-            <span>样本 {points.length}</span>
-            {isDownsampled ? <span>绘制 {renderPoints.length}</span> : null}
-            <span>预警事件 {eventStats.warningCount}</span>
-            <span>确认事件 {eventStats.criticalCount}</span>
-            <span className={eventProjectionState?.status === 'connected' ? 'text-emerald-700 dark:text-emerald-300' : eventProjectionState?.status === 'error' ? 'text-red-600 dark:text-red-300' : ''} title={eventProjectionState?.message}>
-              {eventProjectionState?.status === 'connected' ? '服务端正式泳道' : '帧级兼容泳道'}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400">
-            {latestPoint?.time ? `最新 ${timeLabel(latestPoint.time)} · ` : ''}30min 窗口 · 时间向下
-          </div>
-        </div>
-      </div>
       <div className={`vertical-curve-body flex min-h-0 flex-1 overflow-y-hidden ${fillTracks ? 'overflow-x-hidden' : 'overflow-x-auto'}`}>
         <AxisLane points={renderPoints} compact={compact} mobileDense={mobileDense} />
         {displayTracks.map((track) => (
@@ -844,11 +854,11 @@ export function VerticalCurveDeck({
             key={track.title}
             config={track}
             points={renderPoints}
+            backgroundPoints={points}
             isDark={isDark}
             compact={compact}
             mobileDense={mobileDense}
             fillViewport={fillTracks}
-            eventSpans={eventSpans}
           />
         ))}
       </div>
