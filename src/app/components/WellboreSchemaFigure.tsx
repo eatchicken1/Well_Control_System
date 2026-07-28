@@ -413,15 +413,32 @@ function EngineeringCallouts({ model, g, compact }: { model: WellboreSimulationM
     );
   }
   const right = g.centerX + wOf(52, g);
+  const shoeLabelY = Math.min(shoeY, g.bottom - 42);
+  const bottomLabelY = g.bottom + 22;
+  const bitAtTd = Math.abs(model.wellDepth - model.bitDepth) <= Math.max(10, model.wellDepth * 0.002);
   return (
     <g className="wellbore-engineering-callouts" fontFamily="Microsoft YaHei, PingFang SC, Arial">
-      <path d={`M ${g.centerX + wOf(43, g)} ${shoeY} H ${right - 6}`} stroke="#475569" strokeWidth="1" />
-      <text x={right} y={shoeY + 3} fill="#334155" fontSize="10" fontWeight="800">技术套管鞋 {depth(model.casingShoeDepth)}</text>
-      <text x={right} y={shoeY + 18} fill="#64748b" fontSize="9">裸眼起点</text>
-      <path d={`M ${g.centerX - 26} ${bitY} H ${g.centerX - 76}`} stroke="#475569" strokeWidth="1" />
-      <text x={g.centerX - 80} y={bitY + 3} fill="#1d4ed8" fontSize="10" fontWeight="800" textAnchor="end">钻头 {depth(model.bitDepth)}</text>
-      <path d={`M ${g.centerX + 16} ${tdY} H ${g.centerX + 60}`} stroke="#94a3b8" strokeWidth="1" />
-      <text x={g.centerX + 66} y={tdY - 2} fill="#475569" fontSize="9.5" fontWeight="700">TD {depth(model.wellDepth)}</text>
+      <path d={`M ${g.centerX + wOf(43, g)} ${shoeY} H ${right - 10} V ${shoeLabelY}`} fill="none" stroke="#64748b" strokeWidth="1" />
+      <circle cx={right - 10} cy={shoeLabelY} r="2" fill="#64748b" />
+      <text x={right - 4} y={shoeLabelY + 3} fill="#334155" fontSize="9.4" fontWeight="800">
+        技术套管鞋 / 裸眼起点 · {depth(model.casingShoeDepth)}
+      </text>
+      {bitAtTd ? (
+        <g>
+          <path d={`M ${g.centerX - 24} ${bitY} H ${g.centerX - 62} V ${bottomLabelY - 3} H ${g.centerX - 76}`} fill="none" stroke="#2563eb" strokeWidth="1" />
+          <circle cx={g.centerX - 76} cy={bottomLabelY - 3} r="2" fill="#2563eb" />
+          <text x={g.centerX - 82} y={bottomLabelY} fill="#1d4ed8" fontSize="9.8" fontWeight="800" textAnchor="end">钻头到达 TD · {depth(model.wellDepth)}</text>
+        </g>
+      ) : (
+        <>
+          <path d={`M ${g.centerX - 24} ${bitY} H ${g.centerX - 62} V ${bottomLabelY - 3} H ${g.centerX - 76}`} fill="none" stroke="#2563eb" strokeWidth="1" />
+          <circle cx={g.centerX - 76} cy={bottomLabelY - 3} r="2" fill="#2563eb" />
+          <text x={g.centerX - 82} y={bottomLabelY} fill="#1d4ed8" fontSize="9.8" fontWeight="800" textAnchor="end">钻头 · {depth(model.bitDepth)}</text>
+          <path d={`M ${g.centerX + 18} ${tdY} H ${g.centerX + 58} V ${bottomLabelY + 12} H ${g.centerX + 72}`} fill="none" stroke="#64748b" strokeWidth="1" />
+          <circle cx={g.centerX + 72} cy={bottomLabelY + 12} r="2" fill="#64748b" />
+          <text x={g.centerX + 78} y={bottomLabelY + 15} fill="#475569" fontSize="9.5" fontWeight="700">TD · {depth(model.wellDepth)}</text>
+        </>
+      )}
     </g>
   );
 }
@@ -432,6 +449,7 @@ export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDep
   const g = compact ? THUMB : DETAIL;
   const id = compact ? 'thumb' : 'detail';
   const visual = VISUAL_STATES[backendLevel];
+  const showFlow = model.flowState.circulationActive || backendLevel > 0;
   return (
     <div className={`wellbore-schema-figure wellbore-schema-figure-${mode}`} data-animation={visual.animationIntensity}>
       <svg className="wellbore-schema-overlay" viewBox={g.viewBox} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`${TEXT.aria} L${backendLevel} ${model.statusLabel}`}>
@@ -447,8 +465,8 @@ export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDep
         <FluidColumn model={model} g={g} id={id} level={backendLevel} />
         <Surface g={g} />
         <DrillString model={model} g={g} id={id} />
-        <BitHydraulics model={model} g={g} level={backendLevel} />
-        <Flow model={model} g={g} level={backendLevel} id={id} visual={visual} />
+        {showFlow ? <BitHydraulics model={model} g={g} level={backendLevel} /> : null}
+        {showFlow ? <Flow model={model} g={g} level={backendLevel} id={id} visual={visual} /> : null}
         <EngineeringCallouts model={model} g={g} compact={compact} />
       </svg>
     </div>

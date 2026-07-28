@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router';
 import { useLocation } from 'react-router';
-import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, RadioTower, BarChart3, LogOut, UserCircle, MapPinned, ChevronRight, SignalHigh, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, RadioTower, BarChart3, LogOut, UserCircle, MapPinned, ChevronRight, SignalHigh, CheckCircle2, AlertTriangle, HardHat } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 const navItems = [
   { to: '/', label: '总览', icon: LayoutDashboard, end: true },
   { to: '/monitoring', label: '实时监测', icon: Activity },
+  { to: '/well-management', label: '井管理', icon: HardHat },
   { to: '/baseline', label: '基线管理', icon: Database },
   { to: '/history', label: '历史复盘', icon: BarChart3 },
   { to: '/alerts', label: '报警管理', icon: Bell },

@@ -12,6 +12,8 @@ import Login from './pages/Login';
 import WellborePreview from './pages/WellborePreview';
 import NotFound from './pages/NotFound';
 import RouteError from './pages/RouteError';
+import WellManagement from './pages/WellManagement';
+import WellManagementDetail from './pages/WellManagementDetail';
 
 function WellControlLayout() {
   return <Layout />;
@@ -32,6 +34,8 @@ export const router = createBrowserRouter([
           { index: true, Component: Dashboard },
           { path: 'monitoring', Component: Monitoring },
           { path: 'monitoring/wellbore-status', Component: WellboreStatusDetail },
+          { path: 'well-management', Component: WellManagement },
+          { path: 'well-management/:id', Component: WellManagementDetail },
           { path: 'baseline', Component: Baseline },
           { path: 'history', Component: History },
           { path: 'alerts', Component: Alerts },
