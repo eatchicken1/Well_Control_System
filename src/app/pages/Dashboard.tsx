@@ -52,6 +52,12 @@ function nextReplaySpeed(speed: ReplaySpeed): ReplaySpeed {
   return REPLAY_SPEED_OPTIONS[(index + 1) % REPLAY_SPEED_OPTIONS.length] || 1;
 }
 
+function sampleTimeLabel(value?: string | null) {
+  if (!value) return '--';
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+  return match ? `${match[1]} ${match[2]}` : value;
+}
+
 function statusLabel(runtime?: WellRuntimeState) {
   if (runtime?.status === 'connected') return '监测中';
   if (runtime?.status === 'connecting') return '接入中';
@@ -457,7 +463,7 @@ function MonitoredWellCard({
       <div className="multiwell-card-sample">
         <Clock3 className="h-3.5 w-3.5" />
         <span>最新样本</span>
-        <strong>{latestTime || '--'}</strong>
+        <strong>{sampleTimeLabel(latestTime)}</strong>
       </div>
 
       <div className="multiwell-card-runtime-row" aria-label={`${well.wellName}运行态`}>

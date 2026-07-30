@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router';
 import {
-  Activity,
   BellRing,
-  Check,
-  Database,
+  CircleAlert,
   Eye,
   EyeOff,
   Gauge,
   History,
+  LogIn,
   LockKeyhole,
   Settings2,
   ShieldCheck,
   UserRound,
+  type LucideIcon,
 } from 'lucide-react';
+import { Checkbox } from '../components/ui/checkbox';
 import { useAuth } from '../context/AuthContext';
 
 const REMEMBERED_USERNAME_KEY = 'wcs-login-username';
@@ -27,7 +28,7 @@ function safeReturnPath(value: unknown) {
 
 function BrandMark() {
   return (
-    <svg viewBox="0 0 56 64" aria-hidden="true" className="auth-brand-svg">
+    <svg viewBox="0 0 56 64" aria-hidden="true" className="login-brand-mark-svg">
       <path d="M28 1 54 10v26c0 14-9.7 21.7-26 27C11.7 57.7 2 50 2 36V10L28 1Z" fill="currentColor" />
       <g fill="none" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7">
         <path d="m18 43 10-29 10 29M22 31h12M20 37h16M24 25h8M28 14v-4M16 43h24" />
@@ -41,7 +42,7 @@ function BrandMark() {
 function RigIllustration() {
   return (
     <svg viewBox="0 0 580 220" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
-      <g className="auth-rig-lines" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <g className="login-rig-lines" fill="none" strokeLinecap="round" strokeLinejoin="round">
         <path d="M0 192c58-8 83-4 126 0 47 4 77 5 122-1 55-7 81-2 119 3 44 6 90-2 127-4 31-2 53 1 86 5" />
         <path d="M0 203c51-5 87-2 130 2 48 5 84 2 122-3 54-7 83-2 119 2 45 5 83-4 128-3 31 1 53 3 81 1" />
         <path d="m70 191 11-6 11 1 10-7 18 4 13-3 11 7M424 193l16-8 13 3 13-5 24 6 13-4 13 4" />
@@ -57,11 +58,230 @@ function RigIllustration() {
 }
 
 const featureItems = [
-  { icon: Gauge, title: '多井监测', description: '集中监测管理' },
-  { icon: History, title: '历史复核', description: '回溯分析追踪' },
-  { icon: BellRing, title: '报警判级', description: '分级及时预警' },
-  { icon: Settings2, title: '参数配置', description: '灵活配置管理' },
+  { icon: Gauge, title: '多井监测', description: '集中查看多口井运行状态' },
+  { icon: History, title: '历史复核', description: '追溯报警与参数演化' },
+  { icon: BellRing, title: '报警分级', description: '多级风险识别与响应' },
+  { icon: Settings2, title: '参数配置', description: '灵活调整监测策略' },
 ];
+
+function formatLoginError(err: unknown) {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  if (import.meta.env.DEV && raw) {
+    console.warn('[login] raw login error:', raw);
+  }
+
+  const normalized = raw.toLowerCase();
+  if (/network error|failed to fetch|load failed|networkerror|err_network|network/i.test(raw)) {
+    return '网络连接异常，请检查网络';
+  }
+  if (/unauthorized|forbidden|invalid|credential|401|403/.test(normalized)) {
+    return '用户名或密码错误';
+  }
+  if (/http\s*5\d\d|500|502|503|504|internal server|request failed|service unavailable|bad gateway/.test(normalized)) {
+    return '服务连接异常，请稍后重试';
+  }
+  if (/http\s*\d+|request failed/.test(normalized)) {
+    return '登录服务暂时不可用';
+  }
+  if (raw && /[\u4e00-\u9fff]/.test(raw)) {
+    return raw;
+  }
+  return '登录失败，请检查账号密码。';
+}
+
+function CapabilityItem({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description: string }) {
+  return (
+    <div className="capability-item">
+      <div className="capability-icon" aria-hidden="true">
+        <Icon />
+      </div>
+      <div className="capability-copy">
+        <div className="capability-title">{title}</div>
+        <div className="capability-description">{description}</div>
+      </div>
+    </div>
+  );
+}
+
+function LoginBrandPanel() {
+  return (
+    <section className="brand-panel" aria-label="井控溢流实时监测系统简介">
+      <div className="brand-content">
+        <header className="brand-header">
+          <div className="brand-mark">
+            <BrandMark />
+          </div>
+          <div className="brand-copy">
+            <div className="brand-english">WELL CONTROL SYSTEM</div>
+            <div className="brand-system-name">井控溢流实时监测系统</div>
+          </div>
+        </header>
+
+        <div className="hero-content">
+          <h1 className="hero-title" aria-label="实时感知 · 智能预警 · 安全可控">
+            <span>实时感知</span>
+            <span className="hero-title-separator">·</span>
+            <span>智能预警</span>
+            <span className="hero-title-separator">·</span>
+            <span>安全可控</span>
+          </h1>
+          <div className="hero-accent" aria-hidden="true" />
+          <p className="hero-description">
+            面向多井实时监测、异常识别、风险判级与事件复核，为钻井作业提供持续可靠的井控安全支持。
+          </p>
+        </div>
+
+        <div className="capability-grid" aria-label="系统能力">
+          {featureItems.map((item) => <CapabilityItem key={item.title} {...item} />)}
+        </div>
+      </div>
+
+      <div className="rig-line-art">
+        <RigIllustration />
+      </div>
+    </section>
+  );
+}
+
+interface LoginFormProps {
+  username: string;
+  password: string;
+  rememberMe: boolean;
+  showPassword: boolean;
+  error: string;
+  submitting: boolean;
+  usernameReady: boolean;
+  passwordReady: boolean;
+  submitHint: string;
+  onUsernameChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
+  onRememberChange: (value: boolean) => void;
+  onTogglePassword: () => void;
+  onForgotPassword: () => void;
+  onSubmit: (event: FormEvent) => void;
+}
+
+function LoginForm({
+  username,
+  password,
+  rememberMe,
+  showPassword,
+  error,
+  submitting,
+  usernameReady,
+  passwordReady,
+  submitHint,
+  onUsernameChange,
+  onPasswordChange,
+  onRememberChange,
+  onTogglePassword,
+  onForgotPassword,
+  onSubmit,
+}: LoginFormProps) {
+  return (
+    <section className="login-area" aria-label="系统登录">
+      <form className="login-card" onSubmit={onSubmit} noValidate>
+        <header className="login-heading">
+          <div className="login-heading-icon" aria-hidden="true">
+            <LockKeyhole />
+          </div>
+          <div>
+            <h2 className="login-title">系统登录</h2>
+            <p className="login-subtitle">使用您的系统账户继续</p>
+          </div>
+        </header>
+
+        <div className="login-form-group">
+          <label className="login-form-label" htmlFor="login-username">用户名</label>
+          <div className="login-input-wrapper">
+            <span className="login-input-icon" aria-hidden="true"><UserRound /></span>
+            <input
+              id="login-username"
+              className="login-input-control"
+              aria-label="用户名"
+              value={username}
+              onChange={(event) => onUsernameChange(event.target.value)}
+              autoComplete="username"
+              aria-invalid={Boolean(error) && !usernameReady}
+              aria-describedby="login-error login-submit-hint"
+              placeholder="请输入用户名"
+              required
+            />
+          </div>
+        </div>
+
+        <div className="login-form-group">
+          <label className="login-form-label" htmlFor="login-password">密码</label>
+          <div className="login-input-wrapper">
+            <span className="login-input-icon" aria-hidden="true"><LockKeyhole /></span>
+            <input
+              id="login-password"
+              className="login-input-control"
+              type={showPassword ? 'text' : 'password'}
+              aria-label="密码"
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              autoComplete="current-password"
+              aria-invalid={Boolean(error) && !passwordReady}
+              aria-describedby="login-error login-submit-hint"
+              placeholder="请输入密码"
+              required
+            />
+            <button
+              type="button"
+              className="login-password-toggle"
+              onClick={onTogglePassword}
+              aria-label={showPassword ? '隐藏密码' : '显示密码'}
+            >
+              {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+            </button>
+          </div>
+        </div>
+
+        <div id="login-error" className="login-error" role={error ? 'alert' : undefined} aria-live="polite">
+          {error ? (
+            <>
+              <CircleAlert aria-hidden="true" />
+              <span>{error}</span>
+            </>
+          ) : (
+            <span aria-hidden="true">&nbsp;</span>
+          )}
+        </div>
+
+        <div className="login-form-actions">
+          <label className="login-remember-control">
+            <Checkbox
+              checked={rememberMe}
+              onCheckedChange={(checked) => onRememberChange(checked === true)}
+              className="login-checkbox"
+              aria-label="记住我"
+            />
+            <span>记住我</span>
+          </label>
+          <button type="button" className="login-forgot-link" onClick={onForgotPassword}>
+            忘记密码？
+          </button>
+        </div>
+
+        <div id="login-submit-hint" className="sr-only" role="status" aria-live="polite">{submitHint}</div>
+        <button className="login-button" type="submit" disabled={submitting} aria-describedby="login-submit-hint">
+          <LogIn aria-hidden="true" />
+          {submitting ? '正在验证……' : '进入系统'}
+        </button>
+
+        <div className="login-security-tip">
+          <ShieldCheck aria-hidden="true" />
+          <span>系统采用多重安全机制，保障您的数据安全</span>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function LoginFooter({ year }: { year: number }) {
+  return <footer className="login-footer">© {year} Well Control System. 保留所有权利。</footer>;
+}
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -78,9 +298,8 @@ export default function Login() {
   const copyrightYear = new Date().getFullYear();
   const usernameReady = username.trim().length > 0;
   const passwordReady = password.length > 0;
-  const canSubmit = !submitting;
   const submitHint = submitting
-    ? '正在校验账号，请稍候。'
+    ? '正在验证账号，请稍候。'
     : !usernameReady
       ? '请输入用户名后继续。'
       : !passwordReady
@@ -114,137 +333,47 @@ export default function Login() {
       await login(username.trim(), password);
       navigate(from, { replace: true });
     } catch (err) {
-      if (mountedRef.current) setError(err instanceof Error ? err.message : '登录失败，请检查账号密码。');
+      if (mountedRef.current) setError(formatLoginError(err));
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
   };
 
   return (
-    <main className="auth-shell">
-      <div className="auth-shell-geometry" aria-hidden="true">
-        <span className="auth-orbit auth-orbit-one" />
-        <span className="auth-orbit auth-orbit-two" />
-        <span className="auth-geometry-node auth-geometry-node-one" />
-        <span className="auth-geometry-node auth-geometry-node-two" />
+    <main className="login-page">
+      <div className="login-background-decoration" aria-hidden="true">
+        <span className="login-arc login-arc-primary" />
+        <span className="login-arc login-arc-secondary" />
+        <span className="login-dot-field login-dot-field-top" />
+        <span className="login-dot-field login-dot-field-bottom" />
+        <span className="login-soft-band" />
       </div>
 
-      <section className="auth-login-panel" aria-label="井控溢流实时监测系统登录">
-        <div className="auth-login-copy">
-          <div className="auth-brand-row">
-            <div className="auth-brand-mark"><BrandMark /></div>
-            <span className="auth-brand-name">WELL CONTROL SYSTEM</span>
-          </div>
-
-          <div className="auth-copy-content">
-            <h1>井控溢流实时监测系统</h1>
-            <p>专注于井控安全监测与溢流风险管理，助力钻井作业安全高效运行。</p>
-
-            <div className="auth-signal-grid">
-              {featureItems.map(({ icon: Icon, title, description }) => (
-                <div className="auth-feature-card" key={title}>
-                  <Icon className="auth-feature-icon" aria-hidden="true" />
-                  <strong>{title}</strong>
-                  <span>{description}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="auth-dot-field" aria-hidden="true" />
-          <div className="auth-rig-illustration"><RigIllustration /></div>
-        </div>
-
-        <form className="auth-form" onSubmit={submit} noValidate>
-          <header className="auth-form-header">
-            <div className="auth-eyebrow">SECURE SIGN IN</div>
-            <h2>系统登录</h2>
-          </header>
-
-          <div className="auth-form-fields">
-            <label className="auth-field-label">
-              <span>用户名</span>
-              <div className="auth-input-shell">
-                <UserRound className="auth-input-icon" aria-hidden="true" />
-                <input
-                  className="auth-input"
-                  aria-label="用户名"
-                  value={username}
-                  onChange={(event) => {
-                    setUsername(event.target.value);
-                    if (error) setError('');
-                  }}
-                  autoComplete="username"
-                  aria-invalid={Boolean(error) && !usernameReady}
-                  aria-describedby={error ? 'login-error' : undefined}
-                  placeholder="请输入用户名"
-                  required
-                />
-              </div>
-            </label>
-
-            <label className="auth-field-label">
-              <span>密码</span>
-              <div className="auth-input-shell">
-                <LockKeyhole className="auth-input-icon" aria-hidden="true" />
-                <input
-                  className="auth-input auth-password-input"
-                  type={showPassword ? 'text' : 'password'}
-                  aria-label="密码"
-                  value={password}
-                  onChange={(event) => {
-                    setPassword(event.target.value);
-                    if (error) setError('');
-                  }}
-                  autoComplete="current-password"
-                  aria-invalid={Boolean(error) && !passwordReady}
-                  aria-describedby={error ? 'login-error' : undefined}
-                  placeholder="请输入密码"
-                  required
-                />
-                <button
-                  type="button"
-                  className="auth-password-toggle"
-                  onClick={() => setShowPassword((visible) => !visible)}
-                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
-                >
-                  {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
-                </button>
-              </div>
-            </label>
-          </div>
-
-          {error && <div id="login-error" role="alert" className="auth-error">{error}</div>}
-
-          <div className="auth-form-options">
-            <label className="auth-remember-control">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(event) => setRememberMe(event.target.checked)}
-              />
-              <span className="auth-checkbox" aria-hidden="true"><Check /></span>
-              <span>记住我</span>
-            </label>
-            <button type="button" className="auth-forgot" onClick={() => setError('请联系系统管理员重置密码。')}>
-              忘记密码?
-            </button>
-          </div>
-
-          <div id="login-submit-hint" className="sr-only" role="status" aria-live="polite">{submitHint}</div>
-          <button className="ops-button-primary auth-submit" type="submit" disabled={!canSubmit} aria-describedby="login-submit-hint">
-            <LockKeyhole className="h-4 w-4" aria-hidden="true" />
-            {submitting ? '正在登录' : '进入系统'}
-          </button>
-
-          <div className="auth-security-note">
-            <ShieldCheck aria-hidden="true" />
-            <span>系统采用多重安全机制，保障您的数据安全</span>
-          </div>
-        </form>
-      </section>
-
-      <footer className="auth-footer">© {copyrightYear} Well Control System. 保留所有权利。</footer>
+      <LoginBrandPanel />
+      <LoginForm
+        username={username}
+        password={password}
+        rememberMe={rememberMe}
+        showPassword={showPassword}
+        error={error}
+        submitting={submitting}
+        usernameReady={usernameReady}
+        passwordReady={passwordReady}
+        submitHint={submitHint}
+        onUsernameChange={(value) => {
+          setUsername(value);
+          if (error) setError('');
+        }}
+        onPasswordChange={(value) => {
+          setPassword(value);
+          if (error) setError('');
+        }}
+        onRememberChange={setRememberMe}
+        onTogglePassword={() => setShowPassword((visible) => !visible)}
+        onForgotPassword={() => setError('请联系系统管理员重置密码。')}
+        onSubmit={submit}
+      />
+      <LoginFooter year={copyrightYear} />
     </main>
   );
 }
