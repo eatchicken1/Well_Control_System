@@ -1,10 +1,10 @@
 import { Bell, Square } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { VerticalCurveDeck } from '../components/VerticalCurveDeck';
 import { WellboreStatusThumbnail } from '../components/WellboreStatusThumbnail';
 import { EventExplanationDrawer } from '../components/EventExplanationDrawer';
-import { useWellControl, type BackendLevel } from '../context/WellControlContext';
+import { useWellControl, type BackendLevel, type FlowDataPoint } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 import { fetchWellboreProfile } from '../api/wellboreProfileApi';
 import { normalizeWellboreStructureSections, type WellboreStructureSection } from '../lib/wellboreSimulation';
@@ -20,22 +20,50 @@ function eventDisplayLevel(alert: ReturnType<typeof useWellControl>['alerts'][nu
   return Math.max(current, peak) as BackendLevel;
 }
 
+function observationPointTimeMs(point: FlowDataPoint) {
+  if (Number.isFinite(point.timestampMs)) return Number(point.timestampMs);
+  const parsed = Date.parse(point.time);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function countL1ObservationWindows(points: FlowDataPoint[]) {
+  const observationPoints = points
+    .map((point, index) => ({ point, index, timeMs: observationPointTimeMs(point) }))
+    .filter(({ point }) => safeBackendLevel(point.backendLevel) === 1);
+  if (observationPoints.length === 0) return 0;
+
+  let count = 1;
+  let previous = observationPoints[0];
+  for (const current of observationPoints.slice(1)) {
+    const hasTimes = Number.isFinite(previous.timeMs) && Number.isFinite(current.timeMs);
+    const isContinuous = hasTimes
+      ? current.timeMs >= previous.timeMs && current.timeMs - previous.timeMs <= 60_000
+      : current.index - previous.index <= 1;
+    if (!isContinuous) count += 1;
+    previous = current;
+  }
+  return count;
+}
+
 function AlertQueueMini({
   alerts,
+  observationWindowCount,
   wellName,
   wellKey,
   endpoint,
 }: {
   alerts: ReturnType<typeof useWellControl>['alerts'];
+  observationWindowCount: number;
   wellName: string;
   wellKey: string;
   endpoint: string;
 }) {
-  const criticalCount = alerts.filter((alert) => alert.level === 'critical').length;
-  const warningCount = alerts.filter((alert) => alert.level === 'warning').length;
-  const visibleAlerts = alerts.slice(0, 6);
+  const queueAlerts = alerts.filter((alert) => eventDisplayLevel(alert) >= 2);
+  const criticalCount = queueAlerts.filter((alert) => eventDisplayLevel(alert) >= 4).length;
+  const warningCount = queueAlerts.filter((alert) => eventDisplayLevel(alert) >= 2 && eventDisplayLevel(alert) < 4).length;
+  const visibleAlerts = queueAlerts.slice(0, 6);
   const [selectedAlertId, setSelectedAlertId] = useState<number | null>(null);
-  const selectedAlert = selectedAlertId == null ? null : alerts.find((alert) => alert.id === selectedAlertId) ?? null;
+  const selectedAlert = selectedAlertId == null ? null : queueAlerts.find((alert) => alert.id === selectedAlertId) ?? null;
   const selectedBackendLevel = eventDisplayLevel(selectedAlert);
 
   useEffect(() => {
@@ -64,37 +92,43 @@ function AlertQueueMini({
           </div>
         </div>
       </div>
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100">
+        <span className="font-medium">L1 观察区间</span>
+        <span className="text-right">{observationWindowCount > 0 ? `${observationWindowCount} 个（不进入报警队列）` : '无'}</span>
+      </div>
       <div className="ops-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
         {visibleAlerts.length === 0 ? (
           <div className="flex h-full min-h-[92px] items-center justify-center rounded-md border border-dashed border-slate-300 bg-[#f6fafc] px-2 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
             当前井队列待命
           </div>
         ) : (
-          visibleAlerts.map((alert) => (
-            <button
-              key={alert.id}
-              type="button"
-              onClick={() => setSelectedAlertId(alert.id)}
-              aria-label={`查看 ${wellName} L${eventDisplayLevel(alert)} 事件详情`}
-              className={`w-full rounded-md border px-2.5 py-2 text-left text-xs transition-colors hover:bg-white dark:hover:bg-slate-900 ${
-                alert.level === 'critical'
-                  ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-200'
-                  : alert.level === 'warning'
-                    ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100'
-                    : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/70 dark:bg-blue-950/20 dark:text-blue-100'
-              }`}
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <span className={`h-2 w-2 flex-shrink-0 rounded-full ${alert.level === 'critical' ? 'bg-red-600' : alert.level === 'warning' ? 'bg-amber-500' : 'bg-blue-500'}`} />
-                <span className="ops-inline-tile rounded px-1.5 py-0.5 text-[10px] dark:bg-white/10">L{eventDisplayLevel(alert)}</span>
-                {safeBackendLevel(alert.peakBackendLevel ?? alert.backendLevel) > safeBackendLevel(alert.backendLevel) ? (
-                  <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/30 dark:text-red-200">峰L{safeBackendLevel(alert.peakBackendLevel)}</span>
-                ) : null}
-                <div className="min-w-0 flex-1 truncate">{alert.message}</div>
-                <span className="shrink-0 text-[10px] opacity-65">{alert.count && alert.count > 1 ? `${alert.count}帧` : alert.time}</span>
-              </div>
-            </button>
-          ))
+          visibleAlerts.map((alert) => {
+            const displayLevel = eventDisplayLevel(alert);
+            const isCritical = displayLevel >= 4;
+            return (
+              <button
+                key={alert.id}
+                type="button"
+                onClick={() => setSelectedAlertId(alert.id)}
+                aria-label={`查看 ${wellName} L${displayLevel} 事件详情`}
+                className={`w-full rounded-md border px-2.5 py-2 text-left text-xs transition-colors hover:bg-white dark:hover:bg-slate-900 ${
+                  isCritical
+                    ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-200'
+                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100'
+                }`}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`h-2 w-2 flex-shrink-0 rounded-full ${isCritical ? 'bg-red-600' : 'bg-amber-500'}`} />
+                  <span className="ops-inline-tile rounded px-1.5 py-0.5 text-[10px] dark:bg-white/10">L{displayLevel}</span>
+                  {safeBackendLevel(alert.peakBackendLevel ?? alert.backendLevel) > safeBackendLevel(alert.backendLevel) ? (
+                    <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/30 dark:text-red-200">峰L{safeBackendLevel(alert.peakBackendLevel)}</span>
+                  ) : null}
+                  <div className="min-w-0 flex-1 truncate">{alert.message}</div>
+                  <span className="shrink-0 text-[10px] opacity-65">{alert.count && alert.count > 1 ? `${alert.count}帧` : alert.time}</span>
+                </div>
+              </button>
+            );
+          })
         )}
       </div>
       {false && selectedAlert ? createPortal(
@@ -234,6 +268,7 @@ export default function Monitoring() {
   const viewCycleInfo = selectedWellView.cycleInfo;
   const trackFlowData = selectedWellView.flowHistory;
   const trackPressureData = selectedWellView.pressureHistory;
+  const observationWindowCount = useMemo(() => countL1ObservationWindows(trackFlowData), [trackFlowData]);
   const viewHistoryRecords = selectedWellView.historyRecords;
   const viewCurrentSampleTime = selectedWellView.currentSampleTime;
   const hasSamples = trackFlowData.length > 0 || trackPressureData.length > 0 || viewHistoryRecords.length > 0;
@@ -358,6 +393,7 @@ export default function Monitoring() {
             <div className="min-h-0 overflow-hidden">
               <AlertQueueMini
                 alerts={currentWellAlerts}
+                observationWindowCount={observationWindowCount}
                 wellName={activeWell.wellName}
                 wellKey={activeWell.wellId}
                 endpoint={realtimeEndpoint}
