@@ -51,11 +51,14 @@ export interface MonitoringData {
   drillPipePressure: number | null;
   spp: number | null;
   sppPredicted: number | null;
-  spm: number | null;
+  spm1: number | null;
+  spm2: number | null;
+  spm3: number | null;
+  totalSpm: number | null;
+  totalSpmComplete: boolean;
   mudWeight: number | null;
   mudTemp: number | null;
   rop: number | null;
-  drillTime: number | null;
   hookLoad: number | null;
   wob: number | null;
   totalGas: number | null;
@@ -170,8 +173,8 @@ export interface Alert {
   wellId?: string;
   wellName?: string;
   wellBlock?: string;
-  wellDepth?: number;
-  bitDepth?: number;
+  wellDepth?: number | null;
+  bitDepth?: number | null;
   formation?: string;
   time: string;
   date: string;
@@ -252,11 +255,15 @@ export interface FlowDataPoint {
   pitVolume?: number | null;
   wellDepth?: number | null;
   bitDepth?: number | null;
-  spm?: number | null;
+  spm1?: number | null;
+  spm2?: number | null;
+  spm3?: number | null;
+  totalSpm?: number | null;
+  totalSpmComplete?: boolean;
+  rop?: number | null;
   totalGas?: number | null;
   hookLoad?: number | null;
   wob?: number | null;
-  drillTime?: number | null;
   rpm?: number | null;
   torque?: number | null;
 }
@@ -284,7 +291,8 @@ export interface HistoryRecord {
   drillPipePressure: number | null;
   spp: number | null;
   sppPredicted: number | null;
-  spm: number | null;
+  totalSpm: number | null;
+  totalSpmComplete: boolean;
   totalGas: number | null;
   hookLoad: number | null;
   mudWeight: number | null;
@@ -393,8 +401,8 @@ export interface WellRuntimeState {
   recordCount: number;
   lastRecordAt: string | null;
   backendLevel: BackendLevel;
-  latestWellDepth?: number;
-  latestBitDepth?: number;
+  latestWellDepth?: number | null;
+  latestBitDepth?: number | null;
   latestFormation?: string;
   monitoringStartedAt: string | null;
   startedSampleTime: string | null;
@@ -419,8 +427,8 @@ interface WellMonitoringSnapshot {
   cycleInfo: CycleInfo;
   shutInActive: boolean;
   shutInStartedAt: string | null;
-  latestWellDepth?: number;
-  latestBitDepth?: number;
+  latestWellDepth?: number | null;
+  latestBitDepth?: number | null;
   latestFormation?: string;
 }
 
@@ -434,8 +442,8 @@ export interface SelectedWellViewState {
   cycleInfo: CycleInfo;
   shutInActive: boolean;
   shutInStartedAt: string | null;
-  latestWellDepth?: number;
-  latestBitDepth?: number;
+  latestWellDepth?: number | null;
+  latestBitDepth?: number | null;
   latestFormation?: string;
   fromSnapshotFallback: boolean;
 }
@@ -1336,11 +1344,14 @@ function sanitizeStoredMonitoringData(value: unknown): MonitoringData {
     drillPipePressure: optionalFinite(row.drillPipePressure) ?? null,
     spp: optionalFinite(row.spp) ?? null,
     sppPredicted: optionalFinite(row.sppPredicted) ?? null,
-    spm: optionalFinite(row.spm) ?? null,
+    spm1: optionalFinite(row.spm1) ?? null,
+    spm2: optionalFinite(row.spm2) ?? null,
+    spm3: optionalFinite(row.spm3) ?? null,
+    totalSpm: optionalFinite(row.totalSpm) ?? null,
+    totalSpmComplete: Boolean(row.totalSpmComplete),
     mudWeight: optionalFinite(row.mudWeight) ?? null,
     mudTemp: optionalFinite(row.mudTemp) ?? null,
     rop: optionalFinite(row.rop) ?? null,
-    drillTime: optionalFinite(row.drillTime) ?? null,
     hookLoad: optionalFinite(row.hookLoad) ?? null,
     wob: optionalFinite(row.wob) ?? null,
     totalGas: optionalFinite(row.totalGas) ?? null,
@@ -1770,11 +1781,14 @@ function makeInitialData(well: WellInfo): MonitoringData {
     drillPipePressure: null,
     spp: null,
     sppPredicted: null,
-    spm: null,
+    spm1: null,
+    spm2: null,
+    spm3: null,
+    totalSpm: null,
+    totalSpmComplete: false,
     mudWeight: null,
     mudTemp: null,
     rop: null,
-    drillTime: null,
     hookLoad: null,
     wob: null,
     totalGas: null,
@@ -1851,11 +1865,17 @@ function normalizeRealTimeRecord(record: RealTimeRecord, previous: MonitoringDat
     drillPipePressure: readNullableNumber(record, ['drillPipePressure', 'standpipe_pressure_mpa', 'spp_mpa']),
     spp,
     sppPredicted,
-    spm: readNullableNumber(record, ['spm', 'pump_spm_total', 'pumpSpmTotal', 'pump_spm']),
+    spm1: readNullableNumber(record, ['spm1', 'Spm1', 'pump_spm_1']),
+    spm2: readNullableNumber(record, ['spm2', 'Spm2', 'pump_spm_2']),
+    spm3: readNullableNumber(record, ['spm3', 'Spm3', 'pump_spm_3']),
+    totalSpm: readNullableNumber(record, ['totalSpm', 'TotalSpm', 'spm', 'pump_spm_total']),
+    totalSpmComplete: readBoolean(
+      readValue(record as Record<string, unknown>, ['totalSpmComplete', 'TotalSpmComplete']),
+      false,
+    ),
     mudWeight: readNullableNumber(record, ['mudWeight', 'inlet_density_g_cm3', 'mud_weight']),
     mudTemp: readNullableNumber(record, ['mudTemp', 'inlet_temperature_c', 'outlet_temperature_c']),
-    rop: readNullableNumber(record, ['rop', 'rate_of_penetration', 'rop_m_h']),
-    drillTime: readNullableNumber(record, ['drillTime', 'drill_time', 'drilling_time_1', 'drill_time_min_m']),
+    rop: readNullableNumber(record, ['rop', 'Rop', 'rop_m_per_min', 'rate_of_penetration']),
     hookLoad: readNullableNumber(record, ['hookLoad', 'hookLoadKn', 'hook_load_kn']),
     wob: readNullableNumber(record, ['wob', 'wobKn', 'wob_kn', 'weightOnBit', 'weight_on_bit_kn', 'WOBX']),
     totalGas: readNullableNumber(record, ['totalGas', 'gas', 'total_gas_pct', 'gas_pct']),
@@ -1940,11 +1960,10 @@ function cycleInfoFromRecord(record: RealTimeRecord, previous: CycleInfo): Cycle
   const state = parseCycleState(rawOperation);
   const rawHypothesis = readValue(source, ['hypothesis_cycle_state', 'hypothesisCycleState', 'cycle_candidate_state', 'cycleCandidateState']);
   if (state === null && rawHypothesis === undefined) return { ...previous, source: 'unknown' };
-  const meta = state === null ? null : CYCLE_STATES[state];
   const elapsed = Math.max(0, finite(readValue(source, ['cycle_seconds', 'cycleSeconds', 'elapsed_in_state', 'elapsedInState']), 0));
   const total = Math.max(elapsed, finite(readValue(source, ['total_state_seconds', 'totalStateSeconds']), elapsed || 1));
   return {
-    ...(meta ? { ...previous, ...meta, state } : previous),
+    ...(state !== null ? { ...previous, ...CYCLE_STATES[state], state } : previous),
     operationState: parseOperationCycleState(rawOperation, state),
     hypothesisState: parseHypothesisCycleState(rawHypothesis),
     source: 'backend',
@@ -2358,7 +2377,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     this.lastSampleTime = normalizeSampleTime(initialSampleTime || '') || null;
   }
 
-  connect(well: WellInfo) {
+  connect(well: WellInfo, _seed?: MonitoringData) {
     this.disconnect();
     this.closedByClient = false;
     this.recordCount = 0;
@@ -2535,7 +2554,7 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
     private mode: DataSourceMode = 'historyReplay',
   ) {}
 
-  connect(well: WellInfo) {
+  connect(well: WellInfo, _seed?: MonitoringData) {
     this.disconnect();
     this.closedByClient = false;
     this.recordCount = 0;
@@ -3523,25 +3542,29 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const updateWellRuntime = useCallback((wellId: string, patch: Partial<WellRuntimeState>) => {
     setWellRuntimeStates((prev) => {
       const now = new Date().toISOString();
+      const defaults: WellRuntimeState = {
+        wellId,
+        monitoringMode: 'realtime',
+        status: 'paused',
+        isRunning: false,
+        recordCount: 0,
+        lastRecordAt: null,
+        backendLevel: 0,
+        latestWellDepth: undefined,
+        latestBitDepth: undefined,
+        latestFormation: undefined,
+        monitoringStartedAt: null,
+        startedSampleTime: null,
+        selectedReplayStartTime: null,
+        replaySpeed: 1,
+        pausedSampleTime: null,
+        message: '待启动',
+        updatedAt: now,
+      };
       return {
         ...prev,
         [wellId]: {
-          wellId,
-          monitoringMode: 'realtime',
-          status: 'paused',
-          isRunning: false,
-          recordCount: 0,
-          lastRecordAt: null,
-          backendLevel: 0,
-          latestWellDepth: undefined,
-          latestBitDepth: undefined,
-          latestFormation: undefined,
-          monitoringStartedAt: null,
-          startedSampleTime: null,
-          selectedReplayStartTime: null,
-          replaySpeed: 1,
-          pausedSampleTime: null,
-          message: '待启动',
+          ...defaults,
           ...prev[wellId],
           ...patch,
           updatedAt: now,
@@ -3882,11 +3905,15 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           bitDepth: lastData.bitDepth,
           pitGain: lastData.pitGain,
           pitVolume: lastData.pitVolume,
-          spm: lastData.spm,
+          spm1: lastData.spm1,
+          spm2: lastData.spm2,
+          spm3: lastData.spm3,
+          totalSpm: lastData.totalSpm,
+          totalSpmComplete: lastData.totalSpmComplete,
+          rop: lastData.rop,
           totalGas: lastData.totalGas,
           hookLoad: lastData.hookLoad,
           wob: lastData.wob,
-          drillTime: lastData.drillTime,
           rpm: lastData.rpm,
           torque: lastData.torque,
         },
@@ -3916,7 +3943,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           drillPipePressure: lastData.drillPipePressure,
           spp: lastData.spp,
           sppPredicted: lastData.sppPredicted,
-          spm: lastData.spm,
+          totalSpm: lastData.totalSpm,
+          totalSpmComplete: lastData.totalSpmComplete,
           totalGas: lastData.totalGas,
           hookLoad: lastData.hookLoad,
           mudWeight: lastData.mudWeight,
@@ -4519,11 +4547,15 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           bitDepth: nextData.bitDepth,
           pitGain: nextData.pitGain,
           pitVolume: nextData.pitVolume,
-          spm: nextData.spm,
+          spm1: nextData.spm1,
+          spm2: nextData.spm2,
+          spm3: nextData.spm3,
+          totalSpm: nextData.totalSpm,
+          totalSpmComplete: nextData.totalSpmComplete,
+          rop: nextData.rop,
           totalGas: nextData.totalGas,
           hookLoad: nextData.hookLoad,
           wob: nextData.wob,
-          drillTime: nextData.drillTime,
           rpm: nextData.rpm,
           torque: nextData.torque,
         },
@@ -4553,7 +4585,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           drillPipePressure: nextData.drillPipePressure,
           spp: nextData.spp,
           sppPredicted: nextData.sppPredicted,
-          spm: nextData.spm,
+          totalSpm: nextData.totalSpm,
+          totalSpmComplete: nextData.totalSpmComplete,
           totalGas: nextData.totalGas,
           hookLoad: nextData.hookLoad,
           mudWeight: nextData.mudWeight,
@@ -4610,9 +4643,11 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const resetForWell = (well: WellInfo, startTime = selectedStartTime, clearEvents = false) => {
     const nextInitial = makeInitialData(well);
     wellSnapshotsRef.current[well.wellId] = {
+      sessionCode: null,
       currentData: nextInitial,
       currentSampleTime: '',
       lastRecordAt: null,
+      monitoringStartedAt: null,
       startedSampleTime: startTime ? fromDatetimeLocalValue(startTime) : null,
       flowHistory: [],
       pressureHistory: [],
@@ -5197,7 +5232,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
               ? backendRequestedStartTime
                 || prior?.selectedReplayStartTime
                 || prior?.startedSampleTime
-                || wellSampleStartTime(well)
+                || wellEarliestSampleTime(well)
               : backendRequestedStartTime || backendSessionStartedAt;
             const currentSampleTime = String(session.currentSampleTime || session.current_sample_time || '').replace('T', ' ').trim();
             const resumeSampleTime = hasStableReplayStart
@@ -5520,7 +5555,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const acknowledgedAt = new Date().toISOString();
       setAlerts((previous) => previous.map((alert) => alert.id === id ? { ...alert, acknowledged: true, ackStatus: 'acknowledged', acknowledgedAt, acknowledgementCount: (alert.acknowledgementCount || 0) + 1 } : alert));
       setAcknowledgedEvents((previous) => {
-        const next = { ...previous, [target.backendEventId]: true };
+        const next: AcknowledgedEventMap = { ...previous, [target.backendEventId]: true };
         acknowledgedEventsRef.current = next;
         return next;
       });

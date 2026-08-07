@@ -9,7 +9,7 @@ interface VerticalCurveDeckProps {
   pressureData: PressureDataPoint[];
   thresholds: ThresholdSettings;
   wellDepth?: number;
-  currentDepth?: number;
+  currentDepth?: number | null;
   outletSemantic?: string;
   outletUnit?: string;
   isStopped?: boolean;
@@ -206,7 +206,7 @@ function niceRange(values: (number | null | undefined)[], fallback: [number, num
 
   const referenceWindow = Math.max(span, baseMinSpan);
   (options.referenceValues ?? []).forEach((value) => {
-    if (!Number.isFinite(value)) return;
+    if (value === undefined || !Number.isFinite(value)) return;
     if (value < min - referenceWindow || value > max + referenceWindow) return;
     min = Math.min(min, value);
     max = Math.max(max, value);
@@ -247,10 +247,10 @@ function useNarrowViewport() {
   return isNarrow;
 }
 
-function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoint[], wellDepth = 3200, currentDepth = 3200): CurvePoint[] {
+function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoint[], wellDepth = 3200, currentDepth: number | null = 3200): CurvePoint[] {
   const maxLength = Math.max(flowData.length, pressureData.length);
   if (maxLength === 0) return [];
-  const currentBitDepth = Number.isFinite(currentDepth) ? currentDepth : wellDepth;
+  const currentBitDepth = Number.isFinite(currentDepth) ? currentDepth as number : wellDepth;
   return Array.from({ length: maxLength }).map((_, index) => {
     const flow = flowData[Math.max(0, index - (maxLength - flowData.length))];
     const pressure = pressureData[Math.max(0, index - (maxLength - pressureData.length))];
@@ -260,11 +260,11 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
     const casingPressure = pressure?.casingPressure ?? null;
     const drillPipePressure = pressure?.drillPipePressure ?? null;
     const spp = pressure?.spp ?? null;
-    const spm = flow?.spm ?? null;
+    const totalSpm = flow?.totalSpm ?? null;
     const totalGas = flow?.totalGas ?? null;
     const hookLoad = flow?.hookLoad ?? null;
     const wob = flow?.wob ?? null;
-    const rop = ((flow as Record<string, unknown>)?.rop as number | null | undefined) ?? null;
+    const rop = flow?.rop ?? null;
     const rpm = flow?.rpm ?? null;
     const torque = flow?.torque ?? null;
     const bitDepth = finite(flow?.bitDepth, currentBitDepth);
@@ -285,7 +285,7 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
         casingPressure,
         drillPipePressure,
         spp,
-        spm,
+        totalSpm,
         totalGas,
         hookLoad,
         wob,
@@ -791,7 +791,7 @@ export function VerticalCurveDeck({
   const flowValues = points.flatMap((point) => [point.values.flowIn, point.values.flowOut]);
   const casingValues = points.map((point) => point.values.casingPressure);
   const sppValues = points.map((point) => point.values.spp);
-  const spmValues = points.map((point) => point.values.spm);
+  const spmValues = points.map((point) => point.values.totalSpm);
   const gasValues = points.map((point) => point.values.totalGas);
   const hookValues = points.map((point) => point.values.hookLoad);
   const wobValues = points.map((point) => point.values.wob);
@@ -844,7 +844,7 @@ export function VerticalCurveDeck({
       title: '泵冲',
       width: '0.78 1 104px',
       curves: [
-        { key: 'spm', label: '总泵冲', unit: 'spm', color: '#7c3aed', range: niceRange(spmValues, [0, 96], { clampMin: 0, minSpan: 5 }) },
+        { key: 'totalSpm', label: '总泵冲', unit: 'spm', color: '#7c3aed', range: niceRange(spmValues, [0, 96], { clampMin: 0, minSpan: 5 }) },
       ],
     },
     {

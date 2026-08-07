@@ -1,5 +1,5 @@
 ﻿import type { BackendLevel, CycleInfo } from '../context/WellControlContext';
-import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from './wellboreState';
+import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from './wellboreState.ts';
 
 export type WellboreTone = 'normal' | 'watch' | 'warning' | 'critical';
 
@@ -76,17 +76,17 @@ export function normalizeWellboreStructureSections(rawSections: WellboreStructur
 
 export interface WellboreSimulationInput {
   backendLevel: BackendLevel;
-  flowIn: number;
-  flowOut: number;
+  flowIn: number | null;
+  flowOut: number | null;
   flowDelta: number | null;
-  pitGain: number;
-  pitVolume: number;
-  drillPipePressure: number;
-  casingPressure: number;
-  totalGas: number;
-  spm?: number;
-  wellDepth?: number;
-  bitDepth?: number;
+  pitGain: number | null;
+  pitVolume: number | null;
+  drillPipePressure: number | null;
+  casingPressure: number | null;
+  totalGas: number | null;
+  spm?: number | null;
+  wellDepth?: number | null;
+  bitDepth?: number | null;
   casingShoeDepth?: number;
   drillPipeOD?: number;
   bhaOD?: number;
@@ -95,7 +95,7 @@ export interface WellboreSimulationInput {
   openHoleDiameter?: number;
   formation?: string;
   wellboreSections?: WellboreStructureSection[];
-  mudWeight?: number;
+  mudWeight?: number | null;
   ecd?: number;
   porePressureEquivalent?: number;
   fractureGradientEquivalent?: number;
@@ -188,10 +188,18 @@ export interface WellborePressureWindow {
 
 export interface WellboreKickDiagnostics {
   severity: number;
-  influxRate: number;
+  /**
+   * NOT a physics-model result. Sized only to drive the visual kick
+   * animation's intensity; null when there is no flow information to
+   * derive even that visual intensity from. See influxRateSource.
+   */
+  influxRate: number | null;
+  influxRateSource: 'visualization-only';
   gasFrontDepth?: number;
   gasColumnLength?: number;
+  /** NOT a physics-model result; see migrationVelocitySource. */
   migrationVelocity?: number;
+  migrationVelocitySource: 'visualization-only';
 }
 
 export interface WellboreHydraulicGeometry {
@@ -272,7 +280,7 @@ function clampRange(target: number, min: number, max: number) {
   return clamp(target, min, max);
 }
 
-function finite(value: number | undefined, fallback: number) {
+function finite(value: number | null | undefined, fallback: number) {
   return Number.isFinite(value) ? Number(value) : fallback;
 }
 
@@ -474,10 +482,10 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const bhaTopDepth = clamp(bitDepth - 620, openHoleStartDepth + 80, Math.max(openHoleStartDepth + 120, bitDepth - 40));
   const bitTopDepth = clamp(bitDepth - 80, bhaTopDepth + 40, bitDepth - 8);
   const sectionGeometry: WellboreSectionGeometry[] = [
-    { fromDepth: 0, toDepth: openHoleStartDepth, boreInnerWidth: hydraulicGeometry.casingID, drillOuterWidth: hydraulicGeometry.drillPipeOD, sectionType: 'cased' },
-    { fromDepth: openHoleStartDepth, toDepth: bhaTopDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.drillPipeOD, sectionType: 'openHole' },
-    { fromDepth: bhaTopDepth, toDepth: bitTopDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bhaOD, sectionType: 'bha' },
-    { fromDepth: bitTopDepth, toDepth: bitDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bitOD, sectionType: 'bit' },
+    { fromDepth: 0, toDepth: openHoleStartDepth, boreInnerWidth: hydraulicGeometry.casingID, drillOuterWidth: hydraulicGeometry.drillPipeOD, sectionType: 'cased' as const },
+    { fromDepth: openHoleStartDepth, toDepth: bhaTopDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.drillPipeOD, sectionType: 'openHole' as const },
+    { fromDepth: bhaTopDepth, toDepth: bitTopDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bhaOD, sectionType: 'bha' as const },
+    { fromDepth: bitTopDepth, toDepth: bitDepth, boreInnerWidth: hydraulicGeometry.openHoleDiameter, drillOuterWidth: hydraulicGeometry.bitOD, sectionType: 'bit' as const },
   ].filter((section) => section.toDepth > section.fromDepth + 1);
   const currentFormation = inferFormationName(input.formation, wellDepth);
   const conditionLabel = formatWellboreConditionLabel(input.condition, input.cycleInfo?.stateLabel || '\u7a33\u5b9a\u76d1\u6d4b');
@@ -495,9 +503,16 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   });
   const statusMeta = getWellboreStateMeta(state);
   const tone = levelTone(input.backendLevel);
-  const flowDelta = finite(input.flowOut, 0) - finite(input.flowIn, 0);
+  // flowDelta is NOT recomputed here. Its only source is input.flowDelta,
+  // which the caller derives with computeObservedFlowDelta() - null unless
+  // the outlet semantic is a true volumetric flow and both Qin/Qout exist.
+  const flowDelta = input.flowDelta;
+  // positiveFlowSupport is the non-negative part of flowDelta used to size
+  // visual evidence intensity; it is null (not 0) when flowDelta itself is
+  // null, so "no flow information" is never silently treated as "no support".
+  const positiveFlowSupport = flowDelta !== null ? Math.max(flowDelta, 0) : null;
   const circulationActive = finite(input.flowIn, 0) > 0.5 || finite(input.spm, 0) > 8;
-  const returnActive = finite(input.flowOut, 0) > 0.5 || (input.flowDelta !== null && input.flowDelta > 0.5);
+  const returnActive = finite(input.flowOut, 0) > 0.5 || (flowDelta !== null && flowDelta > 0.5);
   const mudWeight = Number.isFinite(input.mudWeight) && Number(input.mudWeight) > 0 ? Number(input.mudWeight) : undefined;
   const ecd = Number.isFinite(input.ecd) && Number(input.ecd) > 0 ? Number(input.ecd) : undefined;
   const porePressureEquivalent = Number.isFinite(input.porePressureEquivalent) && Number(input.porePressureEquivalent) > 0 ? Number(input.porePressureEquivalent) : undefined;
@@ -517,7 +532,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const gasSupport = finite(input.totalGas, 0) >= 0.8 || hasSignal(input.activeSignals, ['total_gas', 'gas_support']);
   const pitSupport = finite(input.pitGain, 0) >= 0.8 || hasSignal(input.activeSignals, ['pit_gain', 'pit_volume', 'pool_delta', 'pool_window_increase']);
   const pressureSupport = hasSignal(input.activeSignals, ['standpipe_pressure', 'spp', 'spp_drop', 'casing_pressure']);
-  const returnSupport = flowDelta > 0.8 || (input.flowDelta !== null && input.flowDelta > 0.8) || hasSignal(input.activeSignals, ['return_response', 'OutletIncreaseResidual']);
+  const returnSupport = (flowDelta !== null && flowDelta > 0.8) || hasSignal(input.activeSignals, ['OutletIncreaseResidual']);
 
   const estimatedCenterDepth = clamp(bitDepth - Math.max(100, openHoleLength * 0.12), openHoleStartDepth + 80, wellDepth - 80);
   const localizationHalfSpan = clamp(openHoleLength * 0.045, 40, 120);
@@ -539,14 +554,26 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const gasColumnBottomDepth = input.gasColumnBottomDepth;
   const gasFrontDepth = input.gasFrontDepth;
   const gasColumnLength = gasFrontDepth !== undefined && gasColumnBottomDepth !== undefined ? Math.max(0, gasColumnBottomDepth - gasFrontDepth) : undefined;
-  const influxRate = input.backendLevel >= 2 ? clamp(Math.max(flowDelta, 0) * 0.78 + finite(input.pitGain, 0) * 0.42 + finite(input.totalGas, 0) * 0.34, 0.4, 8.8) : 0;
-  const migrationVelocity = input.backendLevel >= 2 ? clamp(12 + severity * 36 + Math.max(flowDelta, 0) * 1.2, 10, 58) : 0;
+  // influxRate and migrationVelocity are NOT physics-model outputs - there is
+  // no backend or calibrated model producing these numbers. They exist only
+  // to size the intensity of the visual kick animation and must never be
+  // presented as measured or estimated quantities (source: 'visualization-only').
+  // They are also not defined when flow information is unavailable: showing a
+  // fabricated rate on a missing Qout-Qin would misrepresent "no data" as "no kick".
+  const influxRate = input.backendLevel >= 2 && positiveFlowSupport !== null
+    ? clamp(positiveFlowSupport * 0.78 + finite(input.pitGain, 0) * 0.42 + finite(input.totalGas, 0) * 0.34, 0.4, 8.8)
+    : null;
+  const migrationVelocity = input.backendLevel >= 2 && positiveFlowSupport !== null
+    ? clamp(12 + severity * 36 + positiveFlowSupport * 1.2, 10, 58)
+    : null;
   const kickDiagnostics: WellboreKickDiagnostics = {
     severity: Number(severity.toFixed(2)),
-    influxRate: Number(influxRate.toFixed(1)),
+    influxRate: influxRate === null ? null : Number(influxRate.toFixed(1)),
+    influxRateSource: 'visualization-only',
     gasFrontDepth: gasFrontDepth === undefined ? undefined : Math.round(gasFrontDepth),
     gasColumnLength: gasColumnLength === undefined ? undefined : Math.round(gasColumnLength),
-    migrationVelocity: input.backendLevel >= 2 ? Math.round(migrationVelocity) : undefined,
+    migrationVelocity: migrationVelocity === null ? undefined : Math.round(migrationVelocity),
+    migrationVelocitySource: 'visualization-only',
   };
   const hasDirectionalBasis = Number.isFinite(input.inclination) && Number(input.inclination) >= 5 && Number.isFinite(input.highSideDirection);
   const annulusPhaseState: AnnulusPhaseState = {
@@ -574,7 +601,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
     });
     evidenceNotes.push('\u672a\u89e6\u53d1\u5f02\u5e38\u4fb5\u5165\u8bc1\u636e');
     evidenceNotes.push(pressureMargin === undefined ? '压力关系数据不足，未接入 PP / ECD' : `井底压力裕度 Δρ ${formatSigned(pressureMargin, 2, 'g/cm³')}`);
-    if (circulationActive) evidenceNotes.push(`\u5165\u53e3 / \u8fd4\u51fa\u57fa\u672c\u5e73\u8861\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}`);
+    if (circulationActive) evidenceNotes.push(flowDelta !== null ? `\u5165\u53e3 / \u8fd4\u51fa\u57fa\u672c\u5e73\u8861\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}` : '\u5165\u53e3 / \u8fd4\u51fa\u57fa\u672c\u5e73\u8861\uff0c\u0394Q \u6570\u636e\u4e0d\u8db3');
   } else if (input.backendLevel === 1) {
     evidenceBands.push({
       key: 'watch-zone',
@@ -587,7 +614,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
     });
     evidenceNotes.push('\u5f02\u5e38\u89c2\u5bdf\u4e2d');
     evidenceNotes.push(pressureMargin === undefined ? '压力关系数据不足，持续观察流量与池体积' : `压力裕度 Δρ ${formatSigned(pressureMargin, 2, 'g/cm³')}`);
-    evidenceNotes.push(returnSupport ? `\u8fd4\u51fa\u54cd\u5e94\u8f7b\u5fae\u62ac\u5347\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}` : '\u5173\u6ce8\u8fd4\u51fa\u4e0e\u6c60\u4f53\u79ef\u5fae\u5c0f\u6ce2\u52a8');
+    evidenceNotes.push(returnSupport && flowDelta !== null ? `\u8fd4\u51fa\u54cd\u5e94\u8f7b\u5fae\u62ac\u5347\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}` : '\u5173\u6ce8\u8fd4\u51fa\u4e0e\u6c60\u4f53\u79ef\u5fae\u5c0f\u6ce2\u52a8');
   } else {
     const annulusTone = input.backendLevel >= 4 ? 'critical' : 'warning';
     evidenceBands.push({
@@ -608,7 +635,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
       opacity: gasSupport ? 0.3 : 0.24,
       lane: 'formation',
     });
-    if (returnSupport) evidenceNotes.push(`\u51fa\u53e3\u6d41\u91cf\u9ad8\u4e8e\u5165\u53e3\u6d41\u91cf\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}`);
+    if (returnSupport && flowDelta !== null) evidenceNotes.push(`\u51fa\u53e3\u6d41\u91cf\u9ad8\u4e8e\u5165\u53e3\u6d41\u91cf\uff0c\u0394Q ${formatSigned(flowDelta, 1, 'L/s')}`);
     if (pressureMargin !== undefined && pressureMargin < 0) evidenceNotes.push(`\u6ce5\u6d46\u5f53\u91cf\u4f4e\u4e8e\u5730\u5c42\u538b\u529b\u5f53\u91cf\uff0c\u0394\u03c1 ${pressureMargin === undefined ? '数据不足' : formatSigned(pressureMargin, 2, 'g/cm\u00b3')}`);
     if (pitSupport) evidenceNotes.push(`\u6c60\u589e\u91cf ${formatValue(finite(input.pitGain, 0), 2, 'm\u00b3')}\uff0c\u603b\u6c60\u4f53\u79ef ${formatValue(finite(input.pitVolume, 0), 2, 'm\u00b3')}`);
     if (pressureSupport) evidenceNotes.push(`\u7acb\u538b ${formatValue(finite(input.drillPipePressure, 0), 2, 'MPa')} / \u5957\u538b ${formatValue(finite(input.casingPressure, 0), 2, 'MPa')}`);

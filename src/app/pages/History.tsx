@@ -21,7 +21,8 @@ type DbHistoryRecord = {
   gas?: number;
   bit_depth?: number;
   hook_load?: number;
-  return_response_pct?: number;
+  /** Legacy DB column only; must never feed current monitoring, algorithm, charts, or alerts. */
+  legacyReturnResponsePct?: number;
   pool_delta_abs?: number;
   public_level?: BackendLevel;
   formal_eval_level?: BackendLevel;
@@ -188,7 +189,7 @@ function normalizeHistoryRecord(value: unknown): DbHistoryRecord {
     pool_smooth: Number(read('pool_smooth', 'poolSmooth') ?? row.poolRaw) || undefined,
     pool_delta_abs: Number(read('pool_delta_abs', 'poolDeltaAbs')) || undefined,
     standpipe_change_mpa: Number(read('standpipe_change_mpa', 'standpipeChangeMpa')) || undefined,
-    return_response_pct: Number(read('return_response_pct', 'returnResponsePct')) || undefined,
+    legacyReturnResponsePct: Number(read('return_response_pct', 'returnResponsePct')) || undefined,
     cp: Number(read('cp', 'casingPressure') ?? row.cp) || undefined,
     spp: Number(read('spp', 'standpipePressure') ?? row.spp) || undefined,
     spm: Number(read('spm', 'pumpStrokeRate') ?? row.spm) || undefined,

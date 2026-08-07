@@ -323,7 +323,7 @@ export default function WellManagementDetail() {
           </thead>
           <tbody>{sections.map((section, index) => <tr key={`${section.kind}-${section.bottomDepthM}-${index}`} className="border-t border-slate-100 dark:border-slate-800">
             <td className="px-4 py-3 text-xs ops-muted">{index + 1}</td>
-            <td className="px-4 py-3 font-medium">{section.label || (section.kind === 'casing' ? '套管段' : '裸眼段')}</td>
+            <td className="px-4 py-3 font-medium">{section.casingName || (section.kind === 'casing' ? '套管段' : '裸眼段')}</td>
             <td className="px-4 py-3 tabular-nums">{formatNumber(section.bottomDepthM, 0, 'm')}</td>
             <td className="px-4 py-3 tabular-nums">{formatNumber(section.holeSizeMm, 1, 'mm')}</td>
             <td className="px-4 py-3">{valueOrDash(section.formation)}</td>

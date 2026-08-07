@@ -513,10 +513,10 @@ export function WellSchematic({
     { label: T.inlet, value: formatFinite(flowIn, 1), unit: 'L/s', tone: model.flowState.inflowTone },
     { label: resolvedOutletLabel, value: formatFinite(flowOut, 1), unit: resolvedOutletUnit, tone: model.flowState.annulusTone },
     { label: T.pitGain, value: formatFinite(pitGain, 2), unit: 'm\u00b3', tone: metricLevelTone },
-    { label: T.pitVolume, value: formatFinite(pitVolume ?? pitGain, 2), unit: 'm\u00b3', tone: backendLevel >= 2 ? 'warning' : 'normal' },
-    { label: T.spp, value: formatFinite(drillPipePressure, 2), unit: 'MPa', tone: activeSignals.includes('standpipe_pressure') || activeSignals.includes('spp_drop') ? model.tone : 'normal' },
-    { label: T.casingPressure, value: formatFinite(casingPressure, 2), unit: 'MPa', tone: activeSignals.includes('casing_pressure') ? model.tone : 'normal' },
-    { label: T.totalGas, value: formatFinite(totalGas, 2), unit: '%', tone: activeSignals.includes('total_gas') ? model.tone : 'normal' },
+    { label: T.pitVolume, value: formatFinite(pitVolume ?? pitGain, 2), unit: 'm\u00b3', tone: (backendLevel >= 2 ? 'warning' : 'normal') as WellboreTone },
+    { label: T.spp, value: formatFinite(drillPipePressure, 2), unit: 'MPa', tone: (activeSignals.includes('standpipe_pressure') || activeSignals.includes('spp_drop') ? model.tone : 'normal') as WellboreTone },
+    { label: T.casingPressure, value: formatFinite(casingPressure, 2), unit: 'MPa', tone: (activeSignals.includes('casing_pressure') ? model.tone : 'normal') as WellboreTone },
+    { label: T.totalGas, value: formatFinite(totalGas, 2), unit: '%', tone: (activeSignals.includes('total_gas') ? model.tone : 'normal') as WellboreTone },
   ];
   const summaryMetrics = compact ? readouts.slice(0, 4) : readouts;
   const topReadouts = !isDetail && !compact ? summaryMetrics.slice(0, 2) : [];

@@ -5,14 +5,14 @@ import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta
 import type { WellboreStructureSection } from '../lib/wellboreSimulation';
 import { WellboreSchemaFigure } from './WellboreSchemaFigure';
 
-function formatDepth(value?: number) {
+function formatDepth(value?: number | null) {
   return Number.isFinite(value) ? `${Math.round(value as number).toLocaleString('zh-CN')} m` : '--';
 }
 
 export interface WellboreStatusViewProps {
   wellName: string;
-  wellDepth?: number;
-  bitDepth?: number;
+  wellDepth?: number | null;
+  bitDepth?: number | null;
   formation?: string;
   backendLevel: BackendLevel;
   activeSignals: string[];
@@ -20,15 +20,15 @@ export interface WellboreStatusViewProps {
   condition?: string;
   wellboreSections?: WellboreStructureSection[];
   cycleInfo?: CycleInfo;
-  flowIn: number;
-  flowOut: number;
-  pitGain: number;
-  pitVolume: number;
-  spp: number;
-  casingPressure: number;
-  totalGas: number;
-  mudWeight: number;
-  spm: number;
+  flowIn: number | null;
+  flowOut: number | null;
+  pitGain: number | null;
+  pitVolume: number | null;
+  spp: number | null;
+  casingPressure: number | null;
+  totalGas: number | null;
+  mudWeight: number | null;
+  spm: number | null;
   hasSamples: boolean;
   isRecovering: boolean;
   isStopped: boolean;

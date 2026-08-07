@@ -28,7 +28,6 @@ function previewData(level: BackendLevel) {
     pitGain: level >= 2 ? 1.86 : level === 1 ? 0.42 : 0.04,
     pitVolume: level >= 2 ? 122.6 : 118.2,
     totalGas: level >= 2 ? 1.42 : 0.18,
-    
     mudWeight: 1.22,
     activeSignals: level >= 2 ? ['OutletIncreaseResidual', 'pit_gain', 'pit_volume', 'total_gas', 'casing_pressure'] : level === 1 ? ['OutletIncreaseResidual'] : [],
     condition: level >= 2 ? '循环异常' : level === 1 ? '循环观察' : '稳定监测',

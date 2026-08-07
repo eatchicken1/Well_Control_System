@@ -1,5 +1,6 @@
-import { Bell, Square } from 'lucide-react';
+import { Bell, Clock3, Square, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { VerticalCurveDeck } from '../components/VerticalCurveDeck';
 import { WellboreStatusThumbnail } from '../components/WellboreStatusThumbnail';
@@ -8,6 +9,8 @@ import { useWellControl, type BackendLevel, type FlowDataPoint } from '../contex
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 import { fetchWellboreProfile } from '../api/wellboreProfileApi';
 import { normalizeWellboreStructureSections, type WellboreStructureSection } from '../lib/wellboreSimulation';
+
+const ALERT_DETAIL_MODAL_ENABLED = false;
 
 function safeBackendLevel(value: unknown): BackendLevel {
   const level = Number(value);
@@ -131,7 +134,7 @@ function AlertQueueMini({
           })
         )}
       </div>
-      {false && selectedAlert ? createPortal(
+      {ALERT_DETAIL_MODAL_ENABLED && selectedAlert ? createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSelectedAlertId(null)}>
           <div
             className="ops-panel w-full max-w-xl overflow-hidden shadow-2xl"
@@ -205,8 +208,8 @@ function formatMetric(value: number, digits: number) {
   return Number.isFinite(value) ? value.toFixed(digits) : '--';
 }
 
-function formatMetricOrPlaceholder(value: number, digits: number, active: boolean) {
-  if (!active) return '--';
+function formatMetricOrPlaceholder(value: number | null, digits: number, active: boolean) {
+  if (!active || value === null) return '--';
   return formatMetric(value, digits);
 }
 
@@ -373,7 +376,7 @@ export default function Monitoring() {
                 formation={selectedWellView.latestFormation || viewCurrentData.formation || activeWell.targetLayer}
                 flowIn={viewCurrentData.flowIn}
                 flowOut={viewCurrentData.flowOut}
-                spm={viewCurrentData.spm}
+                spm={viewCurrentData.totalSpm}
                 casingPressure={viewCurrentData.casingPressure}
                 spp={viewCurrentData.spp}
                 pitGain={viewCurrentData.pitGain}

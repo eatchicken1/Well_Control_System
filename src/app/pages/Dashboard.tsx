@@ -152,13 +152,13 @@ function runtimeDot(runtime?: WellRuntimeState, isStopped = false) {
   return 'bg-slate-400';
 }
 
-function formatNumber(value?: number, unit = '') {
+function formatNumber(value?: number | null, unit = '') {
   if (!Number.isFinite(value)) return '--';
   return `${Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 1 })}${unit}`;
 }
 
-function firstFinite(...values: Array<number | undefined>) {
-  return values.find((value) => Number.isFinite(value));
+function firstFinite(...values: Array<number | null | undefined>) {
+  return values.find((value): value is number => Number.isFinite(value));
 }
 
 function cleanLayerLabel(value?: string | null) {
@@ -449,8 +449,8 @@ function MonitoredWellCard({
       </div>
 
       <div className="multiwell-card-metrics">
-        {metricItems.map(({ label, value, Icon, emphasis, tone }) => (
-          <div key={label} className="multiwell-card-metric" data-emphasis={emphasis ? 'true' : undefined} data-tone={tone}>
+        {metricItems.map(({ label, value, Icon, emphasis }) => (
+          <div key={label} className="multiwell-card-metric" data-emphasis={emphasis ? 'true' : undefined}>
             <div className="multiwell-card-metric-head">
               <span>{label}</span>
               <Icon className="h-4 w-4" />

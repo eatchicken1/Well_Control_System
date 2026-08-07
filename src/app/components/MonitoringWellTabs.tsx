@@ -28,7 +28,9 @@ export function MonitoringWellTabs({ className = '', rightSlot }: { className?: 
     ...realtimeTabWellIds,
     ...(selectedWellId ? [selectedWellId] : []),
   ])];
-  const tabs = tabIds.map((wellId) => wells.find((well) => well.wellId === wellId)).filter(Boolean);
+  const tabs = tabIds
+    .map((wellId) => wells.find((well) => well.wellId === wellId))
+    .filter((well): well is NonNullable<typeof well> => well !== undefined);
 
   if (tabs.length === 0) {
     return (

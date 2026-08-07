@@ -15,7 +15,7 @@ export async function fetchSystemSettings(signal?: AbortSignal): Promise<SystemS
   if (!Array.isArray(payload.settings)) return [];
   return payload.settings.filter((item): item is SystemSetting => Boolean(item && typeof item === 'object' && 'key' in item))
     .map((item) => {
-      const row = item as Record<string, unknown>;
+      const row = item as unknown as Record<string, unknown>;
       return {
         key: String(row.key || ''),
         label: String(row.label || row.key || ''),

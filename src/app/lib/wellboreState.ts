@@ -16,9 +16,9 @@ export interface WellboreStateInput {
   pumpState?: string;
   condition?: string;
   cycleState?: number;
-  flowIn?: number;
-  flowOut?: number;
-  spm?: number;
+  flowIn?: number | null;
+  flowOut?: number | null;
+  spm?: number | null;
   hasSamples?: boolean;
   isRecovering?: boolean;
   isStopped?: boolean;

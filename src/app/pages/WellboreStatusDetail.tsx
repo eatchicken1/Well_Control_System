@@ -16,7 +16,7 @@ const LEVEL_LABELS: Record<BackendLevel, string> = {
 };
 
 const CASING_SHOE_DEPTH = 3200;
-const format = (value: number, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : '--';
+const format = (value: number | null | undefined, digits = 1) => (value !== null && value !== undefined && Number.isFinite(value)) ? value.toFixed(digits) : '--';
 
 function diagramWidth(value: number | undefined, fallback: number) {
   return Number.isFinite(value) && Number(value) > 0 ? Math.max(18, Math.min(76, Number(value) * 0.23)) : fallback;
@@ -29,8 +29,8 @@ function dataDelaySeconds(lastRecordAt: string | null) {
   return Math.max(0, (Date.now() - parsed) / 1000);
 }
 
-function Sparkline({ values, color = '#0f766e' }: { values: number[]; color?: string }) {
-  const finiteValues = values.filter(Number.isFinite).slice(-24);
+function Sparkline({ values, color = '#0f766e' }: { values: Array<number | null | undefined>; color?: string }) {
+  const finiteValues = values.filter((value): value is number => Number.isFinite(value)).slice(-24);
   const points = finiteValues.length >= 2 ? finiteValues : [0, 0];
   const min = Math.min(...points);
   const max = Math.max(...points);
@@ -131,7 +131,7 @@ export default function WellboreStatusDetail() {
     cycleState: cycle.state,
     flowIn: displayData.flowIn,
     flowOut: displayData.flowOut,
-    spm: displayData.spm,
+    spm: displayData.totalSpm,
     hasSamples,
     isRecovering,
     isStopped: selectedWellManuallyStopped,
@@ -191,11 +191,11 @@ export default function WellboreStatusDetail() {
         ? '井身结构：数据库暂无资料，当前使用设计模板'
         : '井身结构：接口暂不可用，当前使用设计模板';
   const stateDescription = abnormal ? meta.description : watch ? '参数出现轻微偏离，进入观察窗口但尚未形成溢流证据链。' : '关键参数处于基线范围内，未触发预警证据。';
-  const pressureRelation = displayData.mudWeight > 0
+  const pressureRelation = (displayData.mudWeight ?? 0) > 0
       ? `MW ${format(displayData.mudWeight, 2)} g/cm³；PP / ECD 数据不足`
       : '压力关系：数据不足';
 
-  const evidenceDuration = cycle.elapsedSeconds > 0 ? `持续 ${Math.round(cycle.elapsedSeconds)} s` : '当前窗口';
+  const evidenceDuration = cycle.elapsedInState > 0 ? `持续 ${Math.round(cycle.elapsedInState)} s` : '当前窗口';
   const outletSemantic = displayData.outletSemantic?.trim() || '';
   const configuredOutletUnit = displayData.outletUnit?.trim() || '';
   const isValveOpening = /valve|opening|开度/i.test(outletSemantic) || outletSemantic === 'ValveOpeningProxy';
@@ -216,14 +216,14 @@ export default function WellboreStatusDetail() {
     : isTrueFlow
       ? '当前通道语义：真实出口流量'
       : '语义未配置';
-  const pressureResidual = Number.isFinite(displayData.spp) && Number.isFinite(displayData.sppPredicted)
+  const pressureResidual = displayData.spp !== null && displayData.sppPredicted !== null
     ? displayData.spp - displayData.sppPredicted
     : undefined;
   const previousGas = selectedWellView.flowHistory.length > 1
     ? selectedWellView.flowHistory[selectedWellView.flowHistory.length - 2]?.totalGas
     : undefined;
-  const gasChange = Number.isFinite(previousGas) && Number.isFinite(displayData.totalGas)
-    ? displayData.totalGas - Number(previousGas)
+  const gasChange = previousGas !== undefined && previousGas !== null && displayData.totalGas !== null
+    ? displayData.totalGas - previousGas
     : undefined;
   const evidence = [
     {
@@ -287,7 +287,7 @@ export default function WellboreStatusDetail() {
     { label: `${outletLabel}${outletUnit === '--' ? '' : `（${outletUnit}）`}`, values: selectedWellView.flowHistory.map((item) => item.flowOut), color: '#dc2626' },
     { label: '池体积', values: selectedWellView.flowHistory.map((item) => item.pitVolume), color: '#d97706' },
     { label: '立压', values: selectedWellView.pressureHistory.map((item) => item.spp), color: '#0f766e' },
-    { label: '全烃', values: selectedWellView.pressureHistory.map((item) => item.totalGas), color: '#0891b2' },
+    { label: '全烃', values: selectedWellView.flowHistory.map((item) => item.totalGas), color: '#0891b2' },
   ];
 
   return (
@@ -322,7 +322,7 @@ export default function WellboreStatusDetail() {
               wellboreSections={profileSections}
               flowIn={displayData.flowIn}
               flowOut={displayData.flowOut}
-              spm={displayData.spm}
+              spm={displayData.totalSpm}
               casingPressure={displayData.casingPressure}
               drillPipePressure={displayData.spp}
               pitGain={displayData.pitGain}
