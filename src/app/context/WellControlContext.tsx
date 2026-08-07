@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import { normalizePreprocessingSnapshot, type PreprocessingSnapshot } from '../lib/preprocessingContract';
 import { appendAccessToken, authenticatedFetch, getAccessToken } from '../api/authToken';
 import { saveSelectedWells } from '../api/authApi';
 import { resetRealtimeBaseline } from '../api/realtimeBaselineApi';
@@ -152,6 +153,8 @@ export interface BaselineSnapshot {
   channels: BaselineChannelSnapshot[];
 }
 
+export type { PreprocessingSignalSnapshot, PreprocessingSnapshot } from '../lib/preprocessingContract';
+
 export interface AlgorithmInterfaceInfo {
   rootPath: string;
   mode: 'adapter-preview' | 'connected';
@@ -215,6 +218,7 @@ export interface BackendDetectionState {
   baselineEndTime: string;
   baselineInvalidReason: string;
   baselineSnapshot: BaselineSnapshot;
+  preprocessing: PreprocessingSnapshot | null;
 }
 
 export interface EventSpan {
@@ -2035,6 +2039,7 @@ const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
   baselineEndTime: '',
   baselineInvalidReason: '',
   baselineSnapshot: INITIAL_BASELINE_SNAPSHOT,
+  preprocessing: null,
 };
 
 function normalizeEventSpan(value: unknown): EventSpan | null {
@@ -2298,6 +2303,7 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
     ),
     baselineInvalidReason: baselineInvalidReason || (!baselineValid && !baselineWarmup ? '基线未建立或已失效' : ''),
     baselineSnapshot,
+    preprocessing: normalizePreprocessingSnapshot(readValue(source, ['preprocessing'])),
   };
 }
 

@@ -188,18 +188,8 @@ export interface WellborePressureWindow {
 
 export interface WellboreKickDiagnostics {
   severity: number;
-  /**
-   * NOT a physics-model result. Sized only to drive the visual kick
-   * animation's intensity; null when there is no flow information to
-   * derive even that visual intensity from. See influxRateSource.
-   */
-  influxRate: number | null;
-  influxRateSource: 'visualization-only';
   gasFrontDepth?: number;
   gasColumnLength?: number;
-  /** NOT a physics-model result; see migrationVelocitySource. */
-  migrationVelocity?: number;
-  migrationVelocitySource: 'visualization-only';
 }
 
 export interface WellboreHydraulicGeometry {
@@ -507,10 +497,6 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   // which the caller derives with computeObservedFlowDelta() - null unless
   // the outlet semantic is a true volumetric flow and both Qin/Qout exist.
   const flowDelta = input.flowDelta;
-  // positiveFlowSupport is the non-negative part of flowDelta used to size
-  // visual evidence intensity; it is null (not 0) when flowDelta itself is
-  // null, so "no flow information" is never silently treated as "no support".
-  const positiveFlowSupport = flowDelta !== null ? Math.max(flowDelta, 0) : null;
   const circulationActive = finite(input.flowIn, 0) > 0.5 || finite(input.spm, 0) > 8;
   const returnActive = finite(input.flowOut, 0) > 0.5 || (flowDelta !== null && flowDelta > 0.5);
   const mudWeight = Number.isFinite(input.mudWeight) && Number(input.mudWeight) > 0 ? Number(input.mudWeight) : undefined;
@@ -554,26 +540,10 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const gasColumnBottomDepth = input.gasColumnBottomDepth;
   const gasFrontDepth = input.gasFrontDepth;
   const gasColumnLength = gasFrontDepth !== undefined && gasColumnBottomDepth !== undefined ? Math.max(0, gasColumnBottomDepth - gasFrontDepth) : undefined;
-  // influxRate and migrationVelocity are NOT physics-model outputs - there is
-  // no backend or calibrated model producing these numbers. They exist only
-  // to size the intensity of the visual kick animation and must never be
-  // presented as measured or estimated quantities (source: 'visualization-only').
-  // They are also not defined when flow information is unavailable: showing a
-  // fabricated rate on a missing Qout-Qin would misrepresent "no data" as "no kick".
-  const influxRate = input.backendLevel >= 2 && positiveFlowSupport !== null
-    ? clamp(positiveFlowSupport * 0.78 + finite(input.pitGain, 0) * 0.42 + finite(input.totalGas, 0) * 0.34, 0.4, 8.8)
-    : null;
-  const migrationVelocity = input.backendLevel >= 2 && positiveFlowSupport !== null
-    ? clamp(12 + severity * 36 + positiveFlowSupport * 1.2, 10, 58)
-    : null;
   const kickDiagnostics: WellboreKickDiagnostics = {
     severity: Number(severity.toFixed(2)),
-    influxRate: influxRate === null ? null : Number(influxRate.toFixed(1)),
-    influxRateSource: 'visualization-only',
     gasFrontDepth: gasFrontDepth === undefined ? undefined : Math.round(gasFrontDepth),
     gasColumnLength: gasColumnLength === undefined ? undefined : Math.round(gasColumnLength),
-    migrationVelocity: migrationVelocity === null ? undefined : Math.round(migrationVelocity),
-    migrationVelocitySource: 'visualization-only',
   };
   const hasDirectionalBasis = Number.isFinite(input.inclination) && Number(input.inclination) >= 5 && Number.isFinite(input.highSideDirection);
   const annulusPhaseState: AnnulusPhaseState = {

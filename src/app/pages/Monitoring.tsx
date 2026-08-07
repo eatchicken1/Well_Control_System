@@ -5,6 +5,7 @@ import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { VerticalCurveDeck } from '../components/VerticalCurveDeck';
 import { WellboreStatusThumbnail } from '../components/WellboreStatusThumbnail';
 import { EventExplanationDrawer } from '../components/EventExplanationDrawer';
+import { PreprocessingDiagnosticsPanel } from '../components/PreprocessingDiagnosticsPanel';
 import { useWellControl, type BackendLevel, type FlowDataPoint } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 import { fetchWellboreProfile } from '../api/wellboreProfileApi';
@@ -403,6 +404,7 @@ export default function Monitoring() {
                 endpoint={realtimeEndpoint}
               />
             </div>
+            <PreprocessingDiagnosticsPanel snapshot={viewBackendDetection.preprocessing} />
           </aside>
         </div>
       )}
