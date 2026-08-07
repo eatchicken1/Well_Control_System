@@ -104,7 +104,8 @@ function formatDbNumberWithSpacedUnit(value: unknown, digits: number, unit: stri
 
 function displayTime(value?: string) {
   if (!value) return '--';
-  return value.replace('T', ' ');
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+  return match ? `${match[1]} ${match[2]}` : value.replace('T', ' ').slice(0, 19);
 }
 
 function toQueryDateTime(value?: string) {
@@ -210,6 +211,7 @@ export default function History() {
   const reviewWellLabel = wellInfo.wellName || wells.find((well) => well.wellId === selectedWellId)?.wellName || '当前井';
   const [page, setPage] = useState(1);
   const pageRef = useRef(1);
+  const [replayPage, setReplayPage] = useState(1);
   const [payload, setPayload] = useState<HistoryPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -293,6 +295,7 @@ export default function History() {
     setSelected(null);
     setPayload(null);
     setReplayResult(null);
+    setReplayPage(1);
     setReplayMessage('');
     setReviewMode('facts');
     setError('');
@@ -318,9 +321,15 @@ export default function History() {
   }, [selected]);
 
   const visiblePayload = reviewMode === 'replay' && replayResult ? replayResult : payload;
-  const records = visiblePayload?.records || [];
-  const visiblePage = visiblePayload?.page || 1;
-  const visibleTotalPages = visiblePayload?.totalPages || 1;
+  const allReplayRecords = replayResult?.records || [];
+  const replayTotal = allReplayRecords.length;
+  const replayTotalPages = Math.max(1, Math.ceil(replayTotal / PAGE_SIZE));
+  const records = reviewMode === 'replay' && replayResult
+    ? allReplayRecords.slice((replayPage - 1) * PAGE_SIZE, replayPage * PAGE_SIZE)
+    : (visiblePayload?.records || []);
+  const visiblePage = reviewMode === 'replay' && replayResult ? replayPage : (visiblePayload?.page || 1);
+  const visibleTotalPages = reviewMode === 'replay' && replayResult ? replayTotalPages : (visiblePayload?.totalPages || 1);
+  const visibleTotal = reviewMode === 'replay' && replayResult ? replayTotal : (visiblePayload?.total ?? 0);
   const refreshHistory = () => {
     historyStartTimeRef.current = selectedStartTimeRef.current;
     loadPage(pageRef.current);
@@ -349,6 +358,7 @@ export default function History() {
         records: (Array.isArray(data.records) ? data.records : (Array.isArray(data.outcomes) ? data.outcomes : [])).map(normalizeHistoryRecord),
       };
       setReplayResult(replayPayload);
+      setReplayPage(1);
       setReplayMessage(`回放 Session ${replayPayload.sessionCode || '已创建'} · 算法 ${replayPayload.algorithmVersion || '--'} · 已预热 ${replayPayload.warmupMinutes || 0} 分钟`);
     } catch (error) {
       setReplayMessage(`回放创建失败：${error instanceof Error ? error.message : '未知错误'}`);
@@ -427,7 +437,7 @@ export default function History() {
         </div>
         <div className="ops-panel-soft p-3">
           <div className="text-[11px] ops-muted">算法输出记录</div>
-          <div className="mt-1 text-sm tabular-nums text-slate-900 dark:text-slate-100">{visiblePayload?.total ?? 0} 条</div>
+          <div className="mt-1 text-sm tabular-nums text-slate-900 dark:text-slate-100">{visibleTotal} 条</div>
         </div>
         <div className="ops-panel-soft p-3">
           <div className="text-[11px] ops-muted">当前页预警</div>
@@ -462,8 +472,8 @@ export default function History() {
             <span>{loading ? '正在刷新...' : `最新刷新 ${lastLoadedAt || '--:--:--'}`}</span>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className="ops-button-secondary px-2 py-1 text-xs" disabled={visiblePage <= 1 || loading || reviewMode === 'replay'} onClick={() => loadPage(visiblePage - 1)}>上一页</button>
-            <button type="button" className="ops-button-secondary px-2 py-1 text-xs" disabled={visiblePage >= visibleTotalPages || loading || reviewMode === 'replay'} onClick={() => loadPage(visiblePage + 1)}>下一页</button>
+            <button type="button" className="ops-button-secondary px-2 py-1 text-xs" disabled={visiblePage <= 1 || loading} onClick={() => { if (reviewMode === 'replay') setReplayPage((p) => Math.max(1, p - 1)); else loadPage(visiblePage - 1); }}>上一页</button>
+            <button type="button" className="ops-button-secondary px-2 py-1 text-xs" disabled={visiblePage >= visibleTotalPages || loading} onClick={() => { if (reviewMode === 'replay') setReplayPage((p) => Math.min(replayTotalPages, p + 1)); else loadPage(visiblePage + 1); }}>下一页</button>
           </div>
         </div>
         {error ? (
