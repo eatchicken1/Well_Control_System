@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type ElementType } from 'react';
 import {
+  Activity,
   AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
   Check,
   CheckCheck,
+  ClipboardCheck,
   Clock3,
   Eye,
   Filter,
@@ -22,6 +26,7 @@ import {
   fetchWarningEvents,
   type WarningEventReviewDetail,
   type WarningEventReviewItem,
+  type WarningEventLatestFrame,
   type WarningEventReviewPage,
   type WarningEventReviewSummary,
 } from '../api/warningsApi';
@@ -107,6 +112,126 @@ function formatDuration(start: string, end: string) {
 function readableValue(value: number | null | undefined, unit = '') {
   if (value == null || !Number.isFinite(value)) return '—';
   return `${value.toFixed(2)}${unit ? ` ${unit}` : ''}`;
+}
+
+function cleanTechnicalText(value?: string | null) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/certificate|证书|UnknownProxy|H_kick_watch|candidate_cluster|precursor_certificate/i.test(text)) return '';
+  return text
+    .replace(/H_kick_watch/gi, '疑似溢流，继续观察')
+    .replace(/UnknownProxy/gi, '出口流量测量类型尚未确认')
+    .replace(/candidate[_\s-]*cluster/gi, '异常组合')
+    .replace(/certificate/gi, '组合证据')
+    .replace(/precursor/gi, '早期异常')
+    .replace(/[；;]\s*[；;]+/g, '；')
+    .trim();
+}
+
+function plainEventState(value?: string | null) {
+  const state = String(value || '').trim().toLowerCase();
+  if (['active', 'tracking', 'observing', 'suspected'].includes(state)) return '异常仍在持续，需继续观察';
+  if (['confirmed'].includes(state)) return '异常已确认';
+  if (['recovering'].includes(state)) return '参数正在恢复，暂不能解除观察';
+  if (['closed', 'resolved', 'ended'].includes(state)) return '事件已结束';
+  return '等待更多现场数据';
+}
+
+function signalDirection(signal: string) {
+  const key = signal.toLowerCase();
+  if (key === 'total_gas' || key === 'gas_support') return 'up';
+  if (/(increase|rise|gain|elevat|up|增|升)/.test(key)) return 'up';
+  if (/(drop|decrease|loss|down|降|跌)/.test(key)) return 'down';
+  return 'watch';
+}
+
+function signalParameters(signal: string) {
+  const key = signal.toLowerCase();
+  const parameters: string[] = [];
+  if (/(outlet|return|出口|返出)/.test(key)) parameters.push('出口流量');
+  if (/(pit|pool|volume|池)/.test(key)) parameters.push('总池体积');
+  if (/(standpipe|spp|pressure|立压)/.test(key) && !/(casing|套压)/.test(key)) parameters.push('立管压力');
+  if (/(casing|套压)/.test(key)) parameters.push('套管压力');
+  if (/(gas|烃|气测)/.test(key)) parameters.push('气测');
+  if (/(rop|钻速)/.test(key)) parameters.push('钻速');
+  if (/(inlet|入口)/.test(key)) parameters.push('入口流量');
+  return [...new Set(parameters)];
+}
+
+function currentParameterValue(parameter: string, frame?: WarningEventLatestFrame | null) {
+  if (!frame) return '当前值未保存';
+  if (parameter === '入口流量') return readableValue(frame.inletFlow, 'L/s');
+  if (parameter === '出口流量') return readableValue(frame.outletFlow, 'L/s');
+  if (parameter === '总池体积') return readableValue(frame.pitVolume, 'm³');
+  if (parameter === '立管压力') return readableValue(frame.standpipePressure, 'MPa');
+  if (parameter === '套管压力') return readableValue(frame.casingPressure, 'MPa');
+  return '当前值未保存';
+}
+
+function parameterMeaning(parameter: string, direction: string) {
+  if (parameter === '出口流量' && direction === 'up') return '返出量增大，需核对是否超过入口排量及正常波动范围。';
+  if (parameter === '总池体积' && direction === 'up') return '池体积持续增加，是判断井筒流体增加的重要现场信号。';
+  if (parameter === '立管压力' && direction === 'down') return '立压下降可能与井筒流体性质或循环状态变化有关，需结合泵冲和排量复核。';
+  if (parameter === '套管压力' && direction === 'up') return '套压上升需关注井口压力变化，并核对是否处于关井或憋压工况。';
+  if (parameter === '气测' && direction === 'up') return '气测升高说明返出流体含气增加，需结合迟到时间和钻遇层位判断。';
+  if (parameter === '钻速' && direction === 'up') return '钻速突然加快可能提示地层变化，应结合岩性和其他参数判断。';
+  return '该参数偏离近期正常状态，需要结合工况和相邻参数继续核对。';
+}
+
+function abnormalParameters(signals: string[], frame?: WarningEventLatestFrame | null) {
+  const byParameter = new Map<string, { parameter: string; direction: string; source: string }>();
+  signals.forEach((signal) => {
+    if (/unknownproxy|outlet_semantic/i.test(signal)) return;
+    const direction = signalDirection(signal);
+    signalParameters(signal).forEach((parameter) => {
+      const previous = byParameter.get(parameter);
+      if (!previous || previous.direction === 'watch') byParameter.set(parameter, { parameter, direction, source: signal });
+    });
+  });
+  if (frame?.inletFlow != null && frame?.outletFlow != null) {
+    const difference = frame.outletFlow - frame.inletFlow;
+    if (Math.abs(difference) >= 0.01 && !byParameter.has('出口流量')) {
+      byParameter.set('出口流量', {
+        parameter: '出口流量',
+        direction: difference > 0 ? 'up' : 'down',
+        source: 'inlet_outlet_difference',
+      });
+    }
+  }
+  return [...byParameter.values()];
+}
+
+function fieldSignalLabels(signals: string[]) {
+  return abnormalParameters(signals).map((item) => (
+    `${item.parameter}${item.direction === 'up' ? '升高' : item.direction === 'down' ? '降低' : '出现异常趋势'}`
+  ));
+}
+
+function fieldConclusion(event: WarningEventReviewItem, signals: string[], frame?: WarningEventLatestFrame | null) {
+  const parameters = abnormalParameters(signals, frame);
+  if (!parameters.length) {
+    return event.currentLevel >= 2
+      ? '系统发现参数组合偏离近期正常状态，但现有数据还不足以指出单一主导参数。请核对流量、池体积、压力和当前作业工况。'
+      : '当前未发现需要现场处置的持续异常。';
+  }
+  const names = parameters.map((item) => {
+    if (item.direction === 'up') return `${item.parameter}升高`;
+    if (item.direction === 'down') return `${item.parameter}降低`;
+    return `${item.parameter}异常`;
+  });
+  return `系统同时发现${names.join('、')}。这些变化已达到 L${event.currentLevel} 观察条件，建议先核对仪表和作业工况，再判断是否存在溢流趋势。`;
+}
+
+function operatorChecks(parameters: ReturnType<typeof abnormalParameters>) {
+  const checks = new Set<string>([
+    '确认当前是否在开泵、停泵、接单根、起下钻或关井，排除正常作业引起的参数变化。',
+    '核对传感器是否跳变、断线或量程异常，并与现场机械表/池液位记录交叉确认。',
+  ]);
+  if (parameters.some((item) => item.parameter === '出口流量')) checks.add('对比入口排量与出口流量，确认差值是否连续扩大。');
+  if (parameters.some((item) => item.parameter === '总池体积')) checks.add('核对活动池液位、补充量和转浆记录，确认池增量是否真实。');
+  if (parameters.some((item) => item.parameter.includes('压力'))) checks.add('核对泵冲、排量、节流状态和立压/套压表，排除设备操作造成的压力变化。');
+  if (parameters.some((item) => item.parameter === '气测')) checks.add('结合迟到时间、背景气和接单根气，确认气测升高是否与当前井深对应。');
+  return [...checks];
 }
 
 function filteredEvents(
@@ -441,6 +566,7 @@ function AlertRow({ event, busy, onDetail, onAcknowledge }: { event: WarningEven
   const visual = LEVEL_VISUAL[visualLevel(level)];
   const Icon = visual.icon;
   const canAcknowledge = event.warningId > 0 && !event.isAcknowledged;
+  const visibleSignals = fieldSignalLabels(event.activeSignals);
   return (
     <article className={`relative border-b border-slate-200 border-l-4 px-4 py-4 last:border-b-0 dark:border-slate-800 ${event.isAcknowledged ? 'border-l-slate-300 bg-white/60 opacity-75 dark:border-l-slate-700 dark:bg-slate-950/40' : `${visual.tone} ${level >= 4 ? 'border-l-red-600' : level >= 3 ? 'border-l-orange-500' : 'border-l-amber-500'}`}`}>
       <div className="flex items-start gap-3">
@@ -453,7 +579,7 @@ function AlertRow({ event, busy, onDetail, onAcknowledge }: { event: WarningEven
             {event.needsManualReview && <span className="rounded bg-violet-100 px-2 py-1 text-[11px] font-semibold text-violet-800 dark:bg-violet-500/15 dark:text-violet-100">需人工复核</span>}
             <span className="text-xs ops-muted">{event.startTime} · {formatDuration(event.startTime, event.endTime)}</span>
           </div>
-          <div className="mt-2 text-sm font-medium leading-6 text-slate-900 dark:text-slate-100">{event.reason || '后端未提供文字原因，请打开详情查看算法帧。'}</div>
+          <div className="mt-2 text-sm font-medium leading-6 text-slate-900 dark:text-slate-100">{cleanTechnicalText(event.reason) || `系统发现${visibleSignals.join('、') || '多项参数偏离近期正常状态'}，请打开详情核对具体变化。`}</div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs ops-muted">
             <span>事件 {event.warningCode || event.eventId}</span>
             <span>Session {event.sessionCode || '—'}</span>
@@ -462,7 +588,7 @@ function AlertRow({ event, busy, onDetail, onAcknowledge }: { event: WarningEven
             {event.isAcknowledged && <span>确认人 {event.acknowledgedBy || '—'} · {event.acknowledgedAt || '—'}</span>}
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {event.activeSignals.length > 0 ? event.activeSignals.map((signal) => <span key={signal} className="ops-inline-tile px-2 py-1 text-[11px]">{backendSignalLabel(signal)}</span>) : <span className="text-xs ops-muted">未记录活动信号</span>}
+            {visibleSignals.length > 0 ? visibleSignals.map((signal) => <span key={signal} className="ops-inline-tile px-2 py-1 text-[11px]">{signal}</span>) : <span className="text-xs ops-muted">未记录可识别的异常参数</span>}
           </div>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
@@ -479,15 +605,17 @@ function ReviewDetailDrawer({ detail, loading, error, comment, onCommentChange, 
   const frame = detail?.latestFrame;
   const level = event ? eventLevel(event) : 0;
   const signals = frame?.activeSignals ? frame.activeSignals.split(',').map((item) => item.trim()).filter(Boolean) : event?.activeSignals || [];
+  const parameterChanges = abnormalParameters(signals, frame);
+  const checks = operatorChecks(parameterChanges);
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/45" onClick={onClose}>
       <aside className="h-full w-full max-w-[920px] overflow-hidden bg-slate-50 shadow-2xl dark:bg-slate-950" role="dialog" aria-modal="true" aria-labelledby="warning-review-detail-title" onClick={(click) => click.stopPropagation()}>
         <div className="flex h-full flex-col">
           <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
             <div className="min-w-0">
-              <div className="ops-eyebrow">现场事件详情 · 后端事实</div>
-              <h2 id="warning-review-detail-title" className="mt-1 truncate text-lg font-semibold text-slate-900 dark:text-slate-100">{event?.wellName || '报警事件'} · {event?.warningCode || event?.eventId || '加载中'}</h2>
-              {event && <div className="mt-2 flex flex-wrap gap-2 text-xs"><span className={`rounded px-2 py-1 font-semibold ${LEVEL_VISUAL[visualLevel(level)].badge}`}>L{level} {BACKEND_LEVEL_META[level].label}</span><span className="ops-inline-tile px-2 py-1">{lifecycleLabel(event)}</span><span className="ops-inline-tile px-2 py-1">Session {event.sessionCode || '—'}</span></div>}
+              <div className="ops-eyebrow">报警详情 · 现场复核</div>
+              <h2 id="warning-review-detail-title" className="mt-1 truncate text-lg font-semibold text-slate-900 dark:text-slate-100">{event?.wellName || '报警事件'} · {event ? `${event.startTime || '时间未知'} 发现异常` : '加载中'}</h2>
+              {event && <div className="mt-2 flex flex-wrap gap-2 text-xs"><span className={`rounded px-2 py-1 font-semibold ${LEVEL_VISUAL[visualLevel(level)].badge}`}>L{level} {BACKEND_LEVEL_META[level].label}</span><span className="ops-inline-tile px-2 py-1">{lifecycleLabel(event)}</span><span className="ops-inline-tile px-2 py-1">持续 {formatDuration(event.startTime, event.endTime)}</span></div>}
             </div>
             <button type="button" className="ops-button-secondary px-2 py-1" onClick={onClose} aria-label="关闭事件详情"><X className="h-4 w-4" /></button>
           </header>
@@ -498,22 +626,27 @@ function ReviewDetailDrawer({ detail, loading, error, comment, onCommentChange, 
             {event && !loading && (
               <>
                 <section className="rounded-xl border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-cyan-900 dark:text-cyan-100"><Eye className="h-4 w-4" />现场先看</div>
-                  <p className="mt-2 text-base font-semibold leading-7 text-slate-900 dark:text-slate-100">{event.reason || '后端未保存文字原因，请结合关键测点与算法状态复核。'}</p>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4"><SummaryMetric label="当前等级" value={event.currentLevel} /><SummaryMetric label="事件最高等级" value={event.highestLevel} /><SummaryMetric label="覆盖样本" value={event.sampleCount} /><SummaryMetric label="确认次数" value={event.acknowledgementCount} /></div>
+                  <div className="flex items-center gap-2 text-xs font-semibold text-cyan-900 dark:text-cyan-100"><Eye className="h-4 w-4" />先看结论</div>
+                  <p className="mt-2 text-base font-semibold leading-7 text-slate-900 dark:text-slate-100">{fieldConclusion(event, signals, frame)}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">当前状态：{plainEventState(event.candidateState || event.status)}。系统结论用于提示复核，是否处置应结合当前作业工况和现场核对结果。</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3"><SummaryMetric label="当前等级" value={event.currentLevel} /><SummaryMetric label="最高等级" value={event.highestLevel} /><SummaryMetric label="已分析样本" value={event.sampleCount} /></div>
                 </section>
 
                 <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-                  <div className="flex items-center justify-between gap-2"><h3 className="font-semibold text-slate-900 dark:text-slate-100">算法证据与判断</h3><span className="text-xs ops-muted">事件 {event.eventId}</span></div>
-                  <div className="mt-3 flex flex-wrap gap-1.5">{signals.length ? signals.map((signal) => <span key={signal} className="ops-inline-tile px-2 py-1 text-xs">{backendSignalLabel(signal)}</span>) : <span className="text-sm ops-muted">未记录活动信号</span>}</div>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2"><InfoItem label="主触发信号" value={event.primarySignal ? backendSignalLabel(event.primarySignal) : '—'} /><InfoItem label="候选状态" value={event.candidateState || event.status || '—'} /><InfoItem label="人工复核" value={event.needsManualReview ? '需要' : '未标记'} /><InfoItem label="起止时间" value={`${event.startTime || '—'} 至 ${event.endTime || '持续中'}`} /></div>
+                  <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-100"><Activity className="h-4 w-4 text-cyan-600" />异常参数怎么变了</h3><span className="text-xs ops-muted">采样时间 {frame?.sampleTime || event.updatedAt || '—'}</span></div>
+                  {parameterChanges.length ? <div className="mt-3 grid gap-3 md:grid-cols-2">{parameterChanges.map((item) => <ParameterChange key={item.parameter} parameter={item.parameter} direction={item.direction} currentValue={currentParameterValue(item.parameter, frame)} meaning={parameterMeaning(item.parameter, item.direction)} />)}</div> : <div className="mt-3 rounded-lg border border-dashed border-slate-300 p-4 text-sm ops-muted dark:border-slate-700">后端没有保存可识别的异常参数变化，请结合下方当前测点和历史曲线复核。</div>}
+                  {frame?.inletFlow != null && frame?.outletFlow != null && <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:bg-slate-950 dark:text-slate-200">流量对比：入口 {readableValue(frame.inletFlow, 'L/s')}，出口 {readableValue(frame.outletFlow, 'L/s')}，出口比入口{frame.outletFlow >= frame.inletFlow ? '高' : '低'} {readableValue(Math.abs(frame.outletFlow - frame.inletFlow), 'L/s')}。</div>}
                 </section>
 
-                {frame ? <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between gap-2"><h3 className="font-semibold text-slate-900 dark:text-slate-100">最新算法帧与关键测点</h3><span className="text-xs ops-muted">采样 {frame.sampleTime} · Frame {frame.frameId}</span></div><div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4"><Metric label="入口流量" value={frame.inletFlow} /><Metric label="出口流量" value={frame.outletFlow} /><Metric label="总池体积" value={frame.pitVolume} unit="m³" /><Metric label="立管压力" value={frame.standpipePressure} unit="MPa" /><Metric label="套管压力" value={frame.casingPressure} unit="MPa" /><Metric label="钻头深度" value={frame.bitDepth} unit="m" /><Metric label="井深" value={frame.wellDepth} unit="m" /><Metric label="正式评估" value={frame.formalEvalLevel} prefix="L" /></div><div className="mt-3 grid gap-2 sm:grid-cols-2"><InfoItem label="算法事件状态" value={frame.eventState || '—'} /><InfoItem label="主导假设" value={frame.dominantHypothesis || '—'} /><InfoItem label="跨周期结论" value={frame.cycleResolution || '—'} /><InfoItem label="前兆等级" value={frame.precursorLevel || '—'} /></div>{frame.reason && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700 dark:bg-slate-950 dark:text-slate-200">{frame.reason}</p>}</section> : <section className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm ops-muted dark:border-slate-700 dark:bg-slate-900">当前事件没有匹配到已持久化算法帧，列表中的事件摘要仍来自后端事件投影。</section>}
+                {frame ? <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between gap-2"><h3 className="font-semibold text-slate-900 dark:text-slate-100">发现异常时的测点</h3><span className="text-xs ops-muted">{frame.sampleTime}</span></div><div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4"><Metric label="入口流量" value={frame.inletFlow} unit="L/s" /><Metric label="出口流量" value={frame.outletFlow} unit="L/s" /><Metric label="总池体积" value={frame.pitVolume} unit="m³" /><Metric label="立管压力" value={frame.standpipePressure} unit="MPa" /><Metric label="套管压力" value={frame.casingPressure} unit="MPa" /><Metric label="钻头深度" value={frame.bitDepth} unit="m" /><Metric label="井深" value={frame.wellDepth} unit="m" /><Metric label="事件等级" value={event.currentLevel} prefix="L" /></div></section> : <section className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm ops-muted dark:border-slate-700 dark:bg-slate-900">当前事件没有保存对应测点，请回到实时监测曲线按事件时间复核。</section>}
 
-                {detail?.lifecycle?.length ? <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h3 className="font-semibold text-slate-900 dark:text-slate-100">生命周期轨迹</h3><div className="mt-3 space-y-2">{detail.lifecycle.map((item, index) => <div key={`${item.sampleTime}-${item.eventName}-${index}`} className="flex gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-950"><div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-cyan-500" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 text-sm font-medium"><span>{item.eventName}</span><span className="ops-inline-tile px-1.5 py-0.5 text-[11px]">L{item.publicLevel}</span><span className="ops-inline-tile px-1.5 py-0.5 text-[11px]">{item.eventState}</span><span className="text-xs ops-muted">修订 {item.revisionSequence}</span></div><div className="mt-1 text-xs ops-muted">{item.sampleTime}</div>{item.reason && <div className="mt-1 text-sm text-slate-700 dark:text-slate-200">{item.reason}</div>}</div></div>)}</div></section> : null}
+                <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20"><h3 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-100"><ClipboardCheck className="h-4 w-4 text-emerald-600" />现场建议核对</h3><ol className="mt-3 space-y-2">{checks.map((item, index) => <li key={item} className="flex gap-3 text-sm leading-6 text-slate-700 dark:text-slate-200"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">{index + 1}</span><span>{item}</span></li>)}</ol></section>
+
+                {detail?.lifecycle?.length ? <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h3 className="font-semibold text-slate-900 dark:text-slate-100">事件变化过程</h3><div className="mt-3 space-y-2">{detail.lifecycle.map((item, index) => <div key={`${item.sampleTime}-${item.eventName}-${index}`} className="flex gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-950"><div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-cyan-500" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 text-sm font-medium"><span>{plainLifecycleEvent(item.eventName)}</span><span className="ops-inline-tile px-1.5 py-0.5 text-[11px]">L{item.publicLevel}</span><span className="text-xs ops-muted">{item.sampleTime}</span></div>{cleanTechnicalText(item.reason) && <div className="mt-1 text-sm text-slate-700 dark:text-slate-200">{cleanTechnicalText(item.reason)}</div>}</div></div>)}</div></section> : null}
 
                 <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between gap-2"><h3 className="font-semibold text-slate-900 dark:text-slate-100">确认审计</h3><span className="text-xs ops-muted">记录由后端保存</span></div>{detail?.acknowledgements?.length ? <div className="mt-3 space-y-2">{detail.acknowledgements.map((item) => <div key={item.acknowledgementId} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-950"><div className="flex flex-wrap items-center gap-2 font-medium"><span>{item.user || '未知用户'}</span><span className="ops-inline-tile px-1.5 py-0.5 text-[11px]">{item.action}</span><span className="text-xs ops-muted">{item.acknowledgedAt}</span></div>{item.comment && <div className="mt-1 text-sm text-slate-700 dark:text-slate-200">备注：{item.comment}</div>}</div>)}</div> : <div className="mt-3 text-sm ops-muted">暂无确认记录</div>}</section>
+
+                <details className="rounded-xl border border-slate-200 bg-white p-4 text-xs ops-muted dark:border-slate-800 dark:bg-slate-900"><summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-200">技术追溯信息</summary><div className="mt-3 grid gap-2 sm:grid-cols-2"><InfoItem label="事件编号" value={event.eventId || '—'} /><InfoItem label="会话编号" value={event.sessionCode || '—'} /><InfoItem label="后端帧号" value={frame ? String(frame.frameId) : '—'} /><InfoItem label="原始状态" value={frame?.eventState || event.candidateState || event.status || '—'} /></div></details>
               </>
             )}
           </div>
@@ -527,6 +660,36 @@ function ReviewDetailDrawer({ detail, loading, error, comment, onCommentChange, 
 
 function InfoItem({ label, value }: { label: string; value: string }) {
   return <div className="ops-inline-tile px-3 py-2"><div className="text-[11px] ops-muted">{label}</div><div className="mt-1 break-words text-sm text-slate-900 dark:text-slate-100">{value}</div></div>;
+}
+
+function ParameterChange({ parameter, direction, currentValue, meaning }: { parameter: string; direction: string; currentValue: string; meaning: string }) {
+  const DirectionIcon = direction === 'up' ? ArrowUpRight : direction === 'down' ? ArrowDownRight : Activity;
+  const directionText = direction === 'up' ? '升高' : direction === 'down' ? '降低' : '偏离正常';
+  const tone = direction === 'up'
+    ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20'
+    : direction === 'down'
+      ? 'border-blue-200 bg-blue-50/70 dark:border-blue-900/60 dark:bg-blue-950/20'
+      : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950';
+  return (
+    <div className={`rounded-xl border p-3 ${tone}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-100"><DirectionIcon className="h-4 w-4" />{parameter}</div>
+        <span className="rounded bg-white/70 px-2 py-1 text-xs font-semibold dark:bg-slate-900/70">{directionText}</span>
+      </div>
+      <div className="mt-2 text-sm">当前值：<strong className="tabular-nums">{currentValue}</strong></div>
+      <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">{meaning}</p>
+    </div>
+  );
+}
+
+function plainLifecycleEvent(value: string) {
+  const key = value.trim().toLowerCase();
+  if (/(created|opened|start)/.test(key)) return '首次发现异常';
+  if (/(escalat|promot|level_up)/.test(key)) return '异常程度升高';
+  if (/(recover|deescalat|level_down)/.test(key)) return '参数开始恢复';
+  if (/(closed|resolved|ended)/.test(key)) return '事件结束';
+  if (/(updated|revision|track)/.test(key)) return '持续观察到新变化';
+  return '事件状态更新';
 }
 
 function Metric({ label, value, unit = '', prefix = '' }: { label: string; value: number | null | undefined; unit?: string; prefix?: string }) {

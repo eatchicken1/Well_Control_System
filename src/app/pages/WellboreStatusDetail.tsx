@@ -198,15 +198,24 @@ export default function WellboreStatusDetail() {
   const evidenceDuration = cycle.elapsedSeconds > 0 ? `持续 ${Math.round(cycle.elapsedSeconds)} s` : '当前窗口';
   const outletSemantic = displayData.outletSemantic?.trim() || '';
   const configuredOutletUnit = displayData.outletUnit?.trim() || '';
-  const valveOpening = /valve|opening|开度/i.test(outletSemantic) || configuredOutletUnit === '%';
-  const outletUnit = valveOpening
+  const isValveOpening = /valve|opening|开度/i.test(outletSemantic) || outletSemantic === 'ValveOpeningProxy';
+  const isTrueFlow = /true(volumetric|return)flow/i.test(outletSemantic) || outletSemantic === 'TrueVolumetricFlow' || outletSemantic === 'TrueReturnFlow';
+  const isUnknown = !isValveOpening && !isTrueFlow;
+  const outletUnit = isValveOpening
     ? '%'
-    : configuredOutletUnit && !/^unknown$/i.test(configuredOutletUnit)
-      ? configuredOutletUnit
-      : /^true(volumetric|return)flow$/i.test(outletSemantic)
-        ? 'L/s'
-        : '--';
-  const outletLabel = valveOpening ? '出口阀门开度' : '出口流量';
+    : isTrueFlow
+      ? (configuredOutletUnit && !/^unknown$/i.test(configuredOutletUnit) ? configuredOutletUnit : 'L/s')
+      : (configuredOutletUnit && !/^unknown$/i.test(configuredOutletUnit) ? configuredOutletUnit : '--');
+  const outletLabel = isValveOpening
+    ? '出口挡板开度'
+    : isTrueFlow
+      ? '出口流量'
+      : '出口信号';
+  const outletChangeText = isValveOpening
+    ? '当前通道语义：阀门开度'
+    : isTrueFlow
+      ? '当前通道语义：真实出口流量'
+      : '语义未配置';
   const pressureResidual = Number.isFinite(displayData.spp) && Number.isFinite(displayData.sppPredicted)
     ? displayData.spp - displayData.sppPredicted
     : undefined;
@@ -221,10 +230,10 @@ export default function WellboreStatusDetail() {
       label: outletLabel,
       value: format(displayData.flowOut, 1),
       unit: outletUnit,
-      change: valveOpening ? '当前通道语义：阀门开度' : '当前通道语义：真实出口值',
+      change: outletChangeText,
       duration: evidenceDuration,
-      grade: abnormal && displayDetection.activeSignals.includes('return_response') ? '主证据' : '正常',
-      tone: abnormal && displayDetection.activeSignals.includes('return_response') ? 'critical' : 'normal',
+      grade: abnormal && displayDetection.activeSignals.includes('OutletIncreaseResidual') ? '主证据' : '正常',
+      tone: abnormal && displayDetection.activeSignals.includes('OutletIncreaseResidual') ? 'critical' : 'normal',
       Icon: Activity,
     },
     {
@@ -318,7 +327,6 @@ export default function WellboreStatusDetail() {
               drillPipePressure={displayData.spp}
               pitGain={displayData.pitGain}
               pitVolume={displayData.pitVolume}
-              returnResponse={displayData.returnResponse}
               totalGas={displayData.totalGas}
               mudWeight={displayData.mudWeight}
               ecd={displayData.ecd}

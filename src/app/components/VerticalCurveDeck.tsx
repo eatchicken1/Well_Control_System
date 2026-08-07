@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BackendLevel, FlowDataPoint, PressureDataPoint, ThresholdSettings } from '../context/WellControlContext';
+import { outletDisplayLabel, outletDisplayUnit } from '../lib/telemetryContract';
 import { useIsDarkMode } from '../hooks/useChartTheme';
 
 interface VerticalCurveDeckProps {
@@ -9,6 +10,8 @@ interface VerticalCurveDeckProps {
   thresholds: ThresholdSettings;
   wellDepth?: number;
   currentDepth?: number;
+  outletSemantic?: string;
+  outletUnit?: string;
   isStopped?: boolean;
   compact?: boolean;
   fillViewport?: boolean;
@@ -21,7 +24,7 @@ interface CurvePoint {
   bitDepth: number;
   level: BackendLevel;
   eventId?: string | null;
-  values: Record<string, number>;
+  values: Record<string, number | null>;
 }
 
 interface TrackCurve {
@@ -157,7 +160,7 @@ function TrackHeader({ config, isAxis, latest }: { config: TrackConfig; isAxis?:
               <div className="vertical-curve-key" key={curve.key} style={{ borderLeftColor: curve.color }}>
                 <div className="vertical-curve-key-main">
                   <span className="vertical-curve-key-name" title={curve.label}>{curve.label}</span>
-                  <strong style={{ color: curve.color }}>{latest ? fmt(latest.values[curve.key]) : '--'}</strong>
+                  <strong style={{ color: curve.color }}>{latest ? (latest.values[curve.key] !== null && latest.values[curve.key] !== undefined ? fmt(latest.values[curve.key] as number) : '--') : '--'}</strong>
                   <span className="vertical-curve-key-unit" style={{ color: curve.color }}>{curve.unit}</span>
                 </div>
                 <div className="vertical-lane-scale" aria-hidden="true">
@@ -184,8 +187,8 @@ function niceStep(roughStep: number) {
   return 10 * magnitude;
 }
 
-function niceRange(values: number[], fallback: [number, number], options: AdaptiveRangeOptions = {}): [number, number] {
-  const finiteValues = values.filter(Number.isFinite);
+function niceRange(values: (number | null | undefined)[], fallback: [number, number], options: AdaptiveRangeOptions = {}): [number, number] {
+  const finiteValues = values.filter((v): v is number => v !== null && v !== undefined && Number.isFinite(v));
   if (finiteValues.length === 0) return fallback;
 
   let min = Math.min(...finiteValues);
@@ -251,19 +254,19 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
   return Array.from({ length: maxLength }).map((_, index) => {
     const flow = flowData[Math.max(0, index - (maxLength - flowData.length))];
     const pressure = pressureData[Math.max(0, index - (maxLength - pressureData.length))];
-    const flowIn = finite(flow?.flowIn, 0);
-    const flowOut = finite(flow?.flowOut, flowIn);
-    const pitVolume = finite(flow?.pitVolume, Number.NaN);
-    const casingPressure = finite(pressure?.casingPressure, 0);
-    const drillPipePressure = finite(pressure?.drillPipePressure, 0);
-    const spp = finite(pressure?.spp, drillPipePressure);
-    const spm = finite(flow?.spm, 0);
-    const totalGas = finite(flow?.totalGas, 0);
-    const hookLoad = finite(flow?.hookLoad, 0);
-    const wob = finite(flow?.wob, 0);
-    const drillTime = finite(flow?.drillTime, 0);
-    const rpm = finite(flow?.rpm, 0);
-    const torque = finite(flow?.torque, 0);
+    const flowIn = flow?.flowIn ?? null;
+    const flowOut = flow?.flowOut ?? null;
+    const pitVolume = flow?.pitVolume ?? null;
+    const casingPressure = pressure?.casingPressure ?? null;
+    const drillPipePressure = pressure?.drillPipePressure ?? null;
+    const spp = pressure?.spp ?? null;
+    const spm = flow?.spm ?? null;
+    const totalGas = flow?.totalGas ?? null;
+    const hookLoad = flow?.hookLoad ?? null;
+    const wob = flow?.wob ?? null;
+    const rop = ((flow as Record<string, unknown>)?.rop as number | null | undefined) ?? null;
+    const rpm = flow?.rpm ?? null;
+    const torque = flow?.torque ?? null;
     const bitDepth = finite(flow?.bitDepth, currentBitDepth);
     const frameWellDepth = finite(flow?.wellDepth, wellDepth);
     const level = (flow?.backendLevel ?? pressure?.backendLevel ?? 0) as BackendLevel;
@@ -278,7 +281,7 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
       values: {
         flowIn,
         flowOut,
-        pitVolume: Number.isFinite(pitVolume) ? pitVolume : 0,
+        pitVolume,
         casingPressure,
         drillPipePressure,
         spp,
@@ -286,7 +289,7 @@ function buildTrackData(flowData: FlowDataPoint[], pressureData: PressureDataPoi
         totalGas,
         hookLoad,
         wob,
-        drillTime,
+        rop,
         rpm,
         torque,
       },
@@ -300,7 +303,9 @@ function curvePointPriority(point: CurvePoint, previous?: CurvePoint) {
   const changeWeight = Object.keys(point.values).reduce((sum, key) => {
     const current = point.values[key];
     const prior = previous.values[key];
-    return Number.isFinite(current) && Number.isFinite(prior) ? sum + Math.abs(current - prior) : sum;
+    return (current !== null && current !== undefined && Number.isFinite(current) &&
+            prior !== null && prior !== undefined && Number.isFinite(prior))
+      ? sum + Math.abs(current - prior) : sum;
   }, 0);
   return eventWeight + changeWeight;
 }
@@ -586,25 +591,38 @@ function VerticalTrack({
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.beginPath();
+      let drawing = false;
       points.forEach((point, index) => {
-        const x = xForValue(finite(point.values[curve.key], 0));
+        const val = point.values[curve.key];
+        if (val === null || val === undefined || !Number.isFinite(val)) {
+          drawing = false;
+          return;
+        }
+        const x = xForValue(val);
         const y = yForIndex(index);
-        if (index === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        if (!drawing) {
+          ctx.moveTo(x, y);
+          drawing = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
       });
       ctx.strokeStyle = curve.color;
       ctx.lineWidth = curveIndex === 0 ? 2.15 : 1.8;
       ctx.stroke();
 
-      const latestX = xForValue(finite(latest.values[curve.key], 0));
-      const latestY = yForIndex(points.length - 1);
-      ctx.fillStyle = curve.color;
-      ctx.beginPath();
-      ctx.arc(latestX, latestY, curveIndex === 0 ? 3.5 : 2.7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = palette.pointStroke;
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
+      const latestVal = latest.values[curve.key];
+      if (latestVal !== null && latestVal !== undefined && Number.isFinite(latestVal)) {
+        const latestX = xForValue(latestVal);
+        const latestY = yForIndex(points.length - 1);
+        ctx.fillStyle = curve.color;
+        ctx.beginPath();
+        ctx.arc(latestX, latestY, curveIndex === 0 ? 3.5 : 2.7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = palette.pointStroke;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      }
     });
 
     const cursorY = yForIndex(points.length - 1);
@@ -721,7 +739,7 @@ function VerticalTrack({
             ) : config.curves.map((curve) => (
               <div key={curve.key} className="flex items-center justify-between gap-3">
                 <span>{curve.label}</span>
-                <span className="tabular-nums">{fmtWithUnit(hoverPoint.values[curve.key], 1, curve.unit)}</span>
+                <span className="tabular-nums">{hoverPoint.values[curve.key] !== null && hoverPoint.values[curve.key] !== undefined ? fmtWithUnit(hoverPoint.values[curve.key] as number, 1, curve.unit) : '--'}</span>
               </div>
             ))}
           </div>,
@@ -758,6 +776,8 @@ export function VerticalCurveDeck({
   thresholds,
   wellDepth,
   currentDepth,
+  outletSemantic,
+  outletUnit,
   isStopped = false,
   compact = false,
   fillViewport = false,
@@ -775,7 +795,7 @@ export function VerticalCurveDeck({
   const gasValues = points.map((point) => point.values.totalGas);
   const hookValues = points.map((point) => point.values.hookLoad);
   const wobValues = points.map((point) => point.values.wob);
-  const drillTimeValues = points.map((point) => point.values.drillTime);
+  const ropValues = points.map((point) => point.values.rop);
   const rpmValues = points.map((point) => point.values.rpm);
   const torqueValues = points.map((point) => point.values.torque);
 
@@ -784,7 +804,7 @@ export function VerticalCurveDeck({
       title: '流量',
       width: '1.15 1 150px',
       curves: [
-        { key: 'flowOut', label: '出口流量', unit: 'L/s', color: '#dc2626', range: niceRange(flowValues, [0, 100], { clampMin: 0 }) },
+        { key: 'flowOut', label: outletDisplayLabel(outletSemantic), unit: outletDisplayUnit(outletSemantic, outletUnit), color: '#dc2626', range: niceRange(flowValues, [0, 100], { clampMin: 0 }) },
         { key: 'flowIn', label: '入口流量', unit: 'L/s', color: '#2563eb', range: niceRange(flowValues, [0, 100], { clampMin: 0 }) },
       ],
     },
@@ -815,7 +835,7 @@ export function VerticalCurveDeck({
       title: '钻进参数',
       width: '1.12 1 154px',
       curves: [
-        { key: 'drillTime', label: '钻时', unit: 'min/m', color: '#65a30d', range: niceRange(drillTimeValues, [0, 5], { clampMin: 0, minSpan: 0.5 }) },
+        { key: 'rop', label: '机械钻速', unit: 'm/min', color: '#65a30d', range: niceRange(ropValues, [0, 30], { clampMin: 0, minSpan: 1 }) },
         { key: 'rpm', label: '转盘转速', unit: 'rpm', color: '#ca8a04', range: niceRange(rpmValues, [0, 120], { clampMin: 0, minSpan: 5 }) },
         { key: 'torque', label: '扭矩', unit: 'kN·m', color: '#d97706', range: niceRange(torqueValues, [0, 40], { clampMin: 0, minSpan: 2 }) },
       ],

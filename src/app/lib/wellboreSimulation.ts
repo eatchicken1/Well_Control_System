@@ -78,7 +78,7 @@ export interface WellboreSimulationInput {
   backendLevel: BackendLevel;
   flowIn: number;
   flowOut: number;
-  returnResponse: number;
+  flowDelta: number | null;
   pitGain: number;
   pitVolume: number;
   drillPipePressure: number;
@@ -497,7 +497,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const tone = levelTone(input.backendLevel);
   const flowDelta = finite(input.flowOut, 0) - finite(input.flowIn, 0);
   const circulationActive = finite(input.flowIn, 0) > 0.5 || finite(input.spm, 0) > 8;
-  const returnActive = finite(input.flowOut, 0) > 0.5 || finite(input.returnResponse, 0) > 5;
+  const returnActive = finite(input.flowOut, 0) > 0.5 || (input.flowDelta !== null && input.flowDelta > 0.5);
   const mudWeight = Number.isFinite(input.mudWeight) && Number(input.mudWeight) > 0 ? Number(input.mudWeight) : undefined;
   const ecd = Number.isFinite(input.ecd) && Number(input.ecd) > 0 ? Number(input.ecd) : undefined;
   const porePressureEquivalent = Number.isFinite(input.porePressureEquivalent) && Number(input.porePressureEquivalent) > 0 ? Number(input.porePressureEquivalent) : undefined;
@@ -517,7 +517,7 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const gasSupport = finite(input.totalGas, 0) >= 0.8 || hasSignal(input.activeSignals, ['total_gas', 'gas_support']);
   const pitSupport = finite(input.pitGain, 0) >= 0.8 || hasSignal(input.activeSignals, ['pit_gain', 'pit_volume', 'pool_delta', 'pool_window_increase']);
   const pressureSupport = hasSignal(input.activeSignals, ['standpipe_pressure', 'spp', 'spp_drop', 'casing_pressure']);
-  const returnSupport = flowDelta > 0.8 || finite(input.returnResponse, 0) > 8 || hasSignal(input.activeSignals, ['return_response']);
+  const returnSupport = flowDelta > 0.8 || (input.flowDelta !== null && input.flowDelta > 0.8) || hasSignal(input.activeSignals, ['return_response', 'OutletIncreaseResidual']);
 
   const estimatedCenterDepth = clamp(bitDepth - Math.max(100, openHoleLength * 0.12), openHoleStartDepth + 80, wellDepth - 80);
   const localizationHalfSpan = clamp(openHoleLength * 0.045, 40, 120);

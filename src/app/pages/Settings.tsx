@@ -346,7 +346,7 @@ export default function Settings() {
   const passwordReady = passwordDraft.oldPassword.length > 0 && passwordDraft.newPassword.length >= 8 && passwordDraft.confirmPassword.length >= 8;
   const passwordMismatch = passwordDraft.confirmPassword.length > 0 && passwordDraft.newPassword !== passwordDraft.confirmPassword;
   const passwordSubmitDisabled = passwordSaving || !passwordReady || passwordMismatch;
-  const thresholdInvalid = draft.returnResponseWarning >= draft.returnResponseCritical || draft.pitGainWarning >= draft.pitGainCritical;
+  const thresholdInvalid = draft.pitGainWarning >= draft.pitGainCritical;
   const algorithmInvalid =
     draft.sppResidualWarning >= draft.sppResidualCritical
     || draft.rlsForgettingFactor <= 0
@@ -633,11 +633,6 @@ export default function Settings() {
             <p className="mt-2 text-[11px] leading-5 ops-muted">解释层只读投影检测事实，不改变报警等级、Candidate 状态、Evidence 或监测 Session。</p>
           </section>
 
-          <ThresholdGroup title="出口流量响应曲线参考">
-            <ThresholdInput label="参考线 1" value={draft.returnResponseWarning} activeValue={thresholds.returnResponseWarning} unit="%" onChange={set('returnResponseWarning')} min={0} max={60} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="warning" />
-            <ThresholdInput label="参考线 2" value={draft.returnResponseCritical} activeValue={thresholds.returnResponseCritical} unit="%" onChange={set('returnResponseCritical')} min={0} max={100} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="critical" />
-          </ThresholdGroup>
-
           <ThresholdGroup title="总池体积曲线参考">
             <ThresholdInput label="参考线 1" value={draft.pitGainWarning} activeValue={thresholds.pitGainWarning} unit="m3" onChange={set('pitGainWarning')} min={0} max={10} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="warning" />
             <ThresholdInput label="参考线 2" value={draft.pitGainCritical} activeValue={thresholds.pitGainCritical} unit="m3" onChange={set('pitGainCritical')} min={0} max={20} step={0.1} description="仅用于曲线标尺，不参与报警判级" level="critical" />
@@ -704,9 +699,7 @@ export default function Settings() {
           </div>
           <div className="mb-2 text-[11px] uppercase tracking-[0.16em] ops-muted">当前参数</div>
           <div className="space-y-2 text-sm">
-            {[ 
-              ['出口流量响应预警', `${thresholds.returnResponseWarning}%`],
-              ['出口流量响应严重', `${thresholds.returnResponseCritical}%`],
+            {[
               ['总池体积变化预警', `${thresholds.pitGainWarning} m3`],
               ['总池体积变化严重', `${thresholds.pitGainCritical} m3`],
               ['套压预警', `${thresholds.casingPressureWarning} MPa`],
@@ -722,13 +715,6 @@ export default function Settings() {
             ))}
           </div>
           <div className="mt-4 space-y-2">
-            <ThresholdScale
-              label="出口流量响应阈值尺"
-              warning={draft.returnResponseWarning}
-              critical={draft.returnResponseCritical}
-              unit="%"
-              max={100}
-            />
             <ThresholdScale
               label="总池体积变化阈值尺"
               warning={draft.pitGainWarning}

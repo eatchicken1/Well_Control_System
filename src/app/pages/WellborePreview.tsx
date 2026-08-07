@@ -28,9 +28,9 @@ function previewData(level: BackendLevel) {
     pitGain: level >= 2 ? 1.86 : level === 1 ? 0.42 : 0.04,
     pitVolume: level >= 2 ? 122.6 : 118.2,
     totalGas: level >= 2 ? 1.42 : 0.18,
-    returnResponse: level >= 2 ? 19.8 : level === 1 ? 5.2 : 0.6,
+    
     mudWeight: 1.22,
-    activeSignals: level >= 2 ? ['return_response', 'pit_gain', 'pit_volume', 'total_gas', 'casing_pressure'] : level === 1 ? ['return_response'] : [],
+    activeSignals: level >= 2 ? ['OutletIncreaseResidual', 'pit_gain', 'pit_volume', 'total_gas', 'casing_pressure'] : level === 1 ? ['OutletIncreaseResidual'] : [],
     condition: level >= 2 ? '循环异常' : level === 1 ? '循环观察' : '稳定监测',
   };
 }
@@ -102,7 +102,6 @@ export default function WellborePreview() {
             drillPipePressure={data.spp}
             pitGain={data.pitGain}
             pitVolume={data.pitVolume}
-            returnResponse={data.returnResponse}
             totalGas={data.totalGas}
             mudWeight={data.mudWeight}
             influxSource={abnormal ? 'estimated' : undefined}

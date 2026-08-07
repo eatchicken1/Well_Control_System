@@ -4,6 +4,7 @@ import {
   type WellboreSimulationModel,
   type WellboreTone,
 } from '../lib/wellboreSimulation';
+import { computeObservedFlowDelta } from '../lib/telemetryContract';
 
 interface WellSchematicProps {
   mode?: 'thumbnail' | 'detail';
@@ -16,10 +17,11 @@ interface WellSchematicProps {
   drillPipePressure: number;
   pitGain: number;
   pitVolume?: number;
-  returnResponse: number;
   totalGas?: number;
   backendLevel: BackendLevel;
   activeSignals?: string[];
+  outletSemantic?: string;
+  outletUnit?: string;
   pumpState?: string;
   condition?: string;
   cycleInfo?: CycleInfo;
@@ -52,7 +54,7 @@ const T = {
   currentEvidence: '\u5f53\u524d\u8bc1\u636e\u6458\u8981',
   wellDepth: '\u4e95\u6df1', bit: '\u94bb\u5934', shoe: '\u5957\u7ba1\u978b', openHole: '\u88f8\u773c\u6bb5', formation: '\u5f53\u524d\u5c42\u4f4d', condition: '\u5de5\u51b5',
   surface: '\u5730\u9762\u7ebf / \u8f6c\u76d8\u9762', wellhead: '\u4e95\u53e3', bop: 'BOP / \u9632\u55b7\u5668\u7ec4', conductor: '\u5bfc\u7ba1', surfaceCasing: '\u8868\u5c42\u5957\u7ba1', intermediateCasing: '\u6280\u672f\u5957\u7ba1', cement: '\u56fa\u4e95\u6c34\u6ce5\u73af', drillString: '\u94bb\u67f1 / BHA', td: '\u4eba\u5de5\u4e95\u5e95',
-  inlet: '\u5165\u53e3\u6d41\u91cf', outlet: '\u51fa\u53e3\u6d41\u91cf', pitGain: '\u6c60\u589e\u91cf', pitVolume: '\u603b\u6c60\u4f53\u79ef', spp: '\u7acb\u538b', casingPressure: '\u5957\u538b', returnResponse: '\u8fd4\u51fa\u54cd\u5e94', totalGas: '\u5168\u70c3',
+  inlet: '\u5165\u53e3\u6d41\u91cf', outlet: '\u51fa\u53e3\u6d41\u91cf', pitGain: '\u6c60\u589e\u91cf', pitVolume: '\u603b\u6c60\u4f53\u79ef', spp: '\u7acb\u538b', casingPressure: '\u5957\u538b', totalGas: '\u5168\u70c3',
   normal: 'L0 \u6b63\u5e38', watch: 'L1 \u89c2\u5bdf', kick: 'L2-L3 \u7591\u4f3c\u6ea2\u6d41', confirm: 'L4 \u6ea2\u6d41\u786e\u8ba4', noEvidence: '\u672a\u89e6\u53d1\u5f02\u5e38\u4fb5\u5165\u8bc1\u636e', watchCopy: '\u5f02\u5e38\u89c2\u5bdf\u4e2d', kickCopy: '\u7591\u4f3c\u8fd4\u51fa\u8def\u5f84', confirmCopy: '\u6ea2\u6d41\u5df2\u786e\u8ba4', evidenceBox: '\u5f02\u5e38\u8bc1\u636e', influx: '\u5f02\u5e38\u4fb5\u5165\u70b9', normalPath: '\u6b63\u5e38\u5faa\u73af\u8def\u5f84', watchPath: '\u89c2\u5bdf\u8def\u5f84', kickPath: '\u7591\u4f3c\u4e0a\u8fd4\u8def\u5f84', units: '\u6df1\u5ea6\u5355\u4f4d m \u00b7 \u538b\u529b\u5355\u4f4d MPa',
 };
 
@@ -451,10 +453,11 @@ export function WellSchematic({
   drillPipePressure,
   pitGain,
   pitVolume,
-  returnResponse,
   totalGas = 0,
   backendLevel,
   activeSignals = [],
+  outletSemantic,
+  outletUnit,
   pumpState,
   condition,
   cycleInfo,
@@ -466,11 +469,12 @@ export function WellSchematic({
 }: WellSchematicProps) {
   const isLight = surface === 'light';
   const isDetail = mode === 'detail';
+  const flowDelta = computeObservedFlowDelta(flowIn, flowOut, outletSemantic);
   const model = buildWellboreSimulationModel({
     backendLevel,
     flowIn,
     flowOut,
-    returnResponse,
+    flowDelta,
     pitGain,
     pitVolume: pitVolume ?? pitGain,
     drillPipePressure,
@@ -497,14 +501,21 @@ export function WellSchematic({
   const metricLevelTone: WellboreTone = backendLevel >= 2 ? 'warning' : backendLevel === 1 ? 'watch' : 'normal';
   const evidenceNote = model.evidenceNotes[0] || model.statusDescription;
 
+  const resolvedOutletLabel = outletSemantic === 'ValveOpeningProxy' ? '\u51fa\u53e3\u6321\u677f\u5f00\u5ea6'
+    : outletSemantic === 'TrueVolumetricFlow' || outletSemantic === 'TrueReturnFlow' ? '\u51fa\u53e3\u6d41\u91cf'
+    : '\u51fa\u53e3\u4fe1\u53f7';
+  const resolvedOutletUnit = outletSemantic === 'ValveOpeningProxy' ? '%'
+    : outletUnit && !/^unknown$/i.test(outletUnit) ? outletUnit
+    : outletSemantic === 'TrueVolumetricFlow' || outletSemantic === 'TrueReturnFlow' ? 'L/s'
+    : '--';
+
   const readouts = [
     { label: T.inlet, value: formatFinite(flowIn, 1), unit: 'L/s', tone: model.flowState.inflowTone },
-    { label: T.outlet, value: formatFinite(flowOut, 1), unit: 'L/s', tone: model.flowState.annulusTone },
+    { label: resolvedOutletLabel, value: formatFinite(flowOut, 1), unit: resolvedOutletUnit, tone: model.flowState.annulusTone },
     { label: T.pitGain, value: formatFinite(pitGain, 2), unit: 'm\u00b3', tone: metricLevelTone },
     { label: T.pitVolume, value: formatFinite(pitVolume ?? pitGain, 2), unit: 'm\u00b3', tone: backendLevel >= 2 ? 'warning' : 'normal' },
     { label: T.spp, value: formatFinite(drillPipePressure, 2), unit: 'MPa', tone: activeSignals.includes('standpipe_pressure') || activeSignals.includes('spp_drop') ? model.tone : 'normal' },
     { label: T.casingPressure, value: formatFinite(casingPressure, 2), unit: 'MPa', tone: activeSignals.includes('casing_pressure') ? model.tone : 'normal' },
-    { label: T.returnResponse, value: formatFinite(returnResponse, 1), unit: '%', tone: metricLevelTone },
     { label: T.totalGas, value: formatFinite(totalGas, 2), unit: '%', tone: activeSignals.includes('total_gas') ? model.tone : 'normal' },
   ];
   const summaryMetrics = compact ? readouts.slice(0, 4) : readouts;

@@ -261,7 +261,6 @@ export default function WellManagementDetail() {
             pitGain={0}
             pitVolume={0}
             totalGas={0}
-            returnResponse={0}
             mudWeight={0}
             hasSamples={false}
             isStopped

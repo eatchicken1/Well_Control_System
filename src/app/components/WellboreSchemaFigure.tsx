@@ -1,5 +1,6 @@
 import type { BackendLevel, CycleInfo } from '../context/WellControlContext';
 import { buildWellboreSimulationModel, type WellboreSimulationModel, type WellboreStructureSection, type WellboreTone } from '../lib/wellboreSimulation';
+import { computeObservedFlowDelta } from '../lib/telemetryContract';
 
 interface WellboreSchemaFigureProps {
   mode?: 'thumbnail' | 'detail';
@@ -21,7 +22,7 @@ interface WellboreSchemaFigureProps {
   drillPipePressure: number;
   pitGain: number;
   pitVolume?: number;
-  returnResponse?: number;
+  outletSemantic?: string;
   totalGas?: number;
   mudWeight?: number;
   ecd?: number;
@@ -443,8 +444,9 @@ function EngineeringCallouts({ model, g, compact }: { model: WellboreSimulationM
   );
 }
 
-export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, flowIn, flowOut, spm = 0, casingPressure, drillPipePressure, pitGain, pitVolume, returnResponse = 0, totalGas = 0, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals = [], pumpState, condition, cycleInfo, hasSamples = true, isRecovering = false, isStopped = false }: WellboreSchemaFigureProps) {
-  const model = buildWellboreSimulationModel({ backendLevel, flowIn, flowOut, returnResponse, pitGain, pitVolume: pitVolume ?? pitGain, drillPipePressure, casingPressure, totalGas, spm, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals, pumpState, condition, cycleInfo, hasSamples, isRecovering, isStopped });
+export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, flowIn, flowOut, spm = 0, casingPressure, drillPipePressure, pitGain, pitVolume, outletSemantic, totalGas = 0, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals = [], pumpState, condition, cycleInfo, hasSamples = true, isRecovering = false, isStopped = false }: WellboreSchemaFigureProps) {
+  const flowDelta = computeObservedFlowDelta(flowIn, flowOut, outletSemantic);
+  const model = buildWellboreSimulationModel({ backendLevel, flowIn, flowOut, flowDelta, pitGain, pitVolume: pitVolume ?? pitGain, drillPipePressure, casingPressure, totalGas, spm, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals, pumpState, condition, cycleInfo, hasSamples, isRecovering, isStopped });
   const compact = mode !== 'detail';
   const g = compact ? THUMB : DETAIL;
   const id = compact ? 'thumb' : 'detail';

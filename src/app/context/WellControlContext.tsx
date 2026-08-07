@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useState, useEffect, useMemo, u
 import { appendAccessToken, authenticatedFetch, getAccessToken } from '../api/authToken';
 import { saveSelectedWells } from '../api/authApi';
 import { resetRealtimeBaseline } from '../api/realtimeBaselineApi';
+import { fallbackQueueCandidateFromFrame, mergeQueueAlertSnapshot } from '../lib/alertQueueProjection';
 import { markEventExplanationRevision } from '../lib/eventExplanationCache';
 import { useAuth } from './AuthContext';
 
@@ -40,29 +41,28 @@ export interface WellInfo {
 }
 
 export interface MonitoringData {
-  pitGain: number;
-  pitVolume: number;
-  returnResponse: number;
-  flowIn: number;
-  flowOut: number;
+  pitGain: number | null;
+  pitVolume: number | null;
+  flowIn: number | null;
+  flowOut: number | null;
   outletUnit?: string;
   outletSemantic?: string;
-  casingPressure: number;
-  drillPipePressure: number;
-  spp: number;
-  sppPredicted: number;
-  spm: number;
-  mudWeight: number;
-  mudTemp: number;
-  rop: number;
-  drillTime: number;
-  hookLoad: number;
-  wob: number;
-  totalGas: number;
-  torque: number;
-  wellDepth?: number;
-  bitDepth: number;
-  rpm: number;
+  casingPressure: number | null;
+  drillPipePressure: number | null;
+  spp: number | null;
+  sppPredicted: number | null;
+  spm: number | null;
+  mudWeight: number | null;
+  mudTemp: number | null;
+  rop: number | null;
+  drillTime: number | null;
+  hookLoad: number | null;
+  wob: number | null;
+  totalGas: number | null;
+  torque: number | null;
+  wellDepth?: number | null;
+  bitDepth: number | null;
+  rpm: number | null;
   confidenceLevel: number;
   pumpState: string;
   condition: string;
@@ -246,20 +246,19 @@ export interface FlowDataPoint {
   timestampMs?: number;
   backendLevel?: BackendLevel;
   eventId?: string | null;
-  flowIn: number;
-  flowOut: number;
-  returnResponse?: number;
-  pitGain?: number;
-  pitVolume?: number;
-  wellDepth?: number;
-  bitDepth?: number;
-  spm?: number;
-  totalGas?: number;
-  hookLoad?: number;
-  wob?: number;
-  drillTime?: number;
-  rpm?: number;
-  torque?: number;
+  flowIn: number | null;
+  flowOut: number | null;
+  pitGain?: number | null;
+  pitVolume?: number | null;
+  wellDepth?: number | null;
+  bitDepth?: number | null;
+  spm?: number | null;
+  totalGas?: number | null;
+  hookLoad?: number | null;
+  wob?: number | null;
+  drillTime?: number | null;
+  rpm?: number | null;
+  torque?: number | null;
 }
 
 export interface PressureDataPoint {
@@ -267,31 +266,30 @@ export interface PressureDataPoint {
   timestampMs?: number;
   backendLevel?: BackendLevel;
   eventId?: string | null;
-  casingPressure: number;
-  drillPipePressure: number;
-  spp?: number;
-  sppPredicted?: number;
+  casingPressure: number | null;
+  drillPipePressure: number | null;
+  spp?: number | null;
+  sppPredicted?: number | null;
 }
 
 export interface HistoryRecord {
   id: number;
   time: string;
   date: string;
-  pitGain: number;
-  pitVolume: number;
-  returnResponse: number;
-  flowIn: number;
-  flowOut: number;
-  casingPressure: number;
-  drillPipePressure: number;
-  spp: number;
-  sppPredicted: number;
-  spm: number;
-  totalGas: number;
-  hookLoad: number;
-  mudWeight: number;
-  rop: number;
-  bitDepth: number;
+  pitGain: number | null;
+  pitVolume: number | null;
+  flowIn: number | null;
+  flowOut: number | null;
+  casingPressure: number | null;
+  drillPipePressure: number | null;
+  spp: number | null;
+  sppPredicted: number | null;
+  spm: number | null;
+  totalGas: number | null;
+  hookLoad: number | null;
+  mudWeight: number | null;
+  rop: number | null;
+  bitDepth: number | null;
   pumpState: string;
   cycleState: CycleState;
   backendLevel: BackendLevel;
@@ -303,8 +301,6 @@ export interface HistoryRecord {
 }
 
 export interface ThresholdSettings {
-  returnResponseWarning: number;
-  returnResponseCritical: number;
   pitGainWarning: number;
   pitGainCritical: number;
   casingPressureWarning: number;
@@ -648,8 +644,6 @@ export function useWellControl() {
 }
 
 export const DEFAULT_THRESHOLDS: ThresholdSettings = {
-  returnResponseWarning: 8,
-  returnResponseCritical: 18,
   pitGainWarning: 1.2,
   pitGainCritical: 3,
   casingPressureWarning: 3.8,
@@ -879,6 +873,13 @@ function readNumber(record: RealTimeRecord, keys: string[], fallback: number) {
   if (raw === undefined || raw === null || raw === '') return fallback;
   const value = typeof raw === 'number' ? raw : Number(raw);
   return Number.isFinite(value) ? value : fallback;
+}
+
+function readNullableNumber(record: RealTimeRecord, keys: string[]): number | null {
+  const raw = readValue(record as Record<string, unknown>, keys);
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(value) ? value : null;
 }
 
 function finite(value: unknown, fallback = 0) {
@@ -1276,8 +1277,8 @@ function getInitialWellRuntimeStates() {
       lastRecordAt: runtime.lastRecordAt || snapshot?.lastRecordAt || snapshot?.currentSampleTime || null,
       startedSampleTime: runtime.startedSampleTime || snapshot?.startedSampleTime || snapshot?.currentSampleTime || null,
       monitoringStartedAt: resolveMonitoringStartedAt(runtime, snapshot),
-      latestWellDepth: runtime.latestWellDepth ?? snapshot?.latestWellDepth ?? snapshot?.currentData.wellDepth,
-      latestBitDepth: runtime.latestBitDepth ?? snapshot?.latestBitDepth ?? snapshot?.currentData.bitDepth,
+      latestWellDepth: runtime.latestWellDepth ?? snapshot?.latestWellDepth ?? snapshot?.currentData.wellDepth ?? undefined,
+      latestBitDepth: runtime.latestBitDepth ?? snapshot?.latestBitDepth ?? snapshot?.currentData.bitDepth ?? undefined,
       latestFormation: runtime.latestFormation ?? snapshot?.latestFormation ?? snapshot?.currentData.formation,
       shouldAutoRestore: runtime.shouldAutoRestore ?? isRuntimeStreamActive(runtime),
       selectedReplayStartTime: runtime.selectedReplayStartTime || snapshot?.startedSampleTime || snapshot?.currentSampleTime || null,
@@ -1304,8 +1305,8 @@ function getInitialWellRuntimeStates() {
       recordCount: snapshot.historyRecords.length,
       lastRecordAt: snapshot.lastRecordAt || snapshot.currentSampleTime || null,
       backendLevel: snapshot.backendDetection.publicLevel,
-      latestWellDepth: snapshot.latestWellDepth ?? snapshot.currentData.wellDepth,
-      latestBitDepth: snapshot.latestBitDepth ?? snapshot.currentData.bitDepth,
+      latestWellDepth: snapshot.latestWellDepth ?? snapshot.currentData.wellDepth ?? undefined,
+      latestBitDepth: snapshot.latestBitDepth ?? snapshot.currentData.bitDepth ?? undefined,
       latestFormation: snapshot.latestFormation ?? snapshot.currentData.formation,
       monitoringStartedAt: resolveMonitoringStartedAt(null, snapshot),
       startedSampleTime: snapshot.startedSampleTime || snapshot.currentSampleTime || null,
@@ -1327,27 +1328,26 @@ function sanitizeStoredMonitoringData(value: unknown): MonitoringData {
   return {
     ...fallback,
     ...row as Partial<MonitoringData>,
-    pitGain: finite(row.pitGain, fallback.pitGain),
-    pitVolume: finite(row.pitVolume, fallback.pitVolume),
-    returnResponse: finite(row.returnResponse, fallback.returnResponse),
-    flowIn: finite(row.flowIn, fallback.flowIn),
-    flowOut: finite(row.flowOut, fallback.flowOut),
-    casingPressure: finite(row.casingPressure, fallback.casingPressure),
-    drillPipePressure: finite(row.drillPipePressure, fallback.drillPipePressure),
-    spp: finite(row.spp, fallback.spp),
-    sppPredicted: finite(row.sppPredicted, fallback.sppPredicted),
-    spm: finite(row.spm, fallback.spm),
-    mudWeight: finite(row.mudWeight, fallback.mudWeight),
-    mudTemp: finite(row.mudTemp, fallback.mudTemp),
-    rop: finite(row.rop, fallback.rop),
-    drillTime: finite(row.drillTime, fallback.drillTime),
-    hookLoad: finite(row.hookLoad, fallback.hookLoad),
-    wob: finite(row.wob, fallback.wob),
-    totalGas: finite(row.totalGas, fallback.totalGas),
-    torque: finite(row.torque, fallback.torque),
-    wellDepth: Number.isFinite(Number(row.wellDepth)) ? Number(row.wellDepth) : fallback.wellDepth,
-    bitDepth: finite(row.bitDepth, fallback.bitDepth),
-    rpm: finite(row.rpm, fallback.rpm),
+    pitGain: optionalFinite(row.pitGain) ?? null,
+    pitVolume: optionalFinite(row.pitVolume) ?? null,
+    flowIn: optionalFinite(row.flowIn) ?? null,
+    flowOut: optionalFinite(row.flowOut) ?? null,
+    casingPressure: optionalFinite(row.casingPressure) ?? null,
+    drillPipePressure: optionalFinite(row.drillPipePressure) ?? null,
+    spp: optionalFinite(row.spp) ?? null,
+    sppPredicted: optionalFinite(row.sppPredicted) ?? null,
+    spm: optionalFinite(row.spm) ?? null,
+    mudWeight: optionalFinite(row.mudWeight) ?? null,
+    mudTemp: optionalFinite(row.mudTemp) ?? null,
+    rop: optionalFinite(row.rop) ?? null,
+    drillTime: optionalFinite(row.drillTime) ?? null,
+    hookLoad: optionalFinite(row.hookLoad) ?? null,
+    wob: optionalFinite(row.wob) ?? null,
+    totalGas: optionalFinite(row.totalGas) ?? null,
+    torque: optionalFinite(row.torque) ?? null,
+    wellDepth: optionalFinite(row.wellDepth) ?? null,
+    bitDepth: optionalFinite(row.bitDepth) ?? null,
+    rpm: optionalFinite(row.rpm) ?? null,
     confidenceLevel: finite(row.confidenceLevel, fallback.confidenceLevel),
     pumpState: row.pumpState ? String(row.pumpState) : fallback.pumpState,
     condition: row.condition ? String(row.condition) : fallback.condition,
@@ -1762,27 +1762,26 @@ function createInitialSelectedViewState(selectedWellId: string): InitialSelected
 
 function makeInitialData(well: WellInfo): MonitoringData {
   return {
-    pitGain: 0,
-    pitVolume: 0,
-    returnResponse: 0,
-    flowIn: 0,
-    flowOut: 0,
-    casingPressure: 0,
-    drillPipePressure: 0,
-    spp: 0,
-    sppPredicted: 0,
-    spm: 0,
-    mudWeight: 0,
-    mudTemp: 0,
-    rop: 0,
-    drillTime: 0,
-    hookLoad: 0,
-    wob: 0,
-    totalGas: 0,
-    torque: 0,
-    wellDepth: well.depth,
-    bitDepth: well.depth - 28,
-    rpm: 0,
+    pitGain: null,
+    pitVolume: null,
+    flowIn: null,
+    flowOut: null,
+    casingPressure: null,
+    drillPipePressure: null,
+    spp: null,
+    sppPredicted: null,
+    spm: null,
+    mudWeight: null,
+    mudTemp: null,
+    rop: null,
+    drillTime: null,
+    hookLoad: null,
+    wob: null,
+    totalGas: null,
+    torque: null,
+    wellDepth: null,
+    bitDepth: null,
+    rpm: null,
     confidenceLevel: 0,
     pumpState: 'Normal',
     condition: '等待接入',
@@ -1810,27 +1809,23 @@ function createWellMonitoringSnapshot(well: WellInfo, sessionCode: string | null
     cycleInfo: getCycleInfo(0),
     shutInActive: false,
     shutInStartedAt: null,
-    latestWellDepth: initialData.wellDepth,
-    latestBitDepth: initialData.bitDepth,
+    latestWellDepth: initialData.wellDepth ?? undefined,
+    latestBitDepth: initialData.bitDepth ?? undefined,
     latestFormation: initialData.formation,
   };
 }
 
 function normalizeRealTimeRecord(record: RealTimeRecord, previous: MonitoringData): MonitoringData {
   const operation = readObject(record, ['operation', 'Operation']);
-  const flowIn = readNumber(record, ['flowIn', 'inletSmooth', 'inletRaw', 'InletSmooth', 'InletRaw', 'inlet_smooth', 'inlet_raw', 'inlet_flow_raw', 'inletFlow', 'inlet_flow', 'pump_flow_in'], previous.flowIn);
-  const flowOut = readNumber(record, ['flowOut', 'outletSmooth', 'outletRaw', 'OutletSmooth', 'OutletRaw', 'outlet_smooth', 'outlet_raw', 'outlet_flow_raw', 'outletFlow', 'outlet_flow', 'return_flow'], previous.flowOut);
-  const spp = readNumber(record, ['spp', 'standpipe_pressure_mpa', 'spp_mpa', 'standpipePressureMpa'], previous.spp);
-  const sppPredicted = readNumber(record, ['sppPredicted', 'spp_predicted_mpa', 'spp_model_mpa', 'predicted_spp_mpa'], previous.sppPredicted || spp);
-  const pitVolume = readNumber(record, ['pitVolume', 'poolSmooth', 'poolRaw', 'PoolSmooth', 'PoolRaw', 'pool_smooth', 'pool_raw', 'total_pit_volume_m3', 'pit_volume', 'totalPitVolumeM3'], previous.pitVolume);
-  const derivedPitGain = Number.isFinite(pitVolume) && Number.isFinite(previous.pitVolume) ? pitVolume - previous.pitVolume : previous.pitGain;
-  const pitGain = readNumber(record, ['pitGain', 'pitGainM3', 'PitGainM3', 'pool_delta_abs', 'gain_loss_raw', 'pit_gain_m3'], derivedPitGain);
-  const derivedReturnResponse = flowOut > 0 && flowIn > 0 ? ((flowOut - flowIn) / Math.max(flowIn, 1)) * 100 : 0;
-  const returnResponse = Math.max(0, readNumber(record, ['returnResponse', 'returnResponsePct', 'ReturnResponsePct', 'outletDeltaPct', 'OutletDeltaPct', 'outlet_delta_pct', 'return_response_pct'], derivedReturnResponse));
-  const casingPressure = readNumber(
+  const flowIn = readNullableNumber(record, ['flowIn', 'inletSmooth', 'inletRaw', 'InletSmooth', 'InletRaw', 'inlet_smooth', 'inlet_raw', 'inlet_flow_raw', 'inletFlow', 'inlet_flow', 'pump_flow_in']);
+  const flowOut = readNullableNumber(record, ['flowOut', 'outletSmooth', 'outletRaw', 'OutletSmooth', 'OutletRaw', 'outlet_smooth', 'outlet_raw', 'outlet_flow_raw', 'outletFlow', 'outlet_flow', 'return_flow']);
+  const spp = readNullableNumber(record, ['spp', 'standpipe_pressure_mpa', 'spp_mpa', 'standpipePressureMpa']);
+  const sppPredicted = readNullableNumber(record, ['sppPredicted', 'spp_predicted_mpa', 'spp_model_mpa', 'predicted_spp_mpa']);
+  const pitVolume = readNullableNumber(record, ['pitVolume', 'poolSmooth', 'poolRaw', 'PoolSmooth', 'PoolRaw', 'pool_smooth', 'pool_raw', 'total_pit_volume_m3', 'pit_volume', 'totalPitVolumeM3']);
+  const pitGain = readNullableNumber(record, ['pitGain', 'pitGainM3', 'PitGainM3', 'pool_delta_abs', 'gain_loss_raw', 'pit_gain_m3']);
+  const casingPressure = readNullableNumber(
     record,
     ['casingPressure', 'cp', 'casing_pressure_mpa', 'casingPressureMpa', 'logging_casing_pressure_mpa', 'measured_casing_pressure_mpa'],
-    previous.casingPressure,
   );
   const operationCategory = readString(operation || {}, ['category', 'Category'], previous.operationCategory || '');
   const operationLabel = readString(operation || {}, ['categoryLabel', 'CategoryLabel'], '');
@@ -1848,27 +1843,26 @@ function normalizeRealTimeRecord(record: RealTimeRecord, previous: MonitoringDat
   return {
     pitGain,
     pitVolume,
-    returnResponse,
     flowIn,
     flowOut,
     outletUnit: readString(record, ['outletUnit', 'outlet_unit', 'OutletUnit'], previous.outletUnit || ''),
     outletSemantic: readString(record, ['outletSemantic', 'outlet_semantic', 'OutletSemantic'], previous.outletSemantic || ''),
     casingPressure,
-    drillPipePressure: readNumber(record, ['drillPipePressure', 'standpipe_pressure_mpa', 'spp_mpa'], spp),
+    drillPipePressure: readNullableNumber(record, ['drillPipePressure', 'standpipe_pressure_mpa', 'spp_mpa']),
     spp,
     sppPredicted,
-    spm: readNumber(record, ['spm', 'pump_spm_total', 'pumpSpmTotal', 'pump_spm'], previous.spm),
-    mudWeight: readNumber(record, ['mudWeight', 'inlet_density_g_cm3', 'mud_weight'], previous.mudWeight),
-    mudTemp: readNumber(record, ['mudTemp', 'inlet_temperature_c', 'outlet_temperature_c'], previous.mudTemp),
-    rop: readNumber(record, ['rop', 'rate_of_penetration', 'rop_m_h'], previous.rop),
-    drillTime: readNumber(record, ['drillTime', 'drill_time', 'drilling_time_1', 'drill_time_min_m', 'ROPA'], previous.drillTime),
-    hookLoad: readNumber(record, ['hookLoad', 'hookLoadKn', 'hook_load_kn'], previous.hookLoad),
-    wob: readNumber(record, ['wob', 'wobKn', 'wob_kn', 'weightOnBit', 'weight_on_bit_kn', 'WOBX'], previous.wob),
-    totalGas: readNumber(record, ['totalGas', 'gas', 'total_gas_pct', 'gas_pct'], previous.totalGas),
-    torque: readNumber(record, ['torque', 'torque_knm'], previous.torque),
-    wellDepth: readNumber(record, ['wellDepth', 'well_depth', 'well_depth_m', 'holeDepth', 'hole_depth', 'hole_depth_m', 'measuredDepth', 'measured_depth', 'measured_depth_m', 'currentDepth', 'current_depth', 'depth', '井深'], previous.wellDepth ?? previous.bitDepth),
-    bitDepth: readNumber(record, ['bitDepth', 'bit_depth', 'bit_depth_m', 'bitPosition', 'bit_position', 'bit_position_m', '钻头位置'], previous.bitDepth),
-    rpm: readNumber(record, ['rpm', 'rotaryRpm', 'rotary_rpm', 'rotary_speed_rpm'], previous.rpm),
+    spm: readNullableNumber(record, ['spm', 'pump_spm_total', 'pumpSpmTotal', 'pump_spm']),
+    mudWeight: readNullableNumber(record, ['mudWeight', 'inlet_density_g_cm3', 'mud_weight']),
+    mudTemp: readNullableNumber(record, ['mudTemp', 'inlet_temperature_c', 'outlet_temperature_c']),
+    rop: readNullableNumber(record, ['rop', 'rate_of_penetration', 'rop_m_h']),
+    drillTime: readNullableNumber(record, ['drillTime', 'drill_time', 'drilling_time_1', 'drill_time_min_m']),
+    hookLoad: readNullableNumber(record, ['hookLoad', 'hookLoadKn', 'hook_load_kn']),
+    wob: readNullableNumber(record, ['wob', 'wobKn', 'wob_kn', 'weightOnBit', 'weight_on_bit_kn', 'WOBX']),
+    totalGas: readNullableNumber(record, ['totalGas', 'gas', 'total_gas_pct', 'gas_pct']),
+    torque: readNullableNumber(record, ['torque', 'torque_knm']),
+    wellDepth: readNullableNumber(record, ['wellDepth', 'well_depth', 'well_depth_m', 'holeDepth', 'hole_depth', 'hole_depth_m', 'measuredDepth', 'measured_depth', 'measured_depth_m', 'currentDepth', 'current_depth', 'depth', '井深']),
+    bitDepth: readNullableNumber(record, ['bitDepth', 'bit_depth', 'bit_depth_m', 'bitPosition', 'bit_position', 'bit_position_m', '钻头位置']),
+    rpm: readNullableNumber(record, ['rpm', 'rotaryRpm', 'rotary_rpm', 'rotary_speed_rpm']),
     confidenceLevel: readNumber(record, ['confidenceLevel', 'formal_eval_level', 'public_level', 'confidence_level'], previous.confidenceLevel),
     pumpState,
     condition,
@@ -2160,6 +2154,48 @@ function backendEventKey(entry: BackendLogEntry) {
   if (entry.candidateId) return `candidate-${entry.candidateId}`;
   if (entry.startTime) return `event-${entry.startTime}`;
   return `event-${entry.eventId}`;
+}
+
+function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry | null {
+  const source = record as Record<string, unknown>;
+  const publicLevel = normalizeBackendLevel(
+    readValue(source, ['public_level', 'publicLevel', 'formal_eval_level', 'formalEvalLevel', 'confidence_level', 'confidenceLevel']),
+  );
+  const candidateIdValue = Number(readValue(source, ['lifecycle_candidate_id', 'lifecycleCandidateId', 'candidate_id', 'candidateId']));
+  const candidateId = Number.isFinite(candidateIdValue) && candidateIdValue > 0 ? Math.round(candidateIdValue) : undefined;
+  const rawEventId = String(readValue(source, ['event_id', 'eventId']) || '').trim();
+  const eventId = rawEventId || (candidateId ? `candidate-${candidateId}` : '');
+  const timestamp = String(readValue(source, ['timestamp', 'sampleTime', 'sample_time']) || '');
+  const candidate = fallbackQueueCandidateFromFrame({
+    eventId,
+    candidateId,
+    publicLevel,
+    formalEvalLevel: normalizeBackendLevel(readValue(source, ['formal_eval_level', 'formalEvalLevel']) ?? publicLevel),
+    reason: displayAlarmText(readValue(source, ['reason']) || `实时判级 L${publicLevel}`),
+    activeSignals: parseActiveSignals(readValue(source, ['active_signals', 'activeSignals'])),
+    eventState: String(readValue(source, ['event_state', 'eventState']) || 'tracking'),
+    pumpState: String(readValue(source, ['pump_state', 'pumpState']) || 'Unknown'),
+    timestamp,
+    startTime: String(readValue(source, ['start_time', 'startTime']) || '') || undefined,
+    endTime: String(readValue(source, ['end_time', 'endTime']) || '') || undefined,
+    sampleCount: finite(readValue(source, ['sample_count', 'sampleCount']), 0) || undefined,
+  });
+  if (!candidate) return null;
+  return {
+    ...candidate,
+    publicLevel: normalizeBackendLevel(candidate.publicLevel),
+    formalEvalLevel: normalizeBackendLevel(candidate.formalEvalLevel),
+  };
+}
+
+function queueLogEntriesFromRecord(record: RealTimeRecord) {
+  const entries = normalizeBackendLogEntries(record);
+  const fallback = fallbackQueueLogEntryFromFrame(record);
+  if (!fallback) return entries;
+  const fallbackKey = backendEventKey(fallback);
+  return entries.some((entry) => backendEventKey(entry) === fallbackKey && entry.publicLevel >= 2)
+    ? entries
+    : [...entries, fallback];
 }
 
 function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionState {
@@ -3437,8 +3473,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       cycleInfo: visibleHasProgress ? cycleInfo : (usableSnapshot?.cycleInfo || cycleInfo),
       shutInActive: fromSnapshotFallback ? (usableSnapshot?.shutInActive ?? shutInActive) : shutInActive,
       shutInStartedAt: shutInStartedAt || usableSnapshot?.shutInStartedAt || null,
-      latestWellDepth: selectedWellRuntime?.latestWellDepth ?? usableSnapshot?.latestWellDepth ?? currentData.wellDepth,
-      latestBitDepth: selectedWellRuntime?.latestBitDepth ?? usableSnapshot?.latestBitDepth ?? currentData.bitDepth,
+      latestWellDepth: selectedWellRuntime?.latestWellDepth ?? usableSnapshot?.latestWellDepth ?? currentData.wellDepth ?? undefined,
+      latestBitDepth: selectedWellRuntime?.latestBitDepth ?? usableSnapshot?.latestBitDepth ?? currentData.bitDepth ?? undefined,
       latestFormation: selectedWellRuntime?.latestFormation ?? usableSnapshot?.latestFormation ?? currentData.formation,
       fromSnapshotFallback,
     };
@@ -3538,7 +3574,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const appendAlertsFromRecord = useCallback((well: WellInfo, record: RealTimeRecord, data: MonitoringData) => {
-    const backendLogs = normalizeBackendLogEntries(record);
+    const backendLogs = queueLogEntriesFromRecord(record);
     if (backendLogs.length === 0) return;
     setAlerts((previous) => {
       let nextAlerts = previous;
@@ -3846,7 +3882,6 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           bitDepth: lastData.bitDepth,
           pitGain: lastData.pitGain,
           pitVolume: lastData.pitVolume,
-          returnResponse: lastData.returnResponse,
           spm: lastData.spm,
           totalGas: lastData.totalGas,
           hookLoad: lastData.hookLoad,
@@ -3875,7 +3910,6 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           date: recordTime.dateStr,
           pitGain: lastData.pitGain,
           pitVolume: lastData.pitVolume,
-          returnResponse: lastData.returnResponse,
           flowIn: lastData.flowIn,
           flowOut: lastData.flowOut,
           casingPressure: lastData.casingPressure,
@@ -4206,10 +4240,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           && (currentRuntime?.sessionCode || '') === requestSessionCode
           && (startRequestTokensRef.current[currentWellId] || 0) === requestStartToken;
         if (!controller.signal.aborted && isSameSession) {
-          setAlerts((previous) => [
-            ...next,
-            ...previous.filter((alert) => alert.wellId !== currentWellId),
-          ].slice(0, 120));
+          setAlerts((previous) => mergeQueueAlertSnapshot(previous, next, currentWellId));
         }
       } catch {
         // Frame-stream alerts remain available when the warning projection endpoint is unavailable.
@@ -4488,7 +4519,6 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           bitDepth: nextData.bitDepth,
           pitGain: nextData.pitGain,
           pitVolume: nextData.pitVolume,
-          returnResponse: nextData.returnResponse,
           spm: nextData.spm,
           totalGas: nextData.totalGas,
           hookLoad: nextData.hookLoad,
@@ -4517,7 +4547,6 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           date: recordTime.dateStr,
           pitGain: nextData.pitGain,
           pitVolume: nextData.pitVolume,
-          returnResponse: nextData.returnResponse,
           flowIn: nextData.flowIn,
           flowOut: nextData.flowOut,
           casingPressure: nextData.casingPressure,
