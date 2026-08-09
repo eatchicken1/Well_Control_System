@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
 import { normalizePreprocessingSnapshot, type PreprocessingSnapshot } from '../lib/preprocessingContract';
+import { normalizeReferenceExperimentSnapshot, type ReferenceExperimentSnapshot } from '../lib/referenceExperimentContract';
 import { appendAccessToken, authenticatedFetch, getAccessToken } from '../api/authToken';
 import { saveSelectedWells } from '../api/authApi';
 import { resetRealtimeBaseline } from '../api/realtimeBaselineApi';
@@ -154,6 +155,7 @@ export interface BaselineSnapshot {
 }
 
 export type { PreprocessingSignalSnapshot, PreprocessingSnapshot } from '../lib/preprocessingContract';
+export type { ReferenceBankDiagnostic, ReferenceChannelComparison, ReferenceExperimentSnapshot } from '../lib/referenceExperimentContract';
 
 export interface AlgorithmInterfaceInfo {
   rootPath: string;
@@ -219,6 +221,7 @@ export interface BackendDetectionState {
   baselineInvalidReason: string;
   baselineSnapshot: BaselineSnapshot;
   preprocessing: PreprocessingSnapshot | null;
+  referenceExperiment: ReferenceExperimentSnapshot | null;
 }
 
 export interface EventSpan {
@@ -2040,6 +2043,7 @@ const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
   baselineInvalidReason: '',
   baselineSnapshot: INITIAL_BASELINE_SNAPSHOT,
   preprocessing: null,
+  referenceExperiment: null,
 };
 
 function normalizeEventSpan(value: unknown): EventSpan | null {
@@ -2304,6 +2308,7 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
     baselineInvalidReason: baselineInvalidReason || (!baselineValid && !baselineWarmup ? '基线未建立或已失效' : ''),
     baselineSnapshot,
     preprocessing: normalizePreprocessingSnapshot(readValue(source, ['preprocessing'])),
+    referenceExperiment: normalizeReferenceExperimentSnapshot(readValue(source, ['referenceExperiment', 'reference_experiment'])),
   };
 }
 
