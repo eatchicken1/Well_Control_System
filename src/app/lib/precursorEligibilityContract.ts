@@ -36,6 +36,7 @@ export interface MechanicalEligibilityDiagnostics {
 }
 
 export interface PrecursorEligibilitySnapshot {
+  pumpGateMode: string;
   eventTime: string | null;
   hydraulic: HydraulicEligibilityDiagnostics;
   pressure: PressureEligibilityDiagnostics;
@@ -135,6 +136,7 @@ export function normalizePrecursorEligibility(value: unknown): PrecursorEligibil
   const row = asRecord(raw);
   if (!row) return null;
   return {
+    pumpGateMode: String(readValue(row, ['pumpGateMode', 'pump_gate_mode']) || 'Unknown'),
     eventTime: optionalText(readValue(row, ['eventTime', 'event_time'])),
     hydraulic: normalizeHydraulic(readValue(row, ['hydraulic'])),
     pressure: normalizePressure(readValue(row, ['pressure'])),

@@ -10,6 +10,7 @@ test('normalizePrecursorEligibility returns null when PumpGate is Disabled or an
 test('normalizePrecursorEligibility preserves backend statuses, roles, and machine-readable reasons without inference', () => {
   const snapshot = normalizePrecursorEligibility({
     precursorEligibility: {
+      pumpGateMode: 'Shadow',
       eventTime: '2026-01-01T00:00:00Z',
       hydraulic: { status: 'Stable', eligible: true, reasons: [], reason: 'stable' },
       pressure: { status: 'Eligible', hydraulicEligible: true, operationEligible: true, telemetryAvailable: true, reasons: [], reason: 'interpretable' },
@@ -25,6 +26,7 @@ test('normalizePrecursorEligibility preserves backend statuses, roles, and machi
   });
 
   assert.ok(snapshot);
+  assert.equal(snapshot!.pumpGateMode, 'Shadow');
   assert.equal(snapshot!.hydraulic.status, 'Stable');
   assert.equal(snapshot!.pressure.status, 'Eligible');
   assert.equal(snapshot!.mechanical.channels[0].role, 'ControlInput');
