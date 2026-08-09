@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
 import { normalizePreprocessingSnapshot, type PreprocessingSnapshot } from '../lib/preprocessingContract';
 import { normalizeReferenceExperimentSnapshot, type ReferenceExperimentSnapshot } from '../lib/referenceExperimentContract';
+import { normalizePumpGateDiagnostics, type PumpGateDiagnosticsSnapshot } from '../lib/pumpGateContract';
 import { appendAccessToken, authenticatedFetch, getAccessToken } from '../api/authToken';
 import { saveSelectedWells } from '../api/authApi';
 import { resetRealtimeBaseline } from '../api/realtimeBaselineApi';
@@ -156,6 +157,7 @@ export interface BaselineSnapshot {
 
 export type { PreprocessingSignalSnapshot, PreprocessingSnapshot } from '../lib/preprocessingContract';
 export type { ReferenceBankDiagnostic, ReferenceChannelComparison, ReferenceExperimentSnapshot } from '../lib/referenceExperimentContract';
+export type { PumpConfigurationDiagnostics, StablePumpingGateDiagnostics, PumpGateDiagnosticsSnapshot } from '../lib/pumpGateContract';
 
 export interface AlgorithmInterfaceInfo {
   rootPath: string;
@@ -222,6 +224,7 @@ export interface BackendDetectionState {
   baselineSnapshot: BaselineSnapshot;
   preprocessing: PreprocessingSnapshot | null;
   referenceExperiment: ReferenceExperimentSnapshot | null;
+  pumpGate: PumpGateDiagnosticsSnapshot | null;
 }
 
 export interface EventSpan {
@@ -2044,6 +2047,7 @@ const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
   baselineSnapshot: INITIAL_BASELINE_SNAPSHOT,
   preprocessing: null,
   referenceExperiment: null,
+  pumpGate: null,
 };
 
 function normalizeEventSpan(value: unknown): EventSpan | null {
@@ -2309,6 +2313,7 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
     baselineSnapshot,
     preprocessing: normalizePreprocessingSnapshot(readValue(source, ['preprocessing'])),
     referenceExperiment: normalizeReferenceExperimentSnapshot(readValue(source, ['referenceExperiment', 'reference_experiment'])),
+    pumpGate: normalizePumpGateDiagnostics(source),
   };
 }
 
