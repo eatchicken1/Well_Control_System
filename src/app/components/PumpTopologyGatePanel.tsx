@@ -26,6 +26,7 @@ export function PumpTopologyGatePanel({ snapshot }: { snapshot: PumpGateDiagnost
   if (!snapshot) return null;
 
   const { configuration, gate } = snapshot;
+  const modeBadge = gate.mode === 'Shadow' ? 'SHADOW' : gate.mode.toUpperCase();
   const pumps = [
     ['Pump 1', configuration.spm1, configuration.pump1State],
     ['Pump 2', configuration.spm2, configuration.pump2State],
@@ -42,7 +43,7 @@ export function PumpTopologyGatePanel({ snapshot }: { snapshot: PumpGateDiagnost
       >
         <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
           <span>泵况拓扑 / Stable Pump Gate</span>
-          <span className="rounded bg-violet-100 px-1 py-0.5 font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-200">SHADOW</span>
+          <span className="rounded bg-violet-100 px-1 py-0.5 font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-200">{modeBadge}</span>
           <span className={`rounded px-1 py-0.5 font-semibold ${statusClass(gate.status)}`}>{gate.status}</span>
         </span>
         {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}

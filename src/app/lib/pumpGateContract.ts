@@ -14,6 +14,7 @@ export interface PumpConfigurationDiagnostics {
 }
 
 export interface StablePumpingGateDiagnostics {
+  mode: string;
   status: string;
   eligibleForPrecursor: boolean;
   configurationStable: boolean;
@@ -85,6 +86,7 @@ function normalizeGate(value: unknown): StablePumpingGateDiagnostics {
   const row = asRecord(value) || {};
   const rawReasons = readValue(row, ['boundaryReasons', 'boundary_reasons']);
   return {
+    mode: String(readValue(row, ['mode']) || 'Unknown'),
     status: String(readValue(row, ['status']) || 'Unavailable'),
     eligibleForPrecursor: readBoolean(readValue(row, ['eligibleForPrecursor', 'eligible_for_precursor']), false),
     configurationStable: readBoolean(readValue(row, ['configurationStable', 'configuration_stable']), false),
