@@ -71,12 +71,13 @@ export function PumpTopologyGatePanel({ snapshot }: { snapshot: PumpGateDiagnost
             <div><dt className="inline text-slate-500">Pump rates stable: </dt><dd className="inline">{gate.perPumpRatesStable ? 'YES' : 'NO'}</dd></div>
           </dl>
           <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 pt-2 dark:border-slate-700">
-            <span className="text-slate-500">Eligible for precursor:</span>
+            <span className="text-slate-500">Hydraulic/pump eligible for downstream precursor gating:</span>
             <span className={`rounded px-1.5 py-0.5 font-semibold ${gate.eligibleForPrecursor ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'}`}>
               {gate.eligibleForPrecursor ? 'YES' : 'NO'}
             </span>
             {gate.boundaryReasons.map((reason) => <span key={reason} className="rounded bg-amber-100 px-1 py-0.5 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">{reason}</span>)}
           </div>
+          <p className="text-slate-500 dark:text-slate-400">Hydraulic/pump eligibility only; pressure, mechanical, and operation-specific eligibility are evaluated later.</p>
           {!gate.eligibleForPrecursor && gate.reason ? <p className="text-amber-700 dark:text-amber-200">{gate.reason}</p> : null}
         </div>
       ) : null}
