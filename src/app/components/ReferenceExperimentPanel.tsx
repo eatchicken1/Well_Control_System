@@ -65,7 +65,7 @@ export function ReferenceExperimentPanel({ snapshot }: { snapshot: ReferenceExpe
       {expanded ? (
         <div className="border-t border-slate-200 dark:border-slate-700">
           <div className="px-3 py-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-            方法：{methodLabel(snapshot.methodVersion)}。两列都以当前原始测量值查询；处理参考仅供实验诊断，不参与当前告警。
+            方法：{methodLabel(snapshot.methodVersion)}。实测参考学习来源：{snapshot.channels[0]?.authoritativeLearningOrigin || 'RawMeasurement'}；处理参考学习来源：{snapshot.channels[0]?.shadowLearningOrigin || 'DerivedEstimate'}。两列都以当前原始测量值查询；处理参考仅供实验诊断，不参与当前告警。
           </div>
           <div className="max-h-64 overflow-auto border-t border-slate-200 dark:border-slate-700">
             <table className="w-full text-[11px]">

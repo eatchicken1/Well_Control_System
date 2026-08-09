@@ -15,6 +15,8 @@ test('normalizeReferenceExperimentSnapshot parses a well-formed ShadowProcessed 
     channels: [
       {
         channel: 'standpipe_pressure',
+        authoritativeLearningOrigin: 'RawMeasurement',
+        shadowLearningOrigin: 'DerivedEstimate',
         rawQueryValue: 18_000_000,
         authoritative: { ready: true, sampleCount: 120, center: 18_000_000, scale: 250_000, standardizedResidual: 0.1, lastLearnedAt: '2026-01-01T00:00:00Z' },
         shadowProcessed: { ready: true, sampleCount: 118, center: 17_990_000, scale: 240_000, standardizedResidual: 0.13, lastLearnedAt: '2026-01-01T00:00:00Z' },
@@ -46,6 +48,8 @@ test('normalizeReferenceExperimentSnapshot parses a well-formed ShadowProcessed 
   assert.equal(snapshot!.channels.length, 2);
   assert.equal(snapshot!.channels[0].authoritative.center, 18_000_000);
   assert.equal(snapshot!.channels[0].shadowProcessed.center, 17_990_000);
+  assert.equal(snapshot!.channels[0].authoritativeLearningOrigin, 'RawMeasurement');
+  assert.equal(snapshot!.channels[0].shadowLearningOrigin, 'DerivedEstimate');
 });
 
 test('a missing/null center, scale, or residual stays null, never coerced to 0', () => {

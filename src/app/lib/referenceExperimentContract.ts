@@ -9,6 +9,8 @@ export interface ReferenceBankDiagnostic {
 
 export interface ReferenceChannelComparison {
   channel: string;
+  authoritativeLearningOrigin: string;
+  shadowLearningOrigin: string;
   rawQueryValue: number | null;
   authoritative: ReferenceBankDiagnostic;
   /**
@@ -111,6 +113,8 @@ export function normalizeReferenceExperimentSnapshot(value: unknown): ReferenceE
       const rawFlags = readValue(channelRow, ['processedFlags', 'processed_flags']) ?? [];
       return {
         channel,
+        authoritativeLearningOrigin: String(readValue(channelRow, ['authoritativeLearningOrigin', 'authoritative_learning_origin']) || ''),
+        shadowLearningOrigin: String(readValue(channelRow, ['shadowLearningOrigin', 'shadow_learning_origin']) || ''),
         rawQueryValue: optionalFinite(readValue(channelRow, ['rawQueryValue', 'raw_query_value'])),
         authoritative: normalizeReferenceBankDiagnostic(readValue(channelRow, ['authoritative'])),
         shadowProcessed: normalizeReferenceBankDiagnostic(readValue(channelRow, ['shadowProcessed', 'shadow_processed'])),
