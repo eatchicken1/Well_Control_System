@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useState, useEffect, useMemo, u
 import { normalizePreprocessingSnapshot, type PreprocessingSnapshot } from '../lib/preprocessingContract';
 import { normalizeReferenceExperimentSnapshot, type ReferenceExperimentSnapshot } from '../lib/referenceExperimentContract';
 import { normalizePumpGateDiagnostics, type PumpGateDiagnosticsSnapshot } from '../lib/pumpGateContract';
+import { normalizePrecursorEligibility, type PrecursorEligibilitySnapshot } from '../lib/precursorEligibilityContract';
 import { appendAccessToken, authenticatedFetch, getAccessToken } from '../api/authToken';
 import { saveSelectedWells } from '../api/authApi';
 import { resetRealtimeBaseline } from '../api/realtimeBaselineApi';
@@ -158,6 +159,7 @@ export interface BaselineSnapshot {
 export type { PreprocessingSignalSnapshot, PreprocessingSnapshot } from '../lib/preprocessingContract';
 export type { ReferenceBankDiagnostic, ReferenceChannelComparison, ReferenceExperimentSnapshot } from '../lib/referenceExperimentContract';
 export type { PumpConfigurationDiagnostics, StablePumpingGateDiagnostics, PumpGateDiagnosticsSnapshot } from '../lib/pumpGateContract';
+export type { HydraulicEligibilityDiagnostics, PressureEligibilityDiagnostics, MechanicalChannelEligibilityDiagnostics, MechanicalEligibilityDiagnostics, PrecursorEligibilitySnapshot } from '../lib/precursorEligibilityContract';
 
 export interface AlgorithmInterfaceInfo {
   rootPath: string;
@@ -225,6 +227,7 @@ export interface BackendDetectionState {
   preprocessing: PreprocessingSnapshot | null;
   referenceExperiment: ReferenceExperimentSnapshot | null;
   pumpGate: PumpGateDiagnosticsSnapshot | null;
+  precursorEligibility: PrecursorEligibilitySnapshot | null;
 }
 
 export interface EventSpan {
@@ -2048,6 +2051,7 @@ const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
   preprocessing: null,
   referenceExperiment: null,
   pumpGate: null,
+  precursorEligibility: null,
 };
 
 function normalizeEventSpan(value: unknown): EventSpan | null {
@@ -2314,6 +2318,7 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
     preprocessing: normalizePreprocessingSnapshot(readValue(source, ['preprocessing'])),
     referenceExperiment: normalizeReferenceExperimentSnapshot(readValue(source, ['referenceExperiment', 'reference_experiment'])),
     pumpGate: normalizePumpGateDiagnostics(source),
+    precursorEligibility: normalizePrecursorEligibility(source),
   };
 }
 

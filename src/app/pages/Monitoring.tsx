@@ -8,6 +8,7 @@ import { EventExplanationDrawer } from '../components/EventExplanationDrawer';
 import { PreprocessingDiagnosticsPanel } from '../components/PreprocessingDiagnosticsPanel';
 import { ReferenceExperimentPanel } from '../components/ReferenceExperimentPanel';
 import { PumpTopologyGatePanel } from '../components/PumpTopologyGatePanel';
+import { PrecursorEligibilityPanel } from '../components/PrecursorEligibilityPanel';
 import { useWellControl, type BackendLevel, type FlowDataPoint } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 import { fetchWellboreProfile } from '../api/wellboreProfileApi';
@@ -409,6 +410,7 @@ export default function Monitoring() {
             <PreprocessingDiagnosticsPanel snapshot={viewBackendDetection.preprocessing} />
             <ReferenceExperimentPanel snapshot={viewBackendDetection.referenceExperiment} />
             <PumpTopologyGatePanel snapshot={viewBackendDetection.pumpGate} />
+            <PrecursorEligibilityPanel snapshot={viewBackendDetection.precursorEligibility} />
           </aside>
         </div>
       )}
