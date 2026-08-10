@@ -20,6 +20,8 @@ export interface OverlayFrame {
   timestamp: string; v1FineLabel: string; v1Kind: string; v1Category: string; controlCandidateFineLabel: string; controlConfirmedFineLabel: string | null;
   controlStatus: string; anchoredCandidateFineLabel: string; anchoredConfirmedFineLabel: string | null; anchoredStatus: string;
   recordedActcod: string | null; pumpGateStatus: string | null; controlMotion: string; anchoredMotion: string; anchoredMotionReason: string; motionConfirmationBasis: string;
+  futureNetBitDepth5s: number | null; futureNetBitDepth8s: number | null; futureNetBitDepth10s: number | null; futureNetBitDepth15s: number | null;
+  futureNetBitDepth30s: number | null; futureNetBitDepth60s: number | null;
 }
 export interface OverlayDataset { packVersion: string; sourceVersion: string; reviewWindows: Array<{ reviewId: string; frames: OverlayFrame[] }>; }
 
@@ -46,7 +48,7 @@ export function validateBlindDataset(value: unknown): BlindDataset {
   const dataset = value as Partial<BlindDataset>;
   if (!dataset || !Array.isArray(dataset.reviewWindows) || typeof dataset.packVersion !== 'string') throw new Error('不是有效的 blind annotation dataset。');
   const forbidden = JSON.stringify(value).toLowerCase();
-  for (const token of ['v1finelabel', 'anchoredconfirmedfinelabel', 'recordedactcod', 'triggerreasons']) {
+  for (const token of ['v1finelabel', 'anchoredconfirmedfinelabel', 'recordedactcod', 'triggerreasons', 'futurenetbitdepth', 'motionconfirmationbasis', 'pumpgatestatus']) {
     if (forbidden.includes(token)) throw new Error('Blind dataset 包含模型或选择元数据，拒绝加载。');
   }
   return dataset as BlindDataset;

@@ -6,6 +6,7 @@ const base = { reviewId: 'OPR-0001', annotatorId: 'A1', eventKey: 'hidden', wind
 
 test('BlindModeDoesNotExposeModelLabels', () => {
   assert.throws(() => validateBlindDataset({ packVersion: 'v1', reviewWindows: [], v1FineLabel: 'forbidden' }));
+  assert.throws(() => validateBlindDataset({ packVersion: 'v1', reviewWindows: [], futureNetBitDepth8s: 0.02 }));
   assert.doesNotThrow(() => validateBlindDataset({ packVersion: 'v1', sourceVersion: 'test', annotationVersion: 'v1', randomSeed: 1, reviewWindows: [] }));
 });
 test('RevealRequiresBlindSave and PreRevealLabelIsImmutableAuditRecord', () => {
