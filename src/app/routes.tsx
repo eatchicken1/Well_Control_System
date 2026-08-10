@@ -14,6 +14,7 @@ import NotFound from './pages/NotFound';
 import RouteError from './pages/RouteError';
 import WellManagement from './pages/WellManagement';
 import WellManagementDetail from './pages/WellManagementDetail';
+import OperationAnnotation from './pages/OperationAnnotation';
 
 function WellControlLayout() {
   return <Layout />;
@@ -40,6 +41,9 @@ export const router = createBrowserRouter([
           { path: 'history', Component: History },
           { path: 'alerts', Component: Alerts },
           { path: 'settings', Component: Settings },
+          // Intentionally omitted from the formal-alert navigation. This is an
+          // offline research workspace, never a monitoring or alarm input.
+          { path: 'research/operation-annotation', Component: OperationAnnotation },
           { path: '*', Component: NotFound },
         ],
       },
