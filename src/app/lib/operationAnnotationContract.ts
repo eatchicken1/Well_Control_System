@@ -21,7 +21,9 @@ export interface BlindDataset { packVersion: string; sourceVersion: string; anno
 export interface OverlayFrame {
   timestamp: string; v1FineLabel: string; v1Kind: string; v1Category: string; controlCandidateFineLabel: string; controlConfirmedFineLabel: string | null;
   controlStatus: string; anchoredCandidateFineLabel: string; anchoredConfirmedFineLabel: string | null; anchoredStatus: string;
-  recordedActcod: string | null; pumpGateStatus: string | null; controlMotion: string; anchoredMotion: string; anchoredMotionReason: string; motionConfirmationBasis: string;
+  // Retrospective field record only. It is hidden until reveal and is never
+  // a runtime operation-recognition input or annotation ground truth.
+  recordedActcod: string | null; recordedActcodReferenceStatus?: 'OFFLINE REFERENCE ONLY'; pumpGateStatus: string | null; controlMotion: string; anchoredMotion: string; anchoredMotionReason: string; motionConfirmationBasis: string;
   futureNetBitDepth5s: number | null; futureNetBitDepth8s: number | null; futureNetBitDepth10s: number | null; futureNetBitDepth15s: number | null;
   futureNetBitDepth30s: number | null; futureNetBitDepth60s: number | null;
 }
