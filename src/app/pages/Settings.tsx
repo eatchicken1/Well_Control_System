@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle, Info, KeyRound, RadioTower, RotateCcw, Save, Server, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Gauge, Info, KeyRound, RadioTower, RotateCcw, Save, Server, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
 import { DEFAULT_REALTIME_ENDPOINT, DEFAULT_THRESHOLDS, useWellControl } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { useAuth } from '../context/AuthContext';
-import { fetchSystemSettings, type SystemSetting } from '../api/systemSettingsApi';
+import { fetchSystemSettings, OUTLET_SIGNAL_SEMANTIC_SETTING_KEY, outletSignalSemanticFromSettings, outletSignalSemanticSetting, saveOutletSignalSemantic, type OutletSignalSemantic, type SystemSetting } from '../api/systemSettingsApi';
+import { getAlarmSoundPreference, previewAlarmSound, setAlarmSoundPreference } from '../lib/alarmNotification';
 
 function ThresholdInput({
   label, value, activeValue, unit, onChange, min, max, step, description, level,
@@ -341,6 +342,11 @@ export default function Settings() {
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [serverSettings, setServerSettings] = useState<SystemSetting[]>([]);
   const [serverSettingsState, setServerSettingsState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [outletSemanticDraft, setOutletSemanticDraft] = useState<OutletSignalSemantic | null>(null);
+  const [outletSemanticSaved, setOutletSemanticSaved] = useState<OutletSignalSemantic | null>(null);
+  const [outletSemanticState, setOutletSemanticState] = useState<{ type: 'idle' | 'saving' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
+  const [alarmSoundEnabled, setAlarmSoundEnabled] = useState(getAlarmSoundPreference);
+  const [alarmSoundState, setAlarmSoundState] = useState<{ type: 'idle' | 'testing' | 'error'; message: string }>({ type: 'idle', message: '' });
   const mountedRef = useRef(true);
   const savedResetTimeoutRef = useRef<number | null>(null);
   const passwordReady = passwordDraft.oldPassword.length > 0 && passwordDraft.newPassword.length >= 8 && passwordDraft.confirmPassword.length >= 8;
@@ -374,6 +380,9 @@ export default function Settings() {
       .then((settings) => {
         if (controller.signal.aborted) return;
         setServerSettings(settings);
+        const semantic = outletSignalSemanticFromSettings(settings);
+        setOutletSemanticDraft(semantic);
+        setOutletSemanticSaved(semantic);
         setServerSettingsState('ready');
       })
       .catch(() => {
@@ -397,6 +406,45 @@ export default function Settings() {
   const handleReset = () => {
     setDraft({ ...DEFAULT_THRESHOLDS });
     setEndpointDraft(DEFAULT_REALTIME_ENDPOINT);
+  };
+
+  const handleOutletSemanticSave = async () => {
+    if (!outletSemanticDraft) {
+      setOutletSemanticState({ type: 'error', message: '请先明确出口通道是实际流量还是挡板开度。' });
+      return;
+    }
+    setOutletSemanticState({ type: 'saving', message: '' });
+    try {
+      await saveOutletSignalSemantic(outletSemanticDraft);
+      if (!mountedRef.current) return;
+      setOutletSemanticSaved(outletSemanticDraft);
+      setServerSettings((previous) => {
+        const next = previous.filter((item) => item.key !== OUTLET_SIGNAL_SEMANTIC_SETTING_KEY);
+        return [...next, outletSignalSemanticSetting(outletSemanticDraft)];
+      });
+      setOutletSemanticState({ type: 'success', message: '出口通道定义已写入后端设置；实时帧会在服务端出口通道配置加载后反映该语义。' });
+    } catch (error) {
+      if (mountedRef.current) setOutletSemanticState({ type: 'error', message: error instanceof Error ? error.message : '出口通道定义保存失败。' });
+    }
+  };
+
+  const toggleAlarmSound = () => {
+    const next = !alarmSoundEnabled;
+    setAlarmSoundEnabled(next);
+    setAlarmSoundPreference(next);
+  };
+
+  const enableAndPreviewAlarmSound = async () => {
+    setAlarmSoundState({ type: 'testing', message: '' });
+    try {
+      await previewAlarmSound();
+      if (!mountedRef.current) return;
+      setAlarmSoundEnabled(true);
+      setAlarmSoundPreference(true);
+      setAlarmSoundState({ type: 'idle', message: '试听成功；L3+ 新事件与升级事件会发出短促声光提示。' });
+    } catch (error) {
+      if (mountedRef.current) setAlarmSoundState({ type: 'error', message: error instanceof Error ? error.message : '声音试听失败。' });
+    }
   };
 
   const handlePasswordSubmit = async (event: FormEvent) => {
@@ -550,6 +598,72 @@ export default function Settings() {
                 <div className="mt-2 tabular-nums opacity-75">样本 {dataSourceState.recordCount} · {dataSourceState.lastRecordAt || '--:--:--'}</div>
               </div>
             </div>
+          </section>
+
+          <section className="ops-surface p-4" aria-labelledby="outlet-signal-setting-title">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 id="outlet-signal-setting-title" className="flex items-center gap-2 text-base text-slate-800 dark:text-slate-100">
+                  <Gauge className="h-4 w-4 text-cyan-500" />
+                  出口通道定义
+                </h3>
+                <p className="mt-1 max-w-2xl text-[11px] leading-5 ops-muted">这是一项后端持久化的物理语义声明。真实流量允许使用入口/出口差值；挡板开度仅作为代理信号，系统不得把百分比当作流量参与物料平衡。实时判级仍以服务端随帧发布的通道配置为准。</p>
+              </div>
+              <span className={`rounded px-2 py-1 text-xs font-medium ${outletSemanticSaved ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-100'}`}>
+                {outletSemanticSaved ? '后端已声明' : '待明确'}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <button
+                type="button"
+                aria-pressed={outletSemanticDraft === 'TrueVolumetricFlow'}
+                onClick={() => { setOutletSemanticDraft('TrueVolumetricFlow'); setOutletSemanticState({ type: 'idle', message: '' }); }}
+                className={`rounded-md border p-3 text-left transition-colors ${outletSemanticDraft === 'TrueVolumetricFlow' ? 'border-cyan-400 bg-cyan-50 ring-1 ring-cyan-300 dark:border-cyan-500 dark:bg-cyan-950/25 dark:ring-cyan-800' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-slate-600'}`}
+              >
+                <div className="flex items-center justify-between gap-2"><strong className="text-sm text-slate-900 dark:text-slate-100">真实出口流量</strong><span className="rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] text-cyan-800 dark:bg-cyan-500/15 dark:text-cyan-200">L/s / m³/s</span></div>
+                <div className="mt-2 text-xs leading-5 ops-muted">用于流量差、返出量与物料平衡证据。仅在传感器及换算版本已核验时选择。</div>
+              </button>
+              <button
+                type="button"
+                aria-pressed={outletSemanticDraft === 'ValveOpeningProxy'}
+                onClick={() => { setOutletSemanticDraft('ValveOpeningProxy'); setOutletSemanticState({ type: 'idle', message: '' }); }}
+                className={`rounded-md border p-3 text-left transition-colors ${outletSemanticDraft === 'ValveOpeningProxy' ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-300 dark:border-amber-500 dark:bg-amber-950/25 dark:ring-amber-800' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-slate-600'}`}
+              >
+                <div className="flex items-center justify-between gap-2"><strong className="text-sm text-slate-900 dark:text-slate-100">出口挡板开度</strong><span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">%</span></div>
+                <div className="mt-2 text-xs leading-5 ops-muted">可监测相对异常与趋势；禁止与入口排量相减，也不生成流量差类物料平衡结论。</div>
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button type="button" className="ops-button-primary px-3 py-2 text-sm" disabled={outletSemanticState.type === 'saving' || outletSemanticDraft === outletSemanticSaved} onClick={() => void handleOutletSemanticSave()}>
+                <Save className="h-4 w-4" />
+                {outletSemanticState.type === 'saving' ? '正在写入后端' : outletSemanticDraft === outletSemanticSaved ? '后端设置已一致' : '保存出口通道定义'}
+              </button>
+              {outletSemanticState.message ? <span role="status" className={`text-xs ${outletSemanticState.type === 'error' ? 'text-red-600 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>{outletSemanticState.message}</span> : null}
+            </div>
+          </section>
+
+          <section className="ops-surface p-4" aria-labelledby="alarm-effect-setting-title">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 id="alarm-effect-setting-title" className="flex items-center gap-2 text-base text-slate-800 dark:text-slate-100">
+                  <Volume2 className="h-4 w-4 text-orange-500" />
+                  报警声光提醒
+                </h3>
+                <p className="mt-1 text-[11px] leading-5 ops-muted">L2 仅以有限光效提示；L3+ 在新事件或升级时追加一次短促声音。确认、刷新、重连与历史回放均不会重复鸣响；L4 使用可区分的三音模式。</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {alarmSoundEnabled ? (
+                  <button type="button" className="ops-button-secondary px-3 py-2 text-sm" aria-pressed={false} onClick={toggleAlarmSound}>
+                    <VolumeX className="h-4 w-4" />L3+ 声音已开启 · 静音
+                  </button>
+                ) : (
+                  <button type="button" className="ops-button-primary px-3 py-2 text-sm" disabled={alarmSoundState.type === 'testing'} onClick={() => void enableAndPreviewAlarmSound()}>
+                    <Volume2 className="h-4 w-4" />{alarmSoundState.type === 'testing' ? '正在试听…' : '试听并启用 L3+ 声音'}
+                  </button>
+                )}
+              </div>
+            </div>
+            {alarmSoundState.message ? <div role="status" className={`mt-2 text-xs ${alarmSoundState.type === 'error' ? 'text-red-600 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>{alarmSoundState.message}</div> : null}
           </section>
 
           <section className="ops-surface p-4">

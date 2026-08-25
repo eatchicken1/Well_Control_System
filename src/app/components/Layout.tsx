@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
 import { useAuth } from '../context/AuthContext';
+import { AlarmEffectController } from './AlarmEffectController';
 
 const navItems = [
   { to: '/', label: '总览', icon: LayoutDashboard, end: true },
@@ -265,6 +266,7 @@ export function Layout() {
 
   return (
     <div className="ops-shell">
+      <AlarmEffectController alerts={alerts} />
       <div className="ops-stage flex h-screen overflow-hidden text-slate-900 transition-colors">
       {/* Mobile overlay */}
       {sidebarOpen && (

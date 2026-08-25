@@ -567,8 +567,9 @@ function AlertRow({ event, busy, onDetail, onAcknowledge }: { event: WarningEven
   const Icon = visual.icon;
   const canAcknowledge = event.warningId > 0 && !event.isAcknowledged;
   const visibleSignals = fieldSignalLabels(event.activeSignals);
+  const effectClass = !event.isAcknowledged && level >= 2 ? `alarm-event-light-l${Math.min(4, level)}` : '';
   return (
-    <article className={`relative border-b border-slate-200 border-l-4 px-4 py-4 last:border-b-0 dark:border-slate-800 ${event.isAcknowledged ? 'border-l-slate-300 bg-white/60 opacity-75 dark:border-l-slate-700 dark:bg-slate-950/40' : `${visual.tone} ${level >= 4 ? 'border-l-red-600' : level >= 3 ? 'border-l-orange-500' : 'border-l-amber-500'}`}`}>
+    <article className={`relative border-b border-slate-200 border-l-4 px-4 py-4 last:border-b-0 dark:border-slate-800 ${effectClass} ${event.isAcknowledged ? 'border-l-slate-300 bg-white/60 opacity-75 dark:border-l-slate-700 dark:bg-slate-950/40' : `${visual.tone} ${level >= 4 ? 'border-l-red-600' : level >= 3 ? 'border-l-orange-500' : 'border-l-amber-500'}`}`}>
       <div className="flex items-start gap-3">
         <Icon className="mt-1 h-5 w-5 shrink-0" />
         <div className="min-w-0 flex-1">
