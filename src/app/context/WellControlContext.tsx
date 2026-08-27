@@ -1344,7 +1344,7 @@ function getInitialWellRuntimeStates() {
       shouldAutoRestore: false,
       recordCount: snapshot.historyRecords.length,
       lastRecordAt: snapshot.lastRecordAt || snapshot.currentSampleTime || null,
-      backendLevel: snapshot.backendDetection.publicLevel,
+      backendLevel: snapshot.backendDetection.advisoryLevel,
       latestWellDepth: snapshot.latestWellDepth ?? snapshot.currentData.wellDepth ?? undefined,
       latestBitDepth: snapshot.latestBitDepth ?? snapshot.currentData.bitDepth ?? undefined,
       latestFormation: snapshot.latestFormation ?? snapshot.currentData.formation,
@@ -2168,6 +2168,7 @@ interface BackendLogEntry {
   acknowledgedBy?: string;
   acknowledgedAt?: string;
   acknowledgementCount?: number;
+  advisoryLevel: BackendLevel;
   publicLevel: BackendLevel;
   formalEvalLevel: BackendLevel;
   title: string;
@@ -2189,6 +2190,10 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
   return rawEntries.flatMap((item, index) => {
     if (!item || typeof item !== 'object') return [];
     const row = item as Record<string, unknown>;
+    const advisoryLevel = normalizeBackendLevel(
+      readValue(row, ['advisory_level', 'advisoryLevel', 'level'])
+        ?? readValue(row, ['public_level', 'publicLevel', 'formal_eval_level', 'formalEvalLevel']),
+    );
     const publicLevel = normalizeBackendLevel(
       readValue(row, ['public_level', 'publicLevel', 'level', 'formal_eval_level', 'formalEvalLevel']),
     );
@@ -2197,10 +2202,10 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
     const candidateId = Number.isFinite(candidateIdValue) && candidateIdValue > 0 ? Math.round(candidateIdValue) : undefined;
     const rawEventId = String(readValue(row, ['event_id', 'eventId']) ?? `${timestamp || 'frame'}-${readValue(row, ['frame']) ?? index}-${publicLevel}`);
     const eventId = candidateId ? `candidate-${candidateId}` : rawEventId;
-    const eventState = String(readValue(row, ['event_state', 'eventState']) || (publicLevel >= 4 ? 'confirmed' : publicLevel >= 2 ? 'tracking' : publicLevel === 1 ? 'recovering' : 'normal'));
-    const shouldKeep = publicLevel >= 2 || eventState === 'recovering' || eventState === 'normal';
+    const eventState = String(readValue(row, ['event_state', 'eventState']) || (advisoryLevel >= 4 ? 'confirmed' : advisoryLevel >= 2 ? 'tracking' : advisoryLevel === 1 ? 'recovering' : 'normal'));
+    const shouldKeep = advisoryLevel >= 2 || eventState === 'recovering' || eventState === 'normal';
     if (!shouldKeep) return [];
-    const presentation = operatorEventPresentation(row, publicLevel);
+    const presentation = operatorEventPresentation(row, advisoryLevel);
     return [{
       eventId,
       candidateId,
@@ -2210,6 +2215,7 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
       acknowledgedBy: String(readValue(row, ['acknowledged_by', 'acknowledgedBy']) || '') || undefined,
       acknowledgedAt: String(readValue(row, ['acknowledged_at', 'acknowledgedAt']) || '') || undefined,
       acknowledgementCount: Math.max(0, Math.round(finite(readValue(row, ['acknowledgement_count', 'acknowledgementCount']), 0))),
+      advisoryLevel,
       publicLevel,
       formalEvalLevel: normalizeBackendLevel(readValue(row, ['formal_eval_level', 'formalEvalLevel']) ?? publicLevel),
       title: presentation.title,
@@ -2235,6 +2241,9 @@ function backendEventKey(entry: BackendLogEntry) {
 
 function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry | null {
   const source = record as Record<string, unknown>;
+  const advisoryLevel = normalizeBackendLevel(
+    readValue(source, ['advisory_level', 'advisoryLevel', 'level', 'public_level', 'publicLevel', 'formal_eval_level', 'formalEvalLevel']),
+  );
   const publicLevel = normalizeBackendLevel(
     readValue(source, ['public_level', 'publicLevel', 'formal_eval_level', 'formalEvalLevel', 'confidence_level', 'confidenceLevel']),
   );
@@ -2243,11 +2252,12 @@ function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry
   const rawEventId = String(readValue(source, ['event_id', 'eventId']) || '').trim();
   const eventId = rawEventId || (candidateId ? `candidate-${candidateId}` : '');
   const timestamp = String(readValue(source, ['timestamp', 'sampleTime', 'sample_time']) || '');
-  const presentation = operatorEventPresentation(source, publicLevel);
+    const presentation = operatorEventPresentation(source, advisoryLevel);
   const candidate = fallbackQueueCandidateFromFrame({
     eventId,
     candidateId,
-    publicLevel,
+    publicLevel: advisoryLevel,
+    advisoryLevel,
     formalEvalLevel: normalizeBackendLevel(readValue(source, ['formal_eval_level', 'formalEvalLevel']) ?? publicLevel),
     reason: presentation.description,
     activeSignals: presentation.abnormalParameters,
@@ -2261,6 +2271,7 @@ function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry
   if (!candidate) return null;
   return {
     ...candidate,
+    advisoryLevel: normalizeBackendLevel(candidate.advisoryLevel ?? candidate.publicLevel),
     publicLevel: normalizeBackendLevel(candidate.publicLevel),
     formalEvalLevel: normalizeBackendLevel(candidate.formalEvalLevel),
     title: presentation.title,
@@ -2274,7 +2285,7 @@ function queueLogEntriesFromRecord(record: RealTimeRecord) {
   const fallback = fallbackQueueLogEntryFromFrame(record);
   if (!fallback) return entries;
   const fallbackKey = backendEventKey(fallback);
-  return entries.some((entry) => backendEventKey(entry) === fallbackKey && entry.publicLevel >= 2)
+  return entries.some((entry) => backendEventKey(entry) === fallbackKey && entry.advisoryLevel >= 2)
     ? entries
     : [...entries, fallback];
 }
@@ -2295,7 +2306,10 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
     readValue(source, ['public_level', 'publicLevel', 'formal_eval_level', 'formalEvalLevel', 'confidence_level', 'confidenceLevel'])
       ?? latestLog?.publicLevel,
   );
-  const effectiveLevel = Math.max(advisoryLevel, publicLevel);
+  // AdvisoryLevel is the backend's sole HMI authority. Public/formal levels
+  // are retained for audit details only and must never raise the live badge,
+  // lane colour, sound, or event queue after a backend downgrade/hold.
+  const effectiveLevel = advisoryLevel;
   const formalEvalLevel = normalizeBackendLevel(
     readValue(source, ['formal_eval_level', 'formalEvalLevel']) ?? latestLog?.formalEvalLevel ?? publicLevel,
   );
@@ -3616,7 +3630,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const selectedWellManuallyStopped = selectedWellId ? suppressedAutoRestoreWellIds.has(selectedWellId) : false;
   const isWellManuallyStopped = useCallback((wellId: string) => suppressedAutoRestoreWellIds.has(wellId), [suppressedAutoRestoreWellIds]);
 
-  const alertStatus = backendLevelToStatus(backendDetection.publicLevel);
+  const alertStatus = backendLevelToStatus(backendDetection.advisoryLevel);
   const baselineInfo = useMemo<BaselineInfo>(() => {
     const baseline = backendDetection.baselineSnapshot;
     const primaryChannels = baseline.channels.filter((channel) => ['standpipe_pressure', 'outlet_flow'].includes(channel.channel));
@@ -3736,7 +3750,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
             acknowledgedBy: entry.acknowledgedBy || alert.acknowledgedBy,
             acknowledgedAt: entry.acknowledgedAt || alert.acknowledgedAt,
             acknowledgementCount: entry.acknowledgementCount ?? alert.acknowledgementCount,
-            level: entry.publicLevel >= 4 ? 'critical' as const : entry.publicLevel >= 2 ? 'warning' as const : 'info' as const,
+            level: entry.advisoryLevel >= 4 ? 'critical' as const : entry.advisoryLevel >= 2 ? 'warning' as const : 'info' as const,
             title: entry.title || alert.title,
             description: entry.description || alert.description,
             primaryParameter: entry.primaryParameter || alert.primaryParameter,
@@ -3746,7 +3760,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
             lastTime: eventEndTime.timeStr,
             lastDate: eventEndTime.dateStr,
             count: entry.sampleCount || (alert.count || 1) + 1,
-            backendLevel: entry.publicLevel,
+            backendLevel: entry.advisoryLevel,
             peakBackendLevel: Math.max(alert.peakBackendLevel ?? alert.backendLevel, entry.publicLevel) as BackendLevel,
             formalEvalLevel: entry.formalEvalLevel,
             peakFormalEvalLevel: Math.max(alert.peakFormalEvalLevel ?? alert.formalEvalLevel, entry.formalEvalLevel) as BackendLevel,
@@ -3756,7 +3770,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           } : alert);
           return;
         }
-        if (entry.publicLevel < 2) return;
+        if (entry.advisoryLevel < 2) return;
         if (backendEventIdsRef.current.has(eventInstanceId) || backendEventKeysRef.current.has(eventKey)) return;
         backendEventIdsRef.current.add(eventInstanceId);
         backendEventKeysRef.current.add(eventKey);
@@ -3784,7 +3798,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           date: eventTime.dateStr,
           lastTime: eventEndTime.timeStr,
           lastDate: eventEndTime.dateStr,
-          level: entry.publicLevel >= 4 ? 'critical' as const : 'warning' as const,
+          level: entry.advisoryLevel >= 4 ? 'critical' as const : 'warning' as const,
           title: entry.title,
           description: entry.description,
           primaryParameter: entry.primaryParameter,
@@ -3792,8 +3806,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           acknowledged: acknowledgedEventsRef.current[eventKey] === true,
           code: entry.eventId,
           backendEventId: eventKey,
-          backendLevel: entry.publicLevel,
-          peakBackendLevel: entry.publicLevel,
+          backendLevel: entry.advisoryLevel,
+          peakBackendLevel: entry.advisoryLevel,
           formalEvalLevel: entry.formalEvalLevel,
           peakFormalEvalLevel: entry.formalEvalLevel,
           activeSignals: entry.activeSignals,
@@ -4012,13 +4026,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const canPaintEvent = isMonitorableEventRecord(record, lastData);
       cycleState = cycleInfoFromRecord(record, cycleState);
       if (sampleTimeText) sampleTime = sampleTimeText.replace('T', ' ');
-      const activeEventId = nextDetection.publicLevel >= 1 && canPaintEvent ? (nextDetection.eventId || null) : null;
+      const activeEventId = nextDetection.advisoryLevel >= 1 && canPaintEvent ? (nextDetection.eventId || null) : null;
       backendState = nextDetection;
       flowItems = appendMonitoringPoint(flowItems,
         {
           time: recordTime.timeStr,
           timestampMs,
-          backendLevel: nextDetection.publicLevel,
+          backendLevel: nextDetection.advisoryLevel,
           eventId: activeEventId,
           eventTitle: nextDetection.eventTitle,
           eventDescription: nextDetection.physicalDescription,
@@ -4046,7 +4060,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         {
           time: recordTime.timeStr,
           timestampMs,
-          backendLevel: nextDetection.publicLevel,
+          backendLevel: nextDetection.advisoryLevel,
           eventId: activeEventId,
           eventTitle: nextDetection.eventTitle,
           eventDescription: nextDetection.physicalDescription,
@@ -4079,12 +4093,12 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           bitDepth: lastData.bitDepth,
           pumpState: nextDetection.pumpState,
           cycleState: cycleState.state,
-          backendLevel: nextDetection.publicLevel,
+          backendLevel: nextDetection.advisoryLevel,
           baselineValid: nextDetection.baselineValid,
           baselineWarmup: nextDetection.baselineWarmup,
           monitoringReady: nextDetection.monitoringReady,
           baselineCount: nextDetection.baselineCount,
-          status: backendLevelToStatus(nextDetection.publicLevel),
+          status: backendLevelToStatus(nextDetection.advisoryLevel),
         },
       );
       updateWellRuntime(well.wellId, {
@@ -4097,7 +4111,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         isSubscriberConnected: true,
         lastSeenSourceRowNo: finite(readValue(record as Record<string, unknown>, ['source_row_no', 'sourceRowNo']), wellRuntimeStatesRef.current[well.wellId]?.lastSeenSourceRowNo ?? NaN),
         lastSeenSampleTime: sampleTime || null,
-        backendLevel: nextDetection.publicLevel,
+        backendLevel: nextDetection.advisoryLevel,
         latestWellDepth: lastData.wellDepth,
         latestBitDepth: lastData.bitDepth,
         latestFormation: lastData.formation,
@@ -4354,7 +4368,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           const endTime = formatRecordTime(endTimeValue || startTimeValue);
           const level = normalizeBackendLevel(readValue(row, ['current_level', 'currentLevel', 'public_level', 'publicLevel', 'level']));
           const highestLevel = normalizeBackendLevel(readValue(row, ['highest_level', 'highestLevel', 'peak_level', 'peakLevel']) ?? level);
-          const displayLevel = Math.max(level, highestLevel) as BackendLevel;
+          // Current advisory level drives the list presentation; peak is
+          // retained separately as historical context.
+          const displayLevel = level;
           const presentation = operatorEventPresentation(row, displayLevel);
           const ackStatus = String(readValue(row, ['ack_status', 'ackStatus']) || 'unacknowledged');
           const eventKey = eventId.startsWith('candidate-')
@@ -4662,15 +4678,15 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const canPaintEvent = isMonitorableEventRecord(record, nextData);
       if (nextDetection.eventId && canPaintEvent) {
         activeEventIdRef.current = nextDetection.eventId;
-      } else if (nextDetection.publicLevel < 1 || !canPaintEvent) {
+      } else if (nextDetection.advisoryLevel < 1 || !canPaintEvent) {
         activeEventIdRef.current = null;
       }
-      const activeEventId = nextDetection.publicLevel >= 1 && canPaintEvent ? activeEventIdRef.current : null;
+      const activeEventId = nextDetection.advisoryLevel >= 1 && canPaintEvent ? activeEventIdRef.current : null;
       const nextFlowHistory = appendMonitoringPoint(previousSnapshot.flowHistory,
         {
           time: recordTime.timeStr,
           timestampMs,
-          backendLevel: nextDetection.publicLevel,
+          backendLevel: nextDetection.advisoryLevel,
           eventId: activeEventId,
           eventTitle: nextDetection.eventTitle,
           eventDescription: nextDetection.physicalDescription,
@@ -4698,7 +4714,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         {
           time: recordTime.timeStr,
           timestampMs,
-          backendLevel: nextDetection.publicLevel,
+          backendLevel: nextDetection.advisoryLevel,
           eventId: activeEventId,
           casingPressure: nextData.casingPressure,
           drillPipePressure: nextData.drillPipePressure,
@@ -4728,17 +4744,17 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           bitDepth: nextData.bitDepth,
           pumpState: nextDetection.pumpState,
           cycleState: nextCycleInfo.state,
-          backendLevel: nextDetection.publicLevel,
+          backendLevel: nextDetection.advisoryLevel,
           baselineValid: nextDetection.baselineValid,
           baselineWarmup: nextDetection.baselineWarmup,
           monitoringReady: nextDetection.monitoringReady,
           baselineCount: nextDetection.baselineCount,
-          status: backendLevelToStatus(nextDetection.publicLevel),
+          status: backendLevelToStatus(nextDetection.advisoryLevel),
         },
       );
       updateWellRuntime(wellInfo.wellId, {
         monitoringMode: mode,
-        backendLevel: nextDetection.publicLevel,
+        backendLevel: nextDetection.advisoryLevel,
         status: 'connected',
         isRunning: true,
         shouldAutoRestore: true,

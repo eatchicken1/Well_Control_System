@@ -127,7 +127,7 @@ export default function WellboreStatusDetail() {
   );
   const displayData = data;
   const displayDetection = detection;
-  const level = displayDetection.publicLevel as BackendLevel;
+  const level = displayDetection.advisoryLevel as BackendLevel;
   const abnormal = level >= 2;
   const watch = level === 1;
 

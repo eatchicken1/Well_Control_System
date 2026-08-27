@@ -8,6 +8,7 @@ export interface QueueAlertLike {
 export interface FrameQueueCandidate {
   eventId: string;
   candidateId?: number;
+  advisoryLevel?: number;
   publicLevel: number;
   formalEvalLevel: number;
   reason: string;
@@ -46,14 +47,15 @@ export function mergeQueueAlertSnapshot<T extends QueueAlertLike>(
 
 export function fallbackQueueCandidateFromFrame(candidate: FrameQueueCandidate): FrameQueueCandidate | null {
   const eventId = String(candidate.eventId || '').trim();
-  const publicLevel = Math.max(0, Math.min(4, Math.round(Number(candidate.publicLevel) || 0)));
-  if (!eventId || publicLevel < 2) return null;
+  const advisoryLevel = Math.max(0, Math.min(4, Math.round(Number(candidate.advisoryLevel ?? candidate.publicLevel) || 0)));
+  if (!eventId || advisoryLevel < 2) return null;
 
   return {
     ...candidate,
     eventId,
-    publicLevel,
-    formalEvalLevel: Math.max(0, Math.min(4, Math.round(Number(candidate.formalEvalLevel) || publicLevel))),
+    advisoryLevel,
+    publicLevel: Math.max(0, Math.min(4, Math.round(Number(candidate.publicLevel) || 0))),
+    formalEvalLevel: Math.max(0, Math.min(4, Math.round(Number(candidate.formalEvalLevel) || advisoryLevel))),
     activeSignals: candidate.activeSignals.filter(Boolean),
   };
 }

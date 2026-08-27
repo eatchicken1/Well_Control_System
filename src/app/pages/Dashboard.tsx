@@ -301,7 +301,7 @@ function MonitoredWellCard({
   const activeSampleTime = isActiveWell ? (selectedWellView.currentSampleTime || currentSampleTime) : currentSampleTime;
   const level = safeBackendLevel(
     runtime?.backendLevel
-    ?? (isActiveWell ? selectedWellView.backendDetection.publicLevel : undefined)
+    ?? (isActiveWell ? selectedWellView.backendDetection.advisoryLevel : undefined)
     ?? alert?.backendLevel
     ?? 0,
   );

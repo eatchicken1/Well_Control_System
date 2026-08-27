@@ -199,7 +199,7 @@ export default function Monitoring() {
                 pitVolume={viewCurrentData.pitVolume}
                 totalGas={viewCurrentData.totalGas}
                 mudWeight={viewCurrentData.mudWeight}
-                backendLevel={viewBackendDetection.publicLevel}
+                backendLevel={viewBackendDetection.advisoryLevel}
                 eventTitle={viewBackendDetection.eventTitle}
                 physicalDescription={viewBackendDetection.physicalDescription}
                 activeSignals={viewBackendDetection.activeSignals}

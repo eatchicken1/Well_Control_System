@@ -251,7 +251,7 @@ export function Layout() {
     warning: 'bg-yellow-500',
     critical: 'bg-red-500',
   };
-  const backendLevel = safeBackendLevel(backendDetection.publicLevel);
+  const backendLevel = safeBackendLevel(backendDetection.advisoryLevel);
   const displayAlertStatus = backendLevel >= 4 ? 'critical' : backendLevel >= 2 ? 'warning' : 'normal';
   const backendMeta = BACKEND_LEVEL_META[backendLevel];
   const sidebarWidth = sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[232px]';

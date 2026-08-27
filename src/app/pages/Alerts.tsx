@@ -391,7 +391,7 @@ export default function Alerts() {
     [acknowledgementFilter, levelFilter, lifecycleFilter, page?.events],
   );
   const eligibleForBulkAcknowledgement = events.filter((event) => !event.isAcknowledged && event.warningId > 0);
-  const currentLevel = safeLevel(backendDetection.publicLevel);
+  const currentLevel = safeLevel(backendDetection.advisoryLevel);
   const hasFilters = levelFilter !== 'all' || acknowledgementFilter !== 'all' || lifecycleFilter !== 'all';
 
   const acknowledgeOne = async (event: WarningEventReviewItem, comment = '') => {
