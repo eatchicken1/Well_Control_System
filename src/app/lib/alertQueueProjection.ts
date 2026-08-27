@@ -48,7 +48,15 @@ export function mergeQueueAlertSnapshot<T extends QueueAlertLike>(
 export function fallbackQueueCandidateFromFrame(candidate: FrameQueueCandidate): FrameQueueCandidate | null {
   const eventId = String(candidate.eventId || '').trim();
   const advisoryLevel = Math.max(0, Math.min(4, Math.round(Number(candidate.advisoryLevel ?? candidate.publicLevel) || 0)));
-  if (!eventId || advisoryLevel < 2) return null;
+  const normalizedState = String(candidate.eventState || '').trim().toLowerCase().replace(/[-\s]/g, '_');
+  const terminal = normalizedState === 'resolved'
+    || normalizedState === 'closedunresolved'
+    || normalizedState === 'closed_unresolved';
+  const lifecycleUpdate = ['watch', 'open', 'hold', 'recovery', 'recovering', 'resolved', 'closedunresolved', 'closed_unresolved'].includes(normalizedState);
+  // Live SSE carries a raw frame rather than log_entries.  Keep any frame
+  // with a canonical event id when it represents lifecycle state, including
+  // L0 Recovery/Resolved updates; only ordinary L0 frames are ignored.
+  if (!eventId || (advisoryLevel < 2 && !terminal && !lifecycleUpdate)) return null;
 
   return {
     ...candidate,
