@@ -355,45 +355,39 @@ function curvePointTimeMs(point: CurvePoint) {
 }
 
 /**
- * Match the canonical replay renderer: public-level backgrounds are built from
- * frame-level levels, not from the candidate's highest level. A one-minute
- * bridge is retained so a single missing frame does not split a real run.
+ * Build mutually exclusive runs from frame-level levels. We intentionally do
+ * not bridge over another level: a L1→L2 transition must never be painted as
+ * one continuous L1 band underneath the L2 band.
  */
-function buildFrameLevelBands(points: CurvePoint[], threshold: number, bridgeMs = 60_000): FrameLevelBand[] {
-  const active = points
-    .map((point, index) => ({ index, timeMs: curvePointTimeMs(point), active: point.level >= threshold }))
-    .filter((item) => item.active);
-  if (active.length === 0) return [];
-
+function buildFrameLevelBands(points: CurvePoint[], level: number): FrameLevelBand[] {
   const bands: FrameLevelBand[] = [];
-  let start = active[0];
-  let previous = active[0];
-
-  for (let cursor = 1; cursor < active.length; cursor += 1) {
-    const current = active[cursor];
-    const hasTimes = Number.isFinite(previous.timeMs) && Number.isFinite(current.timeMs);
-    const continuous = hasTimes
-      ? current.timeMs >= previous.timeMs && current.timeMs - previous.timeMs <= bridgeMs
-      : current.index - previous.index <= 1;
-
-    if (!continuous) {
-      bands.push({
-        startIndex: start.index,
-        endIndex: previous.index,
-        startTimeMs: Number.isFinite(start.timeMs) ? start.timeMs : undefined,
-        endTimeMs: Number.isFinite(previous.timeMs) ? previous.timeMs : undefined,
-      });
-      start = current;
+  let startIndex = -1;
+  let endIndex = -1;
+  points.forEach((point, index) => {
+    if (point.level === level) {
+      if (startIndex < 0) startIndex = index;
+      endIndex = index;
+      return;
     }
-    previous = current;
-  }
-
-  bands.push({
-    startIndex: start.index,
-    endIndex: previous.index,
-    startTimeMs: Number.isFinite(start.timeMs) ? start.timeMs : undefined,
-    endTimeMs: Number.isFinite(previous.timeMs) ? previous.timeMs : undefined,
+    if (startIndex >= 0) {
+      bands.push({
+        startIndex,
+        endIndex,
+        startTimeMs: curvePointTimeMs(points[startIndex]),
+        endTimeMs: curvePointTimeMs(points[endIndex]),
+      });
+      startIndex = -1;
+      endIndex = -1;
+    }
   });
+  if (startIndex >= 0) {
+    bands.push({
+      startIndex,
+      endIndex,
+      startTimeMs: curvePointTimeMs(points[startIndex]),
+      endTimeMs: curvePointTimeMs(points[endIndex]),
+    });
+  }
   return bands;
 }
 
@@ -496,32 +490,29 @@ function VerticalTrack({
     const yForIndex = (index: number) => plotY + (index / (points.length - 1)) * plotH;
     const latest = points[points.length - 1];
 
-    for (const threshold of [1, 2, 3]) {
-      const bandColor = threshold === 3
-        ? (isDark ? 'rgba(239, 91, 100, 0.19)' : 'rgba(217, 91, 100, 0.19)')
-        : threshold === 2
-          ? (isDark ? 'rgba(239, 155, 160, 0.26)' : 'rgba(239, 155, 160, 0.26)')
-          : (isDark ? 'rgba(243, 217, 139, 0.18)' : 'rgba(243, 217, 139, 0.18)');
-      const edgeColor = threshold === 3
-        ? (isDark ? 'rgba(239, 91, 100, 0.75)' : 'rgba(217, 91, 100, 0.70)')
-        : threshold === 2
-          ? (isDark ? 'rgba(239, 155, 160, 0.80)' : 'rgba(217, 91, 100, 0.60)')
-          : (isDark ? 'rgba(243, 217, 139, 0.78)' : 'rgba(202, 138, 4, 0.58)');
-      buildFrameLevelBands(backgroundPoints, threshold).forEach((band) => {
+    const levelBands: Record<1 | 2 | 3 | 4, { fill: string; edge: string }> = {
+      1: { fill: isDark ? 'rgba(250, 204, 21, 0.16)' : 'rgba(250, 204, 21, 0.22)', edge: isDark ? 'rgba(250, 204, 21, 0.62)' : 'rgba(202, 138, 4, 0.62)' },
+      2: { fill: isDark ? 'rgba(251, 146, 60, 0.18)' : 'rgba(251, 146, 60, 0.22)', edge: isDark ? 'rgba(251, 146, 60, 0.68)' : 'rgba(234, 88, 12, 0.64)' },
+      3: { fill: isDark ? 'rgba(248, 113, 113, 0.20)' : 'rgba(248, 113, 113, 0.24)', edge: isDark ? 'rgba(248, 113, 113, 0.74)' : 'rgba(220, 38, 38, 0.68)' },
+      4: { fill: isDark ? 'rgba(190, 24, 93, 0.24)' : 'rgba(190, 24, 93, 0.18)', edge: isDark ? 'rgba(244, 63, 94, 0.84)' : 'rgba(190, 24, 93, 0.76)' },
+    };
+    (Object.keys(levelBands).map(Number) as Array<1 | 2 | 3 | 4>).forEach((level) => {
+      const colors = levelBands[level];
+      buildFrameLevelBands(backgroundPoints, level).forEach((band) => {
         const projected = projectFrameBandToRenderedPoints(band, backgroundPoints, points);
         const y1 = yForIndex(projected.start);
         const y2 = yForIndex(Math.min(points.length - 1, projected.end + 1));
         const height = Math.max(2, y2 - y1);
-        ctx.fillStyle = bandColor;
+        ctx.fillStyle = colors.fill;
         ctx.fillRect(plotX, y1, plotW, height);
-        ctx.strokeStyle = edgeColor;
+        ctx.strokeStyle = colors.edge;
         ctx.lineWidth = 1.0;
         ctx.beginPath();
         ctx.moveTo(plotX, y1 + 0.5);
         ctx.lineTo(plotX + plotW, y1 + 0.5);
         ctx.stroke();
       });
-    }
+    });
 
     ctx.lineWidth = 0.7;
     for (let i = 0; i <= 6; i += 1) {
@@ -867,6 +858,12 @@ export function VerticalCurveDeck({
       className="vertical-curve-deck relative flex h-full min-h-[360px] flex-col overflow-hidden rounded-md border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950"
       data-fill-viewport={fillTracks ? 'true' : undefined}
     >
+      <div className="pointer-events-none absolute right-2 top-1 z-10 flex items-center gap-1 rounded bg-white/85 px-1.5 py-1 text-[9px] font-semibold text-slate-600 shadow-sm dark:bg-slate-900/85 dark:text-slate-300" aria-label="事件等级背景色图例">
+        <span className="h-2 w-2 rounded-sm bg-yellow-300" />L1
+        <span className="h-2 w-2 rounded-sm bg-orange-400" />L2
+        <span className="h-2 w-2 rounded-sm bg-red-400" />L3
+        <span className="h-2 w-2 rounded-sm bg-pink-700" />L4
+      </div>
       <div className={`vertical-curve-body flex min-h-0 flex-1 overflow-y-hidden ${fillTracks ? 'overflow-x-hidden' : 'overflow-x-auto'}`}>
         <AxisLane points={renderPoints} compact={compact} mobileDense={mobileDense} />
         {displayTracks.map((track) => (

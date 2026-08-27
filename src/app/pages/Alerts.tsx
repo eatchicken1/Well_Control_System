@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ElementType } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Activity,
   AlertTriangle,
@@ -6,6 +7,8 @@ import {
   ArrowUpRight,
   Check,
   CheckCheck,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   Clock3,
   Eye,
@@ -296,9 +299,13 @@ function SummaryMetric({ label, value }: { label: string; value: number }) {
 }
 
 export default function Alerts() {
-  const { backendDetection, wellInfo, selectedWellId, wells } = useWellControl();
+  const { backendDetection, wellInfo, selectedWellId, wells, wellRuntimeStates } = useWellControl();
   const currentWellId = selectedWellId || wellInfo.wellId;
   const activeWell = wells.find((well) => well.wellId === currentWellId) || wellInfo;
+  const currentRuntime = wellRuntimeStates[currentWellId];
+  const currentSessionCode = currentRuntime?.monitoringMode === 'historyReplay'
+    ? currentRuntime.sessionCode || ''
+    : '';
   const [page, setPage] = useState<WarningEventReviewPage | null>(null);
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
   const [acknowledgementFilter, setAcknowledgementFilter] = useState<AcknowledgementFilter>('all');
@@ -312,6 +319,10 @@ export default function Alerts() {
   const [error, setError] = useState('');
   const [detailError, setDetailError] = useState('');
   const [ackComment, setAckComment] = useState('');
+  // Server-paged events (the realtime stream keeps a live newest-window;
+  // this page is the full paginated history).
+  const ALERT_PAGE_SIZE = 200;
+  const [pageIndex, setPageIndex] = useState(1);
 
   const loadEvents = useCallback(async (signal?: AbortSignal) => {
     const firstLoad = page === null;
@@ -320,9 +331,10 @@ export default function Alerts() {
     try {
       const next = await fetchWarningEvents({
         wellId: currentWellId || undefined,
+        sessionCode: currentSessionCode || undefined,
         includeAcknowledged: true,
-        page: 1,
-        pageSize: 100,
+        page: pageIndex,
+        pageSize: ALERT_PAGE_SIZE,
       }, signal);
       setPage(next);
       setError('');
@@ -333,18 +345,26 @@ export default function Alerts() {
       if (firstLoad) setLoading(false);
       else setRefreshing(false);
     }
-  }, [currentWellId, page]);
+  }, [currentSessionCode, currentWellId, page, pageIndex]);
 
   useEffect(() => {
     const controller = new AbortController();
     setPage(null);
+    setPageIndex(1);
     void loadEvents(controller.signal);
     const timer = window.setInterval(() => void loadEvents(), 15000);
     return () => {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [currentWellId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentSessionCode, currentWellId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPage(null);
+    void loadEvents(controller.signal);
+    return () => controller.abort();
+  }, [pageIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedEventId) {
@@ -527,7 +547,9 @@ export default function Alerts() {
                 </button>
               ))}
             </div>
-            <span className="ml-auto text-xs ops-muted">显示 {events.length} / {summary.total} 条</span>
+            <span className="ml-auto text-xs ops-muted">
+              本页 {events.length} 条 · 后端共 {summary.total} 条
+            </span>
           </div>
           {eligibleForBulkAcknowledgement.length > 0 && (
             <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
@@ -557,6 +579,20 @@ export default function Alerts() {
             events.map((event) => <AlertRow key={event.eventId} event={event} busy={busyAction === `ack:${event.eventId}`} onDetail={() => setSelectedEventId(event.eventId)} onAcknowledge={() => void acknowledgeOne(event)} />)
           )}
         </div>
+
+        {page && page.totalPages > 1 && (
+          <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-2.5 text-xs dark:border-slate-800 dark:bg-slate-900">
+            <span className="ops-muted">第 {page.page} / {page.totalPages} 页 · 每页 {page.pageSize} 条</span>
+            <div className="flex items-center gap-2">
+              <button type="button" className="ops-button-secondary px-2.5 py-1.5" disabled={pageIndex <= 1 || refreshing} onClick={() => setPageIndex((current) => Math.max(1, current - 1))} aria-label="上一页">
+                <ChevronLeft className="h-3.5 w-3.5" />上一页
+              </button>
+              <button type="button" className="ops-button-secondary px-2.5 py-1.5" disabled={pageIndex >= (page.totalPages || 1) || refreshing} onClick={() => setPageIndex((current) => current + 1)} aria-label="下一页">
+                下一页<ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {selectedEventId && (
@@ -636,7 +672,9 @@ function ReviewDetailDrawer({ detail, loading, error, comment, onCommentChange, 
     physicalDescription: frame?.physicalDescription || event.physicalDescription,
     abnormalParameters: signals,
   }, level) : null;
-  return (
+  // Portal to body so the fixed sheet can never be trapped by an ancestor
+  // overflow/transform containing block (same fix as the monitoring drawer).
+  return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end bg-black/45" onClick={onClose}>
       <aside className="h-full w-full max-w-[920px] overflow-hidden bg-slate-50 shadow-2xl dark:bg-slate-950" role="dialog" aria-modal="true" aria-labelledby="warning-review-detail-title" onClick={(click) => click.stopPropagation()}>
         <div className="flex h-full flex-col">
@@ -684,7 +722,8 @@ function ReviewDetailDrawer({ detail, loading, error, comment, onCommentChange, 
           {event && !event.isAcknowledged && event.warningId > 0 && <footer className="border-t border-slate-200 bg-white px-5 py-3 dark:border-slate-800 dark:bg-slate-900"><div className="flex flex-col gap-2 md:flex-row md:items-center"><input value={comment} onChange={(input) => onCommentChange(input.target.value)} maxLength={1000} placeholder="现场处置备注（可选，写入确认审计）" className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950" /><button type="button" className="ops-button-primary" onClick={onAcknowledge} disabled={busy}>{busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}确认并记录</button></div></footer>}
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

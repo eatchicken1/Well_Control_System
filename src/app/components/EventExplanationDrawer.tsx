@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Activity, AlertTriangle, CheckCircle2, ChevronDown, Clock3, Database, ListChecks, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import type { Alert, BackendLevel } from '../context/WellControlContext';
 import { fetchEventExplanation } from '../api/eventExplanationApi';
@@ -211,7 +212,12 @@ export function EventExplanationDrawer({ alert, wellKey, endpoint, onClose }: { 
   const operatorTitle = presentation.title;
   const physicalDescription = presentation.description || summary.currentPhaseSummary || summary.currentConclusion;
 
-  return (
+  // Render through a portal on document.body: this drawer is opened from
+  // deeply nested side panels whose ancestors carry overflow/transform
+  // rules. Without the portal, position:fixed collapses into that ancestor
+  // and the briefing card gets squeezed into the corner instead of opening
+  // as a full-screen sheet.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end bg-black/45" onClick={onClose}>
       <aside className="h-full w-full max-w-[1080px] overflow-hidden bg-slate-50 shadow-2xl dark:bg-slate-950" role="dialog" aria-modal="true" aria-labelledby="event-explanation-title" onClick={(event) => event.stopPropagation()}>
         <div className="flex h-full flex-col">
@@ -309,7 +315,8 @@ export function EventExplanationDrawer({ alert, wellKey, endpoint, onClose }: { 
           <footer className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-2.5 text-xs ops-muted sm:px-5 dark:border-slate-800 dark:bg-slate-900"><span className="min-w-0 break-words"><Clock3 className="mr-1 inline h-3.5 w-3.5" />更新于 {displayDateTime(getEventExplanationCache(eventId)?.loadedAt || explanation.updatedAt)}</span><button type="button" className="ops-button-secondary shrink-0 px-2.5 py-1.5" onClick={() => void load(true)} disabled={loading}><RefreshCw className={`mr-1 inline h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />{loading ? '刷新中' : '刷新'}</button></footer>
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

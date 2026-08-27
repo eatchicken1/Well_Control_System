@@ -107,6 +107,7 @@ export interface WarningEventReviewPage {
 
 export interface WarningEventQuery {
   wellId?: string;
+  sessionCode?: string;
   status?: 'active' | 'ended' | 'acknowledged' | 'unacknowledged';
   level?: number;
   includeAcknowledged?: boolean;
@@ -134,6 +135,7 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
 export function buildWarningEventsUrl(query: WarningEventQuery = {}) {
   const params = new URLSearchParams();
   if (query.wellId) params.set('wellId', query.wellId);
+  if (query.sessionCode) params.set('sessionCode', query.sessionCode);
   if (query.status) params.set('status', query.status);
   if (query.level !== undefined) params.set('level', String(query.level));
   if (query.includeAcknowledged !== undefined) params.set('includeAcknowledged', String(query.includeAcknowledged));

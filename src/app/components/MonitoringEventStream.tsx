@@ -20,6 +20,11 @@ const FILTERS: Array<{ value: MonitoringEventFilter; label: string }> = [
   { value: 'unacknowledged', label: '未确认' },
 ];
 
+// Live sessions accumulate events indefinitely; the stream viewport keeps a
+// bounded newest-window so long-running monitors cannot grow the DOM without
+// limit. The full history lives in 报警管理 (server-paged).
+const MAX_STREAM_ITEMS = 500;
+
 const TONE_CLASSES = {
   neutral: 'border-l-slate-300 bg-white text-slate-700 dark:border-l-slate-600 dark:bg-slate-950/30 dark:text-slate-200',
   amber: 'border-l-amber-500 bg-amber-50/55 text-slate-800 dark:border-l-amber-400 dark:bg-amber-950/15 dark:text-slate-100',
@@ -121,23 +126,55 @@ export function MonitoringEventStream({
   const viewportRef = useRef<HTMLDivElement>(null);
   const followRef = useRef<FollowLatestState>({ isFollowing: true, newEventCount: 0, itemCount: items.length });
   const [followState, setFollowState] = useState(followRef.current);
-  const visibleItems = useMemo(() => filterMonitoringEvents(items, filter), [filter, items]);
+  const overflowCount = Math.max(0, items.length - MAX_STREAM_ITEMS);
+  const cappedItems = useMemo(
+    () => (overflowCount > 0 ? items.slice(overflowCount) : items),
+    [items, overflowCount],
+  );
+  const visibleItems = useMemo(() => filterMonitoringEvents(cappedItems, filter), [filter, cappedItems]);
   const selectedItem = selectedBackendEventId == null
     ? null
     : items.find((item) => item.backendEventId === selectedBackendEventId) ?? null;
+  // Every stream row is clickable: alarms resolve to their backend alert,
+  // observation windows (L1) get a synthesized briefing alert so the same
+  // full-screen drawer opens for both kinds.
   const selectedAlert = selectedItem == null
     ? null
     : alerts.find((alert) => alert.id === selectedItem.sourceAlertId)
       ?? alerts.find((alert) => alert.backendEventId === selectedBackendEventId)
-      ?? null;
+      ?? (selectedItem.backendEventId
+        ? {
+            id: -1,
+            wellName,
+            date: selectedItem.startTime.slice(0, 10),
+            time: selectedItem.startTime.slice(11) || selectedItem.startTime,
+            lastDate: selectedItem.endTime.slice(0, 10) || undefined,
+            lastTime: selectedItem.endTime.slice(11) || undefined,
+            level: 'info' as const,
+            title: selectedItem.message,
+            description: selectedItem.description,
+            message: selectedItem.message,
+            acknowledged: false,
+            backendEventId: selectedItem.backendEventId,
+            currentBackendLevel: selectedItem.currentLevel as Alert['currentBackendLevel'],
+            backendLevel: (selectedItem.currentLevel || selectedItem.level) as Alert['backendLevel'],
+            peakBackendLevel: selectedItem.peakLevel as Alert['peakBackendLevel'],
+            formalEvalLevel: (selectedItem.currentLevel || selectedItem.level) as Alert['formalEvalLevel'],
+            peakFormalEvalLevel: selectedItem.peakLevel as Alert['peakFormalEvalLevel'],
+            activeSignals: selectedItem.activeSignals ?? [],
+            eventState: selectedItem.lifecycleStatus,
+            pumpState: 'Unknown',
+            count: selectedItem.sampleCount,
+          }
+        : null);
 
   const counts = useMemo(() => ({
-    observation: items.filter((item) => item.kind === 'observation').length,
-    2: items.filter((item) => item.kind === 'alarm' && item.currentLevel === 2).length,
-    3: items.filter((item) => item.kind === 'alarm' && item.currentLevel === 3).length,
-    4: items.filter((item) => item.kind === 'alarm' && item.currentLevel >= 4).length,
-  }), [items]);
-  const highestActiveLevel = items.reduce((highest, item) => item.kind === 'alarm' && item.isActive ? Math.max(highest, item.currentLevel) : highest, 0);
+    observation: cappedItems.filter((item) => item.kind === 'observation').length,
+    2: cappedItems.filter((item) => item.kind === 'alarm' && item.currentLevel === 2).length,
+    3: cappedItems.filter((item) => item.kind === 'alarm' && item.currentLevel === 3).length,
+    4: cappedItems.filter((item) => item.kind === 'alarm' && item.currentLevel >= 4).length,
+  }), [cappedItems]);
+  const highestActiveLevel = cappedItems.reduce((highest, item) => item.kind === 'alarm' && item.isActive ? Math.max(highest, item.currentLevel) : highest, 0);
 
   const scrollToLatest = (behavior: ScrollBehavior = 'smooth') => {
     const viewport = viewportRef.current;
@@ -145,11 +182,11 @@ export function MonitoringEventStream({
   };
 
   useEffect(() => {
-    const update = updateFollowLatestForItems(followRef.current, items.length);
+    const update = updateFollowLatestForItems(followRef.current, cappedItems.length);
     followRef.current = update.state;
     setFollowState(update.state);
     if (update.shouldScroll) requestAnimationFrame(() => scrollToLatest('auto'));
-  }, [items.length]);
+  }, [cappedItems.length]);
 
   useEffect(() => {
     if (followRef.current.isFollowing) requestAnimationFrame(() => scrollToLatest('auto'));
@@ -157,7 +194,7 @@ export function MonitoringEventStream({
 
   useEffect(() => {
     setSelectedBackendEventId(null);
-    followRef.current = { isFollowing: true, newEventCount: 0, itemCount: items.length };
+    followRef.current = { isFollowing: true, newEventCount: 0, itemCount: cappedItems.length };
     setFollowState(followRef.current);
     requestAnimationFrame(() => scrollToLatest('auto'));
   }, [wellKey]);
@@ -215,12 +252,17 @@ export function MonitoringEventStream({
         <div ref={viewportRef} className="ops-scroll h-full overflow-y-auto" onScroll={handleScroll} aria-live="polite">
           {visibleItems.length === 0 ? (
             <div className="flex items-center justify-center gap-1.5 px-3 py-5 text-[11px] text-slate-500 dark:text-slate-400">
-              {items.length === 0 ? <><Circle className="h-2 w-2 fill-emerald-500 text-emerald-500" aria-hidden="true" />暂无事件 · 持续监测中</> : '当前筛选无事件'}
+              {cappedItems.length === 0 ? <><Circle className="h-2 w-2 fill-emerald-500 text-emerald-500" aria-hidden="true" />暂无事件 · 持续监测中</> : '当前筛选无事件'}
             </div>
           ) : visibleItems.map((item) => (
-            <EventRow key={item.id} item={item} onOpen={item.kind === 'alarm' && item.backendEventId ? () => setSelectedBackendEventId(item.backendEventId!) : undefined} />
+            <EventRow key={item.id} item={item} onOpen={item.backendEventId ? () => setSelectedBackendEventId(item.backendEventId!) : undefined} />
           ))}
         </div>
+        {overflowCount > 0 ? (
+          <div className="shrink-0 border-t border-slate-200 px-3 py-1.5 text-center text-[10px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+            已保留最近 {MAX_STREAM_ITEMS} 条（更早 {overflowCount} 条见报警管理）
+          </div>
+        ) : null}
         {!followState.isFollowing && followState.newEventCount > 0 ? (
           <button type="button" className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-[10px] font-semibold text-white shadow-lg dark:bg-slate-100 dark:text-slate-900" onClick={resumeFollowing} aria-label={`滚动到最新的 ${followState.newEventCount} 条事件`}>
             <ArrowDown className="h-3 w-3" aria-hidden="true" />{followState.newEventCount} 条新事件
