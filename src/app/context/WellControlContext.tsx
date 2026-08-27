@@ -183,6 +183,7 @@ export interface Alert {
   acknowledgementCount?: number;
   wellId?: string;
   wellName?: string;
+  sessionCode?: string;
   wellBlock?: string;
   wellDepth?: number | null;
   bitDepth?: number | null;
@@ -1654,6 +1655,7 @@ function sanitizeAlert(value: unknown): Alert | null {
     acknowledgementCount: Math.max(0, Math.round(finite(row.acknowledgementCount, 0))),
     wellId: row.wellId ? String(row.wellId) : undefined,
     wellName: row.wellName ? String(row.wellName) : undefined,
+    sessionCode: row.sessionCode ? String(row.sessionCode) : undefined,
     wellBlock: row.wellBlock ? String(row.wellBlock) : undefined,
     wellDepth: Number.isFinite(Number(row.wellDepth)) ? Number(row.wellDepth) : undefined,
     bitDepth: Number.isFinite(Number(row.bitDepth)) ? Number(row.bitDepth) : undefined,
@@ -2161,6 +2163,7 @@ function displayAlarmText(value: unknown) {
 
 interface BackendLogEntry {
   eventId: string;
+  sessionCode?: string;
   candidateId?: number;
   warningId?: number;
   lifecycleStatus?: string;
@@ -2200,14 +2203,21 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
     const timestamp = String(readValue(row, ['timestamp']) ?? record.timestamp ?? record.sampleTime ?? record.sample_time ?? '');
     const candidateIdValue = Number(readValue(row, ['lifecycle_candidate_id', 'lifecycleCandidateId', 'candidate_id', 'candidateId']));
     const candidateId = Number.isFinite(candidateIdValue) && candidateIdValue > 0 ? Math.round(candidateIdValue) : undefined;
-    const rawEventId = String(readValue(row, ['event_id', 'eventId']) ?? `${timestamp || 'frame'}-${readValue(row, ['frame']) ?? index}-${publicLevel}`);
-    const eventId = candidateId ? `candidate-${candidateId}` : rawEventId;
-    const eventState = String(readValue(row, ['event_state', 'eventState']) || (advisoryLevel >= 4 ? 'confirmed' : advisoryLevel >= 2 ? 'tracking' : advisoryLevel === 1 ? 'recovering' : 'normal'));
-    const shouldKeep = advisoryLevel >= 2 || eventState === 'recovering' || eventState === 'normal';
+    const sessionCode = String(readValue(row, ['session_code', 'sessionCode']) ?? readValue(record as Record<string, unknown>, ['session_code', 'sessionCode']) ?? '').trim() || undefined;
+    const rawEventId = String(readValue(row, ['event_id', 'eventId']) ?? '').trim();
+    // Event identity is a backend fact.  Compatibility payloads without an
+    // event id are accepted only when the backend supplied the full
+    // (session,candidate) identity; frame timestamps must never become ids.
+    const eventId = rawEventId || (candidateId && sessionCode ? `session-${sessionCode}:candidate-${candidateId}` : '');
+    if (!eventId) return [];
+    const eventState = String(readValue(row, ['event_state', 'eventState', 'lifecycle_status', 'lifecycleStatus']) || 'unknown');
+    const normalizedEventState = eventState.trim().toLowerCase();
+    const shouldKeep = advisoryLevel >= 2 || ['watch', 'open', 'hold', 'recovery', 'recovering', 'normal'].includes(normalizedEventState);
     if (!shouldKeep) return [];
     const presentation = operatorEventPresentation(row, advisoryLevel);
     return [{
       eventId,
+      sessionCode,
       candidateId,
       warningId: Number.isFinite(Number(readValue(row, ['warning_id', 'warningId', 'id']))) ? Number(readValue(row, ['warning_id', 'warningId', 'id'])) : undefined,
       lifecycleStatus: String(readValue(row, ['lifecycle_status', 'lifecycleStatus']) || eventState),
@@ -2234,9 +2244,8 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
 }
 
 function backendEventKey(entry: BackendLogEntry) {
-  if (entry.candidateId) return `candidate-${entry.candidateId}`;
-  if (entry.startTime) return `event-${entry.startTime}`;
-  return `event-${entry.eventId}`;
+  if (entry.sessionCode && entry.candidateId) return `session-${entry.sessionCode}:candidate-${entry.candidateId}`;
+  return entry.eventId;
 }
 
 function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry | null {
@@ -2249,8 +2258,10 @@ function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry
   );
   const candidateIdValue = Number(readValue(source, ['lifecycle_candidate_id', 'lifecycleCandidateId', 'candidate_id', 'candidateId']));
   const candidateId = Number.isFinite(candidateIdValue) && candidateIdValue > 0 ? Math.round(candidateIdValue) : undefined;
+  const sessionCode = String(readValue(source, ['session_code', 'sessionCode']) || '').trim() || undefined;
   const rawEventId = String(readValue(source, ['event_id', 'eventId']) || '').trim();
-  const eventId = rawEventId || (candidateId ? `candidate-${candidateId}` : '');
+  const eventId = rawEventId || (candidateId && sessionCode ? `session-${sessionCode}:candidate-${candidateId}` : '');
+  if (!eventId) return null;
   const timestamp = String(readValue(source, ['timestamp', 'sampleTime', 'sample_time']) || '');
     const presentation = operatorEventPresentation(source, advisoryLevel);
   const candidate = fallbackQueueCandidateFromFrame({
@@ -2261,7 +2272,7 @@ function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry
     formalEvalLevel: normalizeBackendLevel(readValue(source, ['formal_eval_level', 'formalEvalLevel']) ?? publicLevel),
     reason: presentation.description,
     activeSignals: presentation.abnormalParameters,
-    eventState: String(readValue(source, ['event_state', 'eventState']) || 'tracking'),
+    eventState: String(readValue(source, ['event_state', 'eventState', 'lifecycle_status', 'lifecycleStatus']) || 'unknown'),
     pumpState: String(readValue(source, ['pump_state', 'pumpState']) || 'Unknown'),
     timestamp,
     startTime: String(readValue(source, ['start_time', 'startTime']) || '') || undefined,
@@ -2271,6 +2282,7 @@ function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry
   if (!candidate) return null;
   return {
     ...candidate,
+    sessionCode,
     advisoryLevel: normalizeBackendLevel(candidate.advisoryLevel ?? candidate.publicLevel),
     publicLevel: normalizeBackendLevel(candidate.publicLevel),
     formalEvalLevel: normalizeBackendLevel(candidate.formalEvalLevel),
@@ -4362,6 +4374,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           // (for example rt_000004).  Keep the client-side key consistent so the queue does not
           // filter out a warning that the API just returned.
           const realtimeWellId = currentWellId;
+          const sessionCode = String(readValue(row, ['session_code', 'sessionCode']) || requestSessionCode || '').trim();
           const startTimeValue = readValue(row, ['start_time', 'startTime', 'timestamp']) as string | number | undefined;
           const endTimeValue = readValue(row, ['end_time', 'endTime']) as string | number | undefined;
           const eventTime = formatRecordTime(startTimeValue);
@@ -4373,15 +4386,16 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           const displayLevel = level;
           const presentation = operatorEventPresentation(row, displayLevel);
           const ackStatus = String(readValue(row, ['ack_status', 'ackStatus']) || 'unacknowledged');
-          const eventKey = eventId.startsWith('candidate-')
+          const eventKey = eventId.includes(':') || !sessionCode
             ? eventId
-            : `${eventId}:${String(startTimeValue || eventTime.dateStr + ' ' + eventTime.timeStr)}`;
+            : `${sessionCode}:${eventId}`;
           const backendEventId = `${realtimeWellId}:${eventKey}`;
           return [{
             id: Math.max(1, Math.round(warningId || index + 1)),
             warningId,
             wellId: realtimeWellId,
             wellName: String(readValue(row, ['well_name', 'wellName']) || wellInfo.wellName),
+            sessionCode: sessionCode || undefined,
             time: eventTime.timeStr,
             date: eventTime.dateStr,
             lastTime: endTime.timeStr,
