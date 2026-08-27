@@ -2205,14 +2205,13 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
     const candidateId = Number.isFinite(candidateIdValue) && candidateIdValue > 0 ? Math.round(candidateIdValue) : undefined;
     const sessionCode = String(readValue(row, ['session_code', 'sessionCode']) ?? readValue(record as Record<string, unknown>, ['session_code', 'sessionCode']) ?? '').trim() || undefined;
     const rawEventId = String(readValue(row, ['event_id', 'eventId']) ?? '').trim();
-    // Event identity is a backend fact.  Compatibility payloads without an
-    // event id are accepted only when the backend supplied the full
-    // (session,candidate) identity; frame timestamps must never become ids.
-    const eventId = rawEventId || (candidateId && sessionCode ? `session-${sessionCode}:candidate-${candidateId}` : '');
+    // Event identity is a backend fact. Do not reconstruct it from candidate
+    // or timestamp fields: live, replay and review must share one canonical id.
+    const eventId = rawEventId;
     if (!eventId) return [];
     const eventState = String(readValue(row, ['event_state', 'eventState', 'lifecycle_status', 'lifecycleStatus']) || 'unknown');
     const normalizedEventState = eventState.trim().toLowerCase();
-    const shouldKeep = advisoryLevel >= 2 || ['watch', 'open', 'hold', 'recovery', 'recovering', 'normal'].includes(normalizedEventState);
+    const shouldKeep = advisoryLevel >= 2 || ['watch', 'open', 'hold', 'recovery', 'recovering', 'resolved', 'closedunresolved', 'closed_unresolved', 'normal'].includes(normalizedEventState);
     if (!shouldKeep) return [];
     const presentation = operatorEventPresentation(row, advisoryLevel);
     return [{
@@ -2244,7 +2243,6 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
 }
 
 function backendEventKey(entry: BackendLogEntry) {
-  if (entry.sessionCode && entry.candidateId) return `session-${entry.sessionCode}:candidate-${entry.candidateId}`;
   return entry.eventId;
 }
 
@@ -2260,7 +2258,8 @@ function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry
   const candidateId = Number.isFinite(candidateIdValue) && candidateIdValue > 0 ? Math.round(candidateIdValue) : undefined;
   const sessionCode = String(readValue(source, ['session_code', 'sessionCode']) || '').trim() || undefined;
   const rawEventId = String(readValue(source, ['event_id', 'eventId']) || '').trim();
-  const eventId = rawEventId || (candidateId && sessionCode ? `session-${sessionCode}:candidate-${candidateId}` : '');
+  // A frame without the server-issued event id is not an event projection.
+  const eventId = rawEventId;
   if (!eventId) return null;
   const timestamp = String(readValue(source, ['timestamp', 'sampleTime', 'sample_time']) || '');
     const presentation = operatorEventPresentation(source, advisoryLevel);
@@ -2310,9 +2309,9 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
   // "Canonical L0--L4 level for HMI and API consumers"). It is read FIRST;
   // publicLevel and formalEvalLevel remain as audit/context fields only.
   const advisoryLevel = normalizeBackendLevel(
-    readValue(source, ['advisory_level', 'advisoryLevel'])
+      readValue(source, ['advisory_level', 'advisoryLevel'])
       ?? readValue((readValue(source, ['warning', 'Warning']) as Record<string, unknown> | undefined) ?? {}, ['advisory_level', 'advisoryLevel'])
-      ?? latestLog?.publicLevel,
+      ?? latestLog?.advisoryLevel,
   );
   const publicLevel = normalizeBackendLevel(
     readValue(source, ['public_level', 'publicLevel', 'formal_eval_level', 'formalEvalLevel', 'confidence_level', 'confidenceLevel'])
@@ -2351,7 +2350,7 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
   const presentation = operatorEventPresentation(source, effectiveLevel);
   return {
     advisoryLevel,
-    publicLevel: Math.max(0, Math.min(4, effectiveLevel)) as BackendLevel,
+    publicLevel,
     formalEvalLevel,
     eventTitle: presentation.title || latestLog?.title || '',
     physicalDescription: presentation.description || latestLog?.description || '',
@@ -2361,7 +2360,7 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
     eventState: String(
       readValue(source, ['event_state', 'eventState'])
         || latestLog?.eventState
-        || (publicLevel >= 4 ? 'confirmed' : publicLevel >= 2 ? 'tracking' : publicLevel === 1 ? 'observing' : 'normal'),
+        || (advisoryLevel >= 4 ? 'confirmed' : advisoryLevel >= 2 ? 'tracking' : advisoryLevel === 1 ? 'observing' : 'normal'),
     ),
     pumpState: String(
       readValue(source, ['pump_state', 'pumpState'])
@@ -2370,7 +2369,7 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
         || 'Unknown',
     ),
     timestamp,
-    eventId: latestLog?.eventId || (publicLevel >= 1 ? frameEventId : null),
+    eventId: latestLog?.eventId || frameEventId,
     baselineValid,
     baselineWarmup,
     monitoringReady,
@@ -3773,7 +3772,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
             lastDate: eventEndTime.dateStr,
             count: entry.sampleCount || (alert.count || 1) + 1,
             backendLevel: entry.advisoryLevel,
-            peakBackendLevel: Math.max(alert.peakBackendLevel ?? alert.backendLevel, entry.publicLevel) as BackendLevel,
+            peakBackendLevel: Math.max(alert.peakBackendLevel ?? alert.backendLevel, entry.advisoryLevel) as BackendLevel,
             formalEvalLevel: entry.formalEvalLevel,
             peakFormalEvalLevel: Math.max(alert.peakFormalEvalLevel ?? alert.formalEvalLevel, entry.formalEvalLevel) as BackendLevel,
             activeSignals: entry.activeSignals,
@@ -3782,7 +3781,11 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           } : alert);
           return;
         }
-        if (entry.advisoryLevel < 2) return;
+        const normalizedEntryState = entry.eventState.trim().toLowerCase();
+        const isTerminal = normalizedEntryState === 'resolved'
+          || normalizedEntryState === 'closedunresolved'
+          || normalizedEntryState === 'closed_unresolved';
+        if (entry.advisoryLevel < 2 && !isTerminal) return;
         if (backendEventIdsRef.current.has(eventInstanceId) || backendEventKeysRef.current.has(eventKey)) return;
         backendEventIdsRef.current.add(eventInstanceId);
         backendEventKeysRef.current.add(eventKey);
@@ -3810,7 +3813,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           date: eventTime.dateStr,
           lastTime: eventEndTime.timeStr,
           lastDate: eventEndTime.dateStr,
-          level: entry.advisoryLevel >= 4 ? 'critical' as const : 'warning' as const,
+          level: entry.advisoryLevel >= 4 ? 'critical' as const : entry.advisoryLevel >= 2 ? 'warning' as const : 'info' as const,
           title: entry.title,
           description: entry.description,
           primaryParameter: entry.primaryParameter,
@@ -4386,9 +4389,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           const displayLevel = level;
           const presentation = operatorEventPresentation(row, displayLevel);
           const ackStatus = String(readValue(row, ['ack_status', 'ackStatus']) || 'unacknowledged');
-          const eventKey = eventId.includes(':') || !sessionCode
-            ? eventId
-            : `${sessionCode}:${eventId}`;
+          const eventKey = eventId;
           const backendEventId = `${realtimeWellId}:${eventKey}`;
           return [{
             id: Math.max(1, Math.round(warningId || index + 1)),

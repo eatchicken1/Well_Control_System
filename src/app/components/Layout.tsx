@@ -30,7 +30,7 @@ function backendLevelTone(level: BackendLevel) {
 }
 
 function HeaderBackendLevelChip({ detection }: { detection: ReturnType<typeof useWellControl>['backendDetection'] }) {
-  const level = safeBackendLevel(detection.publicLevel);
+  const level = safeBackendLevel(detection.advisoryLevel);
   const visual = backendLevelTone(level);
   const meta = BACKEND_LEVEL_META[level];
   return (
