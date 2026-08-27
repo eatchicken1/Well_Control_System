@@ -3,6 +3,7 @@ import { AlertTriangle, Database, Download, Eye, RefreshCw, X } from 'lucide-rea
 import { useWellControl, type AlertStatus, type BackendLevel } from '../context/WellControlContext';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
+import { operatorEventPresentation } from '../lib/operatorEventPresentation';
 import { authenticatedFetch } from '../api/authToken';
 
 type DbHistoryRecord = {
@@ -36,6 +37,10 @@ type DbHistoryRecord = {
   reference_learning_action?: string;
   evidence_severity?: string;
   primary_hypothesis?: string;
+  event_title?: string;
+  physical_description?: string;
+  primary_parameter?: string;
+  abnormal_parameters?: string[];
   lifecycle_state?: string;
   data_quality?: string;
   missing_observations?: string[];
@@ -158,6 +163,10 @@ function normalizeHistoryRecord(value: unknown): DbHistoryRecord {
         .filter(Boolean)
         .join(',')
       : readNested(evidence, 'supportingSignals'));
+  const presentation = operatorEventPresentation(row, alertLevel);
+  const normalizedSignals = presentation.abnormalParameters.length > 0
+    ? presentation.abnormalParameters
+    : (Array.isArray(activeSignals) ? activeSignals.map(String) : String(activeSignals || '').split(/[,、;；]/g).map((item) => item.trim()).filter(Boolean));
   return {
     ...row,
     id: Number(read('id')) || undefined,
@@ -169,8 +178,12 @@ function normalizeHistoryRecord(value: unknown): DbHistoryRecord {
     formal_eval_level: hasFiniteValue(read('formal_eval_level', 'formalEvalLevel')) ? finite(read('formal_eval_level', 'formalEvalLevel')) as BackendLevel : undefined,
     highest_level: hasFiniteValue(highestLevel) ? finite(highestLevel) as BackendLevel : undefined,
     event_id: String(read('event_id', 'eventId') ?? readNested(candidate, 'candidateId', 'candidate_id') ?? ''),
-    reason: String(read('reason') ?? readNested(alert, 'reason') ?? ''),
-    active_signals: Array.isArray(activeSignals) ? activeSignals.join(',') : String(activeSignals || ''),
+    reason: presentation.description,
+    active_signals: normalizedSignals.join(','),
+    event_title: presentation.title,
+    physical_description: presentation.description,
+    primary_parameter: presentation.primaryParameter,
+    abnormal_parameters: normalizedSignals,
     cycle_resolution: String(read('cycle_resolution', 'cycleResolution') || ''),
     reference_learning_action: String(read('reference_learning_action', 'referenceLearningAction') || ''),
     evidence_severity: String(read('evidence_severity', 'evidenceSeverity') ?? readNested(evidence, 'severity') ?? ''),
@@ -370,7 +383,7 @@ export default function History() {
   const replayEndLabel = displayTime(visiblePayload?.endTime || currentSampleTime || wellInfo.endTime || timeBounds.lastTime || toQueryDateTime(selectedStartTime));
 
   const exportCSV = () => {
-    const headers = ['时间', '工况', '入口流量(L/s)', '出口流量(L/s)', '总池体积(m3)', 'SPM', '立管压力(MPa)', '套管压力(MPa)', '全烃(%)', '报警等级', '证据', '原因'];
+    const headers = ['时间', '工况', '入口流量(L/s)', '出口流量(L/s)', '总池体积(m3)', 'SPM', '立管压力(MPa)', '套管压力(MPa)', '全烃(%)', '报警等级', '事件', '异常参数', '现场变化'];
     const rows = records.map((record) => [
       displayTime(record.timestamp || record.sample_time),
       record.condition || record.pump_state || '',
@@ -382,8 +395,9 @@ export default function History() {
       formatDbNumber(record.cp, 2, ''),
       formatDbNumber(record.gas, 2, ''),
       hasFiniteValue(record.public_level) ? `L${finite(record.public_level)}` : '',
-      record.evidence_severity || record.active_signals || '',
-      record.reason || '',
+      record.event_title || '',
+      record.abnormal_parameters?.join('、') || record.active_signals || '',
+      record.physical_description || record.reason || '',
     ].map(csvCell).join(','));
     const blob = new Blob(['\uFEFF' + [headers.map(csvCell).join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -512,7 +526,8 @@ export default function History() {
               <th className="text-right">立管压力</th>
               <th className="text-right">全烃</th>
               <th className="text-center">报警等级</th>
-              <th className="text-left">证据</th>
+              <th className="text-left">事件</th>
+              <th className="text-left">异常参数</th>
               <th className="text-right">详情</th>
                 </tr>
               </thead>
@@ -539,7 +554,10 @@ export default function History() {
                           {hasLevel ? `L${level} ${STATUS_LABELS[status]}` : '-- 未知'}
                         </span>
                       </td>
-                      <td className="max-w-[180px] truncate text-xs ops-muted" title={record.reason || undefined}>{record.evidence_severity || activeSignalList(record.active_signals).join('、') || '--'}</td>
+                      <td className="max-w-[240px] truncate text-xs font-medium text-slate-800 dark:text-slate-100" title={record.physical_description || undefined}>
+                        {record.event_title || (hasLevel ? operatorEventPresentation(record, level).title : '当前未发现需提示的参数异常')}
+                      </td>
+                      <td className="max-w-[180px] truncate text-xs ops-muted" title={record.physical_description || undefined}>{record.abnormal_parameters?.join('、') || activeSignalList(record.active_signals).join('、') || '--'}</td>
                       <td className="text-right">
                         <button type="button" onClick={() => setSelected(record)} className="ops-button-secondary px-2 py-1 text-xs" aria-label={`查看 ${displayTime(record.timestamp || record.sample_time)} 复核详情`}>
                           <Eye className="h-3.5 w-3.5" />
@@ -567,6 +585,8 @@ export default function History() {
                         {hasLevel ? `L${level} ${STATUS_LABELS[status]}` : '-- 未知'}
                       </span>
                     </div>
+                    <div className="mt-2 text-sm font-semibold leading-5 text-slate-900 dark:text-slate-100">{record.event_title || (hasLevel ? operatorEventPresentation(record, level).title : '当前未发现需提示的参数异常')}</div>
+                    <div className="mt-1 text-xs leading-5 ops-muted">{record.physical_description || '当前记录未保存可读的现场变化描述。'}</div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                       <div className="ops-inline-tile min-w-0 p-2">
                         <div className="ops-muted">入口流量</div>
@@ -626,7 +646,7 @@ export default function History() {
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
                 <div className="ops-eyebrow">复核详情</div>
-                <h3 id="history-detail-title" className="text-base font-semibold text-slate-900 dark:text-slate-100">复核详情</h3>
+                <h3 id="history-detail-title" className="text-base font-semibold text-slate-900 dark:text-slate-100">{selected.event_title || '复核详情'}</h3>
               </div>
               <button type="button" className="ops-button-secondary px-2 py-1" onClick={() => setSelected(null)} title="关闭复核详情" aria-label="关闭复核详情" autoFocus><X className="h-4 w-4" /></button>
             </div>
@@ -636,12 +656,8 @@ export default function History() {
               <div className="ops-inline-tile p-2"><span className="ops-muted">事件 ID </span>{selected.event_id || '--'}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">事件最高等级 </span>{backendLevelText(selected.highest_level)}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">内部正式评估 </span>{backendLevelText(selected.formal_eval_level)}</div>
-              <div className="ops-inline-tile p-2"><span className="ops-muted">跨周期解析 </span>{selected.cycle_resolution || '--'}</div>
-              <div className="ops-inline-tile p-2"><span className="ops-muted">参考学习动作 </span>{selected.reference_learning_action || '--'}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">工况 </span>{selected.condition || selected.pump_state || '--'}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">生命周期 </span>{selected.lifecycle_state || '--'}</div>
-              <div className="ops-inline-tile p-2"><span className="ops-muted">证据强度 </span>{selected.evidence_severity || '--'}</div>
-              <div className="ops-inline-tile p-2"><span className="ops-muted">主导假设 </span>{selected.primary_hypothesis || '--'}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">入口流量 </span>{formatDbNumberWithSpacedUnit(selected.inlet_smooth, 2, 'L/s')}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">出口流量 </span>{formatDbNumberWithSpacedUnit(selected.outlet_smooth, 2, 'L/s')}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">总池体积 </span>{formatDbNumberWithSpacedUnit(selected.pool_smooth, 2, 'm3')}</div>
@@ -651,9 +667,11 @@ export default function History() {
               <div className="ops-inline-tile p-2"><span className="ops-muted">全烃 </span>{formatDbNumberWithUnit(selected.gas, 2, '%')}</div>
               <div className="ops-inline-tile p-2"><span className="ops-muted">数据质量 </span>{selected.data_quality || '--'}</div>
             </div>
-            <div id="history-detail-summary" className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="font-medium text-slate-900 dark:text-slate-100">判定原因</div>
-              <div className="ops-break-text mt-1 ops-muted">{selected.reason || '当前记录未触发报警事件原因。'}</div>
+            <div id="history-detail-summary" className="mt-3 rounded-md border border-cyan-200 bg-cyan-50/70 p-3 text-sm dark:border-cyan-900/60 dark:bg-cyan-950/20">
+              <div className="font-medium text-slate-900 dark:text-slate-100">现场变化</div>
+              <div className="mt-1 text-base font-semibold leading-6 text-slate-900 dark:text-slate-100">{selected.event_title || '当前记录未发现需提示的参数异常'}</div>
+              <div className="ops-break-text mt-1 leading-6 text-slate-700 dark:text-slate-200">{selected.physical_description || selected.reason || '当前记录未保存可读的现场变化描述。'}</div>
+              {selected.primary_parameter && <div className="mt-2 text-xs text-cyan-900 dark:text-cyan-100">主要异常参数：{selected.primary_parameter}</div>}
               {selected.missing_observations && selected.missing_observations.length > 0 && (
                 <div className="mt-2 text-xs text-amber-700 dark:text-amber-200">缺失观测：{selected.missing_observations.join('、')}</div>
               )}
@@ -663,6 +681,15 @@ export default function History() {
                 ))}
               </div>
             </div>
+            <details className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-sm dark:border-slate-800 dark:bg-slate-950">
+              <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-200">算法追溯（专家复核）</summary>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <div className="ops-inline-tile p-2"><span className="ops-muted">证据强度 </span>{selected.evidence_severity || '--'}</div>
+                <div className="ops-inline-tile p-2"><span className="ops-muted">主导假设 </span>{selected.primary_hypothesis || '--'}</div>
+                <div className="ops-inline-tile p-2"><span className="ops-muted">跨周期解析 </span>{selected.cycle_resolution || '--'}</div>
+                <div className="ops-inline-tile p-2"><span className="ops-muted">参考学习动作 </span>{selected.reference_learning_action || '--'}</div>
+              </div>
+            </details>
           </div>
         </div>
       )}

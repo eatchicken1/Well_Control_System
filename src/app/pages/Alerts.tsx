@@ -19,6 +19,7 @@ import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
+import { operatorEventPresentation } from '../lib/operatorEventPresentation';
 import {
   acknowledgeWarningEvent,
   acknowledgeWarningEvents,
@@ -85,16 +86,21 @@ function lifecycleKey(event: WarningEventReviewItem) {
 
 function isEnded(event: WarningEventReviewItem) {
   const state = lifecycleKey(event);
-  return event.status.toLowerCase() === 'ended' || state === 'ended' || state === 'resolved' || state === 'closed';
+  return event.status.toLowerCase() === 'ended'
+    || state === 'ended'
+    || state === 'resolved'
+    || state === 'closed'
+    || state === 'closedunresolved';
 }
 
 function lifecycleLabel(event: WarningEventReviewItem) {
   if (event.isAcknowledged) return '已确认';
-  if (isEnded(event)) return '已结束';
   const state = lifecycleKey(event);
+  if (isEnded(event)) return state === 'closedunresolved' ? '已关闭·未解除' : '已结束';
   if (state === 'tracking') return '持续跟踪';
-  if (state === 'observing') return '异常观察';
+  if (state === 'observing' || state === 'watch') return '异常观察';
   if (state === 'recovering') return '恢复观察';
+  if (state === 'hold') return '保持（解释冻结）';
   if (state === 'confirmed') return '风险确认';
   return event.status === 'active' ? '活动事件' : event.status || '待确认';
 }
@@ -130,9 +136,11 @@ function cleanTechnicalText(value?: string | null) {
 
 function plainEventState(value?: string | null) {
   const state = String(value || '').trim().toLowerCase();
-  if (['active', 'tracking', 'observing', 'suspected'].includes(state)) return '异常仍在持续，需继续观察';
+  if (['active', 'tracking', 'observing', 'suspected', 'watch', 'open'].includes(state)) return '异常仍在持续，需继续观察';
   if (['confirmed'].includes(state)) return '异常已确认';
-  if (['recovering'].includes(state)) return '参数正在恢复，暂不能解除观察';
+  if (['recovering', 'recovery'].includes(state)) return '参数正在恢复，暂不能解除观察';
+  if (state === 'hold') return '事件保持：解释框架切换/数据间断，事件身份保留，参考学习冻结';
+  if (state === 'closedunresolved') return '事件已关闭（未解除）';
   if (['closed', 'resolved', 'ended'].includes(state)) return '事件已结束';
   return '等待更多现场数据';
 }
@@ -169,11 +177,11 @@ function currentParameterValue(parameter: string, frame?: WarningEventLatestFram
 }
 
 function parameterMeaning(parameter: string, direction: string) {
-  if (parameter === '出口流量' && direction === 'up') return '返出量增大，需核对是否超过入口排量及正常波动范围。';
+  if (parameter === '出口流量' && direction === 'up') return '出口流量增大，需核对是否超过入口排量及正常波动范围。';
   if (parameter === '总池体积' && direction === 'up') return '池体积持续增加，是判断井筒流体增加的重要现场信号。';
   if (parameter === '立管压力' && direction === 'down') return '立压下降可能与井筒流体性质或循环状态变化有关，需结合泵冲和排量复核。';
   if (parameter === '套管压力' && direction === 'up') return '套压上升需关注井口压力变化，并核对是否处于关井或憋压工况。';
-  if (parameter === '气测' && direction === 'up') return '气测升高说明返出流体含气增加，需结合迟到时间和钻遇层位判断。';
+  if (parameter === '气测' && direction === 'up') return '气测升高说明出口流体含气增加，需结合迟到时间和钻遇层位判断。';
   if (parameter === '钻速' && direction === 'up') return '钻速突然加快可能提示地层变化，应结合岩性和其他参数判断。';
   return '该参数偏离近期正常状态，需要结合工况和相邻参数继续核对。';
 }
@@ -242,6 +250,12 @@ function filteredEvents(
 ) {
   return events
     .filter((event) => {
+      // L0/L1 do not belong in the formal alarm list: L1 is the advisory
+      // observation lane on the monitoring page. Keeping them here would
+      // visually promote an early weak precursor to "L2 formal" via the
+      // L2+ visual floor below - the opposite of the L0-L4 escalation
+      // semantics.
+      if (eventLevel(event) < 2) return false;
       if (levelFilter !== 'all' && eventLevel(event) !== Number(levelFilter)) return false;
       if (acknowledgementFilter === 'unacknowledged' && event.isAcknowledged) return false;
       if (acknowledgementFilter === 'acknowledged' && !event.isAcknowledged) return false;
@@ -462,7 +476,7 @@ export default function Alerts() {
         <div className="flex items-start gap-2">
           <Eye className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-300" />
           <div>
-            <div className="font-semibold text-cyan-950 dark:text-cyan-100">现场先看：等级、状态、触发信号、算法原因</div>
+            <div className="font-semibold text-cyan-950 dark:text-cyan-100">现场先看：等级、异常参数和实际变化</div>
             <div className="mt-0.5 text-xs text-cyan-900/75 dark:text-cyan-100/75">“确认”会写入后端确认审计表；算法候选没有 warning_id 时只展示，不允许伪确认。</div>
           </div>
         </div>
@@ -563,6 +577,7 @@ export default function Alerts() {
 
 function AlertRow({ event, busy, onDetail, onAcknowledge }: { event: WarningEventReviewItem; busy: boolean; onDetail: () => void; onAcknowledge: () => void }) {
   const level = eventLevel(event);
+  const presentation = operatorEventPresentation(event, level);
   const visual = LEVEL_VISUAL[visualLevel(level)];
   const Icon = visual.icon;
   const canAcknowledge = event.warningId > 0 && !event.isAcknowledged;
@@ -580,12 +595,13 @@ function AlertRow({ event, busy, onDetail, onAcknowledge }: { event: WarningEven
             {event.needsManualReview && <span className="rounded bg-violet-100 px-2 py-1 text-[11px] font-semibold text-violet-800 dark:bg-violet-500/15 dark:text-violet-100">需人工复核</span>}
             <span className="text-xs ops-muted">{event.startTime} · {formatDuration(event.startTime, event.endTime)}</span>
           </div>
-          <div className="mt-2 text-sm font-medium leading-6 text-slate-900 dark:text-slate-100">{cleanTechnicalText(event.reason) || `系统发现${visibleSignals.join('、') || '多项参数偏离近期正常状态'}，请打开详情核对具体变化。`}</div>
+          <div className="mt-2 text-base font-semibold leading-6 text-slate-950 dark:text-slate-100">{presentation.title}</div>
+          <div className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-200">{presentation.description}</div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs ops-muted">
             <span>事件 {event.warningCode || event.eventId}</span>
             <span>Session {event.sessionCode || '—'}</span>
             <span>样本 {event.sampleCount}</span>
-            {event.primarySignal && <span>主信号 {backendSignalLabel(event.primarySignal)}</span>}
+            {event.primaryParameter && <span>主要异常参数 {event.primaryParameter}</span>}
             {event.isAcknowledged && <span>确认人 {event.acknowledgedBy || '—'} · {event.acknowledgedAt || '—'}</span>}
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -605,9 +621,21 @@ function ReviewDetailDrawer({ detail, loading, error, comment, onCommentChange, 
   const event = detail?.event;
   const frame = detail?.latestFrame;
   const level = event ? eventLevel(event) : 0;
-  const signals = frame?.activeSignals ? frame.activeSignals.split(',').map((item) => item.trim()).filter(Boolean) : event?.activeSignals || [];
+  const signals = frame?.abnormalParameters?.length
+    ? frame.abnormalParameters
+    : frame?.activeSignals
+      ? frame.activeSignals.split(/[,、;；]/g).map((item) => item.trim()).filter(Boolean)
+      : event?.abnormalParameters?.length
+        ? event.abnormalParameters
+        : event?.activeSignals || [];
   const parameterChanges = abnormalParameters(signals, frame);
   const checks = operatorChecks(parameterChanges);
+  const presentation = event ? operatorEventPresentation({
+    ...event,
+    eventTitle: event.eventTitle,
+    physicalDescription: frame?.physicalDescription || event.physicalDescription,
+    abnormalParameters: signals,
+  }, level) : null;
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/45" onClick={onClose}>
       <aside className="h-full w-full max-w-[920px] overflow-hidden bg-slate-50 shadow-2xl dark:bg-slate-950" role="dialog" aria-modal="true" aria-labelledby="warning-review-detail-title" onClick={(click) => click.stopPropagation()}>
@@ -615,7 +643,7 @@ function ReviewDetailDrawer({ detail, loading, error, comment, onCommentChange, 
           <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
             <div className="min-w-0">
               <div className="ops-eyebrow">报警详情 · 现场复核</div>
-              <h2 id="warning-review-detail-title" className="mt-1 truncate text-lg font-semibold text-slate-900 dark:text-slate-100">{event?.wellName || '报警事件'} · {event ? `${event.startTime || '时间未知'} 发现异常` : '加载中'}</h2>
+              <h2 id="warning-review-detail-title" className="mt-1 truncate text-lg font-semibold text-slate-900 dark:text-slate-100">{event?.wellName || '报警事件'} · {presentation?.title || '加载中'}</h2>
               {event && <div className="mt-2 flex flex-wrap gap-2 text-xs"><span className={`rounded px-2 py-1 font-semibold ${LEVEL_VISUAL[visualLevel(level)].badge}`}>L{level} {BACKEND_LEVEL_META[level].label}</span><span className="ops-inline-tile px-2 py-1">{lifecycleLabel(event)}</span><span className="ops-inline-tile px-2 py-1">持续 {formatDuration(event.startTime, event.endTime)}</span></div>}
             </div>
             <button type="button" className="ops-button-secondary px-2 py-1" onClick={onClose} aria-label="关闭事件详情"><X className="h-4 w-4" /></button>
@@ -628,8 +656,9 @@ function ReviewDetailDrawer({ detail, loading, error, comment, onCommentChange, 
               <>
                 <section className="rounded-xl border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
                   <div className="flex items-center gap-2 text-xs font-semibold text-cyan-900 dark:text-cyan-100"><Eye className="h-4 w-4" />先看结论</div>
-                  <p className="mt-2 text-base font-semibold leading-7 text-slate-900 dark:text-slate-100">{fieldConclusion(event, signals, frame)}</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">当前状态：{plainEventState(event.candidateState || event.status)}。系统结论用于提示复核，是否处置应结合当前作业工况和现场核对结果。</p>
+                  <p className="mt-2 text-base font-semibold leading-7 text-slate-900 dark:text-slate-100">{presentation?.title || fieldConclusion(event, signals, frame)}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{presentation?.description || fieldConclusion(event, signals, frame)}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">当前状态：{plainEventState(event.candidateState || event.status)}。系统提示用于现场复核，是否处置应结合当前作业工况和现场核对结果。</p>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3"><SummaryMetric label="当前等级" value={event.currentLevel} /><SummaryMetric label="最高等级" value={event.highestLevel} /><SummaryMetric label="已分析样本" value={event.sampleCount} /></div>
                 </section>
 

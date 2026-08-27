@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import type { BackendLevel, CycleInfo } from '../context/WellControlContext';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
 import type { WellboreStructureSection } from '../lib/wellboreSimulation';
+import { operatorEventPresentation } from '../lib/operatorEventPresentation';
 import { WellboreSchemaFigure } from './WellboreSchemaFigure';
 
 function formatDepth(value?: number | null) {
@@ -15,6 +16,8 @@ export interface WellboreStatusViewProps {
   bitDepth?: number | null;
   formation?: string;
   backendLevel: BackendLevel;
+  eventTitle?: string;
+  physicalDescription?: string;
   activeSignals: string[];
   pumpState?: string;
   condition?: string;
@@ -50,6 +53,13 @@ export function WellboreStatusThumbnail(props: WellboreStatusViewProps) {
   });
   const meta = getWellboreStateMeta(state);
   const conditionLabel = formatWellboreConditionLabel(props.condition);
+  const eventPresentation = operatorEventPresentation({
+    publicLevel: props.backendLevel,
+    eventTitle: props.eventTitle,
+    physicalDescription: props.physicalDescription,
+    activeSignals: props.activeSignals,
+  }, props.backendLevel);
+  const eventTitle = eventPresentation.title || meta.label;
   const openDetail = () => navigate('/monitoring/wellbore-status');
 
   return (
@@ -61,6 +71,7 @@ export function WellboreStatusThumbnail(props: WellboreStatusViewProps) {
             <h2>井筒状态缩略图</h2>
             <span className="wellbore-thumbnail-level" data-tone={meta.tone}>L{props.backendLevel}</span>
           </div>
+          <div className="mt-1 truncate text-xs font-semibold text-slate-800 dark:text-slate-100" title={props.physicalDescription || undefined}>{eventTitle}</div>
         </div>
         <button type="button" className="wellbore-ghost-button" onClick={openDetail}><Maximize2 size={14} />点击放大</button>
       </header>
@@ -81,6 +92,8 @@ export function WellboreStatusThumbnail(props: WellboreStatusViewProps) {
           totalGas={props.totalGas}
           mudWeight={props.mudWeight}
           backendLevel={props.backendLevel}
+          eventTitle={props.eventTitle}
+          physicalDescription={props.physicalDescription}
           activeSignals={props.activeSignals}
           pumpState={props.pumpState}
           condition={props.condition}

@@ -52,7 +52,10 @@ function clockLabel(value: string) {
 
 function lifecycleLabel(status: MonitoringLifecycleStatus) {
   if (status === 'active') return '进行中';
+  if (status === 'hold') return '保持（解释冻结）';
+  if (status === 'watching') return '观察中';
   if (status === 'recovering') return '恢复中';
+  if (status === 'closedUnresolved') return '已关闭·未解除';
   return '已结束';
 }
 
@@ -88,6 +91,7 @@ function EventRow({ item, onOpen }: { item: MonitoringEventStreamItem; onOpen?: 
         <span>持续 {durationLabel(item.duration)}</span>
         {item.kind === 'alarm' ? <><span aria-hidden="true">·</span><span>{item.isActive ? `当前 L${item.currentLevel}` : `当前 L${item.currentLevel} · ${lifecycleLabel(item.lifecycleStatus)}`}</span></> : null}
       </div>
+      {item.description ? <div className="mt-1 line-clamp-2 pl-5 text-[10px] leading-4 text-slate-600 dark:text-slate-300">{item.description}</div> : null}
     </>
   );
 
@@ -96,7 +100,7 @@ function EventRow({ item, onOpen }: { item: MonitoringEventStreamItem; onOpen?: 
     <button type="button" className={`${classes} hover:brightness-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-600`} onClick={onOpen} aria-label={`查看当前 L${item.currentLevel}、峰值 L${item.peakLevel} 告警事件详情：${item.message}`}>
       {content}
     </button>
-  ) : <div className={classes} aria-label={`L1 观察事件：${item.message}`}>{content}</div>;
+  ) : <div className={classes} aria-label={`查看事件：${item.message}`}>{content}</div>;
 }
 
 export function MonitoringEventStream({

@@ -29,6 +29,13 @@ function dataDelaySeconds(lastRecordAt: string | null) {
   return Math.max(0, (Date.now() - parsed) / 1000);
 }
 
+function hasEventSignal(signals: string[], tokens: string[]) {
+  return signals.some((signal) => {
+    const normalized = String(signal || '').toLowerCase();
+    return tokens.some((token) => normalized.includes(token.toLowerCase()));
+  });
+}
+
 function Sparkline({ values, color = '#0f766e' }: { values: Array<number | null | undefined>; color?: string }) {
   const finiteValues = values.filter((value): value is number => Number.isFinite(value)).slice(-24);
   const points = finiteValues.length >= 2 ? finiteValues : [0, 0];
@@ -190,7 +197,8 @@ export default function WellboreStatusDetail() {
       : wellboreProfileStatus === 'empty'
         ? '井身结构：数据库暂无资料，当前使用设计模板'
         : '井身结构：接口暂不可用，当前使用设计模板';
-  const stateDescription = abnormal ? meta.description : watch ? '参数出现轻微偏离，进入观察窗口但尚未形成溢流证据链。' : '关键参数处于基线范围内，未触发预警证据。';
+  const stateDescription = displayDetection.physicalDescription
+    || (abnormal ? meta.description : watch ? '参数出现轻微偏离，进入观察窗口但尚未形成溢流证据链。' : '关键参数处于基线范围内，未触发预警证据。');
   const pressureRelation = (displayData.mudWeight ?? 0) > 0
       ? `MW ${format(displayData.mudWeight, 2)} g/cm³；PP / ECD 数据不足`
       : '压力关系：数据不足';
@@ -206,16 +214,12 @@ export default function WellboreStatusDetail() {
     : isTrueFlow
       ? (configuredOutletUnit && !/^unknown$/i.test(configuredOutletUnit) ? configuredOutletUnit : 'L/s')
       : (configuredOutletUnit && !/^unknown$/i.test(configuredOutletUnit) ? configuredOutletUnit : '--');
-  const outletLabel = isValveOpening
-    ? '出口挡板开度'
-    : isTrueFlow
-      ? '出口流量'
-      : '出口信号';
+  const outletLabel = '出口流量';
   const outletChangeText = isValveOpening
-    ? '当前通道语义：阀门开度'
+    ? '当前通道为代理测量，数值单位保持原配置；仅用于出口流量趋势观察'
     : isTrueFlow
       ? '当前通道语义：真实出口流量'
-      : '语义未配置';
+      : '当前通道语义待确认';
   const pressureResidual = displayData.spp !== null && displayData.sppPredicted !== null
     ? displayData.spp - displayData.sppPredicted
     : undefined;
@@ -232,8 +236,8 @@ export default function WellboreStatusDetail() {
       unit: outletUnit,
       change: outletChangeText,
       duration: evidenceDuration,
-      grade: abnormal && displayDetection.activeSignals.includes('OutletIncreaseResidual') ? '主证据' : '正常',
-      tone: abnormal && displayDetection.activeSignals.includes('OutletIncreaseResidual') ? 'critical' : 'normal',
+      grade: abnormal && hasEventSignal(displayDetection.activeSignals, ['OutletIncreaseResidual', '出口流量持续升高']) ? '主证据' : '正常',
+      tone: abnormal && hasEventSignal(displayDetection.activeSignals, ['OutletIncreaseResidual', '出口流量持续升高']) ? 'critical' : 'normal',
       Icon: Activity,
     },
     {
@@ -242,12 +246,12 @@ export default function WellboreStatusDetail() {
       unit: 'm³',
       change: `较基线 +${format(displayData.pitGain, 2)} m³`,
       duration: evidenceDuration,
-      grade: abnormal && (displayDetection.activeSignals.includes('pit_volume') || displayDetection.activeSignals.includes('pit_gain')) ? '支持证据' : '正常',
-      tone: abnormal && (displayDetection.activeSignals.includes('pit_volume') || displayDetection.activeSignals.includes('pit_gain')) ? 'warning' : 'normal',
+      grade: abnormal && hasEventSignal(displayDetection.activeSignals, ['pit_volume', 'pit_gain', '总池体积']) ? '支持证据' : '正常',
+      tone: abnormal && hasEventSignal(displayDetection.activeSignals, ['pit_volume', 'pit_gain', '总池体积']) ? 'warning' : 'normal',
       Icon: Database,
     },
     {
-      label: abnormal ? '立压' : '立压残差',
+      label: '立压',
       value: format(displayData.spp, 2),
       unit: 'MPa',
       change: pressureResidual === undefined
@@ -255,7 +259,7 @@ export default function WellboreStatusDetail() {
         : `较参考 ${pressureResidual >= 0 ? '+' : ''}${format(pressureResidual, 2)} MPa`,
       duration: evidenceDuration,
       grade: abnormal ? '辅助观察' : '正常',
-      tone: abnormal && (displayDetection.activeSignals.includes('standpipe_pressure') || displayDetection.activeSignals.includes('spp_drop')) ? 'warning' : 'normal',
+      tone: abnormal && hasEventSignal(displayDetection.activeSignals, ['standpipe_pressure', 'spp_drop', 'PressureDropResidual', 'PressureRiseResidual', '立压']) ? 'warning' : 'normal',
       Icon: Gauge,
     },
     {
@@ -266,22 +270,22 @@ export default function WellboreStatusDetail() {
         ? '等待上一有效样本'
         : `较上一有效样本 ${gasChange >= 0 ? '+' : ''}${format(gasChange, 2)}%`,
       duration: evidenceDuration,
-      grade: abnormal && displayDetection.activeSignals.includes('total_gas') ? '支持证据' : '正常',
-      tone: abnormal && displayDetection.activeSignals.includes('total_gas') ? 'critical' : 'normal',
+      grade: abnormal && hasEventSignal(displayDetection.activeSignals, ['total_gas', 'GasDelayedRise', '全烃']) ? '支持证据' : '正常',
+      tone: abnormal && hasEventSignal(displayDetection.activeSignals, ['total_gas', 'GasDelayedRise', '全烃']) ? 'critical' : 'normal',
       Icon: Flame,
     },
   ] as const;
 
   const timeline = useMemo(() => {
-    const alertEvents = currentWellAlerts.slice(0, 4).map((alert) => ({ time: alert.time, text: alert.message }));
+    const alertEvents = currentWellAlerts.slice(0, 4).map((alert) => ({ time: alert.time, text: alert.title || alert.message }));
     if (alertEvents.length > 0) return alertEvents;
 
     return [
-      { time: selectedWellView.currentSampleTime?.slice(11, 16) || '--:--', text: level >= 2 ? '返出响应未完全回落' : '进入稳定监测窗口' },
+      { time: selectedWellView.currentSampleTime?.slice(11, 16) || '--:--', text: level > 0 ? displayDetection.eventTitle : '进入稳定监测窗口' },
       { time: cycle.tStopPump || cycle.tStable || '--:--', text: level >= 2 ? '池体积开始偏离' : '基线状态保持有效' },
       { time: cycle.tStartPump || '--:--', text: level >= 2 ? `${conditionLabel}窗口持续跟踪` : '无未确认报警' },
     ];
-  }, [conditionLabel, currentWellAlerts, cycle.tStable, cycle.tStartPump, cycle.tStopPump, level, selectedWellView.currentSampleTime]);
+  }, [conditionLabel, currentWellAlerts, cycle.tStable, cycle.tStartPump, cycle.tStopPump, displayDetection.eventTitle, level, selectedWellView.currentSampleTime]);
 
   const trendSeries = [
     { label: `${outletLabel}${outletUnit === '--' ? '' : `（${outletUnit}）`}`, values: selectedWellView.flowHistory.map((item) => item.flowOut), color: '#dc2626' },
@@ -310,6 +314,8 @@ export default function WellboreStatusDetail() {
             <WellboreSchemaFigure
               mode="detail"
               backendLevel={level}
+              eventTitle={displayDetection.eventTitle}
+              physicalDescription={displayDetection.physicalDescription}
               wellDepth={structureDepth}
               bitDepth={displayData.bitDepth ?? structureDepth}
               casingShoeDepth={casingShoeDepth}
@@ -348,7 +354,7 @@ export default function WellboreStatusDetail() {
         <aside className="wellbore-detail-side">
           <section className="wellbore-detail-side-card" data-tone={meta.tone}>
             <div className="wellbore-detail-summary-top">
-              <div className="wellbore-status-hero"><span>L{level}</span><strong>{LEVEL_LABELS[level]}</strong></div>
+              <div className="wellbore-status-hero"><span>L{level}</span><strong>{displayDetection.eventTitle || LEVEL_LABELS[level]}</strong></div>
               <dl>
                 <div><dt>当前工况</dt><dd>{conditionLabel}</dd></div>
                 <div><dt>压力关系</dt><dd>{pressureRelation}</dd></div>
@@ -412,4 +418,3 @@ export default function WellboreStatusDetail() {
     </div>
   );
 }
-

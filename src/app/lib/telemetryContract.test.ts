@@ -42,13 +42,13 @@ test('outlet semantic label: TrueFlow → 出口流量', () => {
   assert.equal(outletDisplayLabel('TrueReturnFlow'), '出口流量');
 });
 
-test('outlet semantic label: Paddle → 出口挡板开度', () => {
-  assert.equal(outletDisplayLabel('ValveOpeningProxy'), '出口挡板开度');
+test('outlet semantic label: proxy → 出口流量', () => {
+  assert.equal(outletDisplayLabel('ValveOpeningProxy'), '出口流量');
 });
 
-test('outlet semantic label: Unknown → 出口信号', () => {
-  assert.equal(outletDisplayLabel('UnknownProxy'), '出口信号');
-  assert.equal(outletDisplayLabel(undefined), '出口信号');
+test('outlet semantic label: Unknown → 出口流量', () => {
+  assert.equal(outletDisplayLabel('UnknownProxy'), '出口流量');
+  assert.equal(outletDisplayLabel(undefined), '出口流量');
 });
 
 test('outlet display unit: ValveOpening → %', () => {

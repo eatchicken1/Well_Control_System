@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { REPLAY_SPEED_OPTIONS, useWellControl, type Alert, type BackendLevel, type MonitoringMode, type ReplaySpeed, type WellInfo, type WellRuntimeState } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
+import { operatorEventPresentation } from '../lib/operatorEventPresentation';
 
 function safeBackendLevel(value: unknown): BackendLevel {
   const level = Number(value);
@@ -643,13 +644,21 @@ function EventOverview({ selectedAlerts }: { selectedAlerts: Alert[] }) {
             </div>
           </div>
         ) : (
-          visible.map((alert) => (
+          visible.map((alert) => {
+            const presentation = operatorEventPresentation({
+              publicLevel: alert.backendLevel,
+              eventTitle: alert.title,
+              physicalDescription: alert.description,
+              primaryParameter: alert.primaryParameter,
+              activeSignals: alert.activeSignals,
+            }, alert.backendLevel);
+            return (
             <button
               key={alert.id}
               type="button"
               onClick={() => navigate('/alerts')}
               className={`multiwell-event-card ${safeBackendLevel(alert.backendLevel) >= 4 ? 'multiwell-event-critical' : 'multiwell-event-warning'}`}
-              aria-label={`查看 ${alert.wellName || alert.wellId || '当前井'} L${safeBackendLevel(alert.backendLevel)} 报警事件`}
+              aria-label={`查看 ${alert.wellName || alert.wellId || '当前井'} 事件：${presentation.title}`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -661,14 +670,16 @@ function EventOverview({ selectedAlerts }: { selectedAlerts: Alert[] }) {
                   {safeBackendLevel(alert.peakBackendLevel ?? alert.backendLevel) > safeBackendLevel(alert.backendLevel) ? ` / 峰L${safeBackendLevel(alert.peakBackendLevel)}` : ''}
                 </span>
               </div>
-              <div className="mt-2 line-clamp-2 text-xs text-slate-700 dark:text-slate-200">{alert.message}</div>
+              <div className="mt-2 line-clamp-2 text-xs font-semibold text-slate-800 dark:text-slate-100">{presentation.title}</div>
+              {presentation.description ? <div className="mt-1 line-clamp-2 text-[11px] text-slate-600 dark:text-slate-300">{presentation.description}</div> : null}
               <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
                 <span>井深 {formatNumber(alert.wellDepth, ' m')}</span>
                 <span>钻头 {formatNumber(alert.bitDepth, ' m')}</span>
                 <span className="col-span-2 truncate">层位 {cleanLayerLabel(alert.formation) || '--'}</span>
               </div>
             </button>
-          ))
+            );
+          })
         )}
       </div>
 

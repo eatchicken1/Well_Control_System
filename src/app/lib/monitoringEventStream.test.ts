@@ -50,6 +50,48 @@ test('L1DoesNotEnterBackendAlertQueue', () => {
   assert.deepEqual(projectAlarmEvents([alert({ currentBackendLevel: 1, backendLevel: 1, peakBackendLevel: 1 })]), []);
 });
 
+test('BackendHoldStateKeepsTheIncidentLive', () => {
+  // A held L2+ event is still open: backend retains incident identity while
+  // interpretation is frozen. It must not fall into the level-based
+  // active/ended fallback (which previously showed it as a plain active row).
+  const [item] = projectAlarmEvents([alert({
+    currentBackendLevel: 2,
+    backendLevel: 2,
+    peakBackendLevel: 2,
+    eventState: 'Hold',
+    lifecycleStatus: 'hold',
+  })]);
+  assert.equal(item.lifecycleStatus, 'hold');
+  assert.equal(item.isActive, true);
+  assert.equal(item.currentLevel, 2);
+});
+
+test('ClosedUnresolvedIsTerminalNotActive', () => {
+  // Previously 'closedunresolved' matched no branch and an L2+ event fell
+  // back to 'active' - showing a closed-unresolved incident as ongoing.
+  const [item] = projectAlarmEvents([alert({
+    currentBackendLevel: 2,
+    backendLevel: 2,
+    peakBackendLevel: 3,
+    eventState: 'ClosedUnresolved',
+    lifecycleStatus: 'closedunresolved',
+  })]);
+  assert.equal(item.lifecycleStatus, 'closedUnresolved');
+  assert.equal(item.isActive, false);
+  assert.equal(item.currentLevel, 0);
+});
+
+test('WatchStateMapsToObservationLifecycle', () => {
+  const [item] = projectAlarmEvents([alert({
+    currentBackendLevel: 2,
+    backendLevel: 2,
+    peakBackendLevel: 2,
+    eventState: 'Watch',
+    lifecycleStatus: 'watch',
+  })]);
+  assert.equal(item.lifecycleStatus, 'watching');
+});
+
 test('L1AndL2AppearInSameChronologicalStream', () => {
   const observations = projectL1ObservationWindows([
     flow('2026-08-13 10:00:00'),

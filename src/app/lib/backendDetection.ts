@@ -15,21 +15,21 @@ export const BACKEND_LEVEL_META: Record<BackendLevel, {
 
 const SIGNAL_LABELS: Record<string, string> = {
   // Current engine EvidenceKind outputs (PascalCase from enum ToString)
-  PressureDropResidual: '立压下降',
-  PressureRiseResidual: '立压抬升',
-  OutletIncreaseResidual: '出口增量',
-  OutletDecreaseResidual: '出口减量',
-  PitIncreaseResidual: '池体积增量',
-  PitDecreaseResidual: '池体积减量',
-  DensityDropResidual: '密度下降',
-  DensityRiseResidual: '密度抬升',
-  GasDelayedRise: '气测延迟抬升',
-  PumpConsistencyFailure: '停泵返出异常',
-  CasingPressureRiseResidual: '套压抬升',
-  MechanicalTransientEvidence: '机械瞬态证据',
-  SurfaceOperationEvidence: '地面操作证据',
-  SensorFaultEvidence: '传感器故障证据',
-  HydraulicContradiction: '液力矛盾',
+  PressureDropResidual: '立压低于同工况参考',
+  PressureRiseResidual: '立压高于同工况参考',
+  OutletIncreaseResidual: '出口流量持续升高',
+  OutletDecreaseResidual: '出口流量持续降低',
+  PitIncreaseResidual: '总池体积持续增加',
+  PitDecreaseResidual: '总池体积持续减少',
+  DensityDropResidual: '出口钻井液密度低于参考',
+  DensityRiseResidual: '出口钻井液密度高于参考',
+  GasDelayedRise: '全烃持续升高',
+  PumpConsistencyFailure: '停泵后出口流量仍未衰减',
+  CasingPressureRiseResidual: '套压持续升高',
+  MechanicalTransientEvidence: '机械参数出现短时变化',
+  SurfaceOperationEvidence: '地面作业状态发生变化',
+  SensorFaultEvidence: '立压、出口流量或总池体积测量异常',
+  HydraulicContradiction: '参数变化需要现场复核',
   // Current engine EvidenceFamily outputs
   Material: '物质平衡',
   Pressure: '压力证据',
@@ -37,7 +37,7 @@ const SIGNAL_LABELS: Record<string, string> = {
   Boundary: '边界证据',
   Operation: '工况证据',
   // Legacy snake_case keys that may appear in historical DB records
-  return_response: '出口流量响应',
+  return_response: '出口流量出现异常变化',
   pit_volume: '总池体积',
   pit_gain: '池体积增量',
   pool_delta: '池体积增量',
@@ -59,7 +59,22 @@ const SIGNAL_LABELS: Record<string, string> = {
 };
 
 export function backendSignalLabel(signal: string) {
-  return SIGNAL_LABELS[signal] || signal;
+  const value = String(signal || '').trim();
+  if (!value) return '';
+  if (/出口挡板开度|出口信号|出口流量信号/.test(value)) return '出口流量出现异常变化';
+  const exact = SIGNAL_LABELS[value]
+    || Object.entries(SIGNAL_LABELS).find(([key]) => key.toLowerCase() === value.toLowerCase())?.[1];
+  if (exact) return exact;
+  if (/PressureDropResidual|pressure[_-]?drop|spp[_-]?drop/i.test(value)) return '立压低于同工况参考';
+  if (/PressureRiseResidual|pressure[_-]?rise/i.test(value)) return '立压高于同工况参考';
+  if (/OutletIncreaseResidual|outlet|return|flow[_-]?out/i.test(value)) return '出口流量出现异常变化';
+  if (/PitIncreaseResidual|pit|pool|volume/i.test(value)) return '总池体积出现异常变化';
+  if (/GasDelayedRise|gas|烃/i.test(value)) return '全烃出现异常变化';
+  if (/CasingPressureRiseResidual|casing|套压/i.test(value)) return '套压出现异常变化';
+  if (/DensityDropResidual|density|密度/i.test(value)) return '出口钻井液密度出现异常变化';
+  if (/Mechanical|扭矩|悬重/i.test(value)) return '扭矩或悬重出现异常变化';
+  if (/Sensor|UnknownProxy|candidate|certificate|Evidence|residual|hydrauliccontradiction|^H_/i.test(value)) return '立压、出口流量或总池体积测量异常';
+  return value;
 }
 
 export function backendLevelState(level: BackendLevel): 'normal' | 'warning' | 'critical' {

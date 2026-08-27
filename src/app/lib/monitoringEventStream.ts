@@ -1,7 +1,22 @@
 import type { Alert, BackendLevel, FlowDataPoint } from '../context/WellControlContext';
+import { operatorEventPresentation } from './operatorEventPresentation';
 
 export type MonitoringEventKind = 'observation' | 'alarm';
-export type MonitoringLifecycleStatus = 'active' | 'recovering' | 'ended';
+/**
+ * Mirrors the backend SafetyIncidentState lifecycle contract
+ * (Watch/Open/Hold/Recovery/Resolved/ClosedUnresolved/Normal) projected into
+ * operator-facing statuses. Never re-derive these by heuristics: `hold`
+ * means the backend switched interpretation frameworks (telemetry gap /
+ * hydraulic boundary / pump-rate change) while RETAINING incident identity,
+ * and `watching` is the backend Watch state - not merely "level == 1".
+ */
+export type MonitoringLifecycleStatus =
+  | 'active'
+  | 'watching'
+  | 'hold'
+  | 'recovering'
+  | 'ended'
+  | 'closedUnresolved';
 export type MonitoringAckStatus = 'not-required' | 'unacknowledged' | 'acknowledged';
 
 export interface MonitoringEventStreamItem {
@@ -14,6 +29,7 @@ export interface MonitoringEventStreamItem {
   endTime: string;
   lastTime: string;
   message: string;
+  description?: string;
   lifecycleStatus: MonitoringLifecycleStatus;
   ackStatus: MonitoringAckStatus;
   duration: number;
@@ -61,8 +77,15 @@ function durationMs(start: number, end: number) {
 
 function lifecycle(value: string | undefined, currentLevel: BackendLevel): MonitoringLifecycleStatus {
   const normalized = String(value || '').trim().toLowerCase();
-  if (['ended', 'closed', 'resolved', 'complete', 'completed'].includes(normalized)) return 'ended';
-  if (['recovering', 'recovered', 'cooldown', 'cooling'].includes(normalized)) return 'recovering';
+  // Backend SafetyIncidentState values are matched explicitly (lowercased):
+  // resolved, closedunresolved are terminal; hold keeps the incident alive
+  // with interpretation frozen; watch is the advisory-only observation state.
+  if (normalized === 'closedunresolved') return 'closedUnresolved';
+  if (['resolved', 'closed', 'ended', 'complete', 'completed'].includes(normalized)) return 'ended';
+  if (['recovering', 'recovered', 'recovery', 'cooldown', 'cooling'].includes(normalized)) return 'recovering';
+  if (normalized === 'hold') return 'hold';
+  if (normalized === 'watch') return 'watching';
+  if (normalized === 'open') return 'active';
   return currentLevel >= 2 ? 'active' : 'ended';
 }
 
@@ -100,6 +123,8 @@ export function projectL1ObservationWindows(flowHistory: FlowDataPoint[]): Monit
     startTimestamp: number;
     lastTimestamp: number;
     sampleCount: number;
+    message: string;
+    description?: string;
   } | null = null;
 
   const close = (isActive: boolean) => {
@@ -114,7 +139,8 @@ export function projectL1ObservationWindows(flowHistory: FlowDataPoint[]): Monit
       startTime: current.startTime,
       endTime: current.lastTime,
       lastTime: current.lastTime,
-      message: 'L1 观察事件',
+      message: current.message,
+      description: current.description,
       lifecycleStatus: isActive ? 'active' : 'ended',
       ackStatus: 'not-required',
       duration: durationMs(current.startTimestamp, current.lastTimestamp),
@@ -134,6 +160,12 @@ export function projectL1ObservationWindows(flowHistory: FlowDataPoint[]): Monit
     if (!isL1) return;
 
     if (!current) {
+      const presentation = operatorEventPresentation({
+        publicLevel: 1,
+        eventTitle: value.eventTitle,
+        physicalDescription: value.eventDescription,
+        abnormalParameters: value.abnormalParameters,
+      }, 1);
       current = {
         eventId,
         startTime: value.time,
@@ -141,12 +173,22 @@ export function projectL1ObservationWindows(flowHistory: FlowDataPoint[]): Monit
         startTimestamp: timestamp,
         lastTimestamp: timestamp,
         sampleCount: 1,
+        message: presentation.title,
+        description: presentation.description,
       };
     } else {
+      const presentation = operatorEventPresentation({
+        publicLevel: 1,
+        eventTitle: value.eventTitle,
+        physicalDescription: value.eventDescription,
+        abnormalParameters: value.abnormalParameters,
+      }, 1);
       current.lastTime = value.time;
       current.lastTimestamp = timestamp;
       current.sampleCount += 1;
       current.eventId ||= eventId;
+      current.message = presentation.title || current.message;
+      current.description = presentation.description || current.description;
     }
 
     if (orderedIndex === ordered.length - 1) close(true);
@@ -182,19 +224,30 @@ export function projectAlarmEvents(alerts: Alert[]): MonitoringEventStreamItem[]
       Math.max(peak, safeLevel(alert.peakBackendLevel ?? alert.backendLevel), safeLevel(alert.backendLevel)) as BackendLevel
     ), 0);
     const normalizedLifecycle = lifecycle(latest.lifecycleStatus || latest.eventState, latestCurrentLevel);
-    const isActive = normalizedLifecycle === 'active';
+    // A held incident is still OPEN: the backend retains its identity and the
+    // operator warning while interpretation is frozen (telemetry gap /
+    // hydraulic boundary). Only terminal states clear the live level.
+    const isActive = normalizedLifecycle === 'active' || normalizedLifecycle === 'hold';
     const currentLevel = isActive ? latestCurrentLevel : 0;
 
+    const presentation = operatorEventPresentation({
+      publicLevel: latestCurrentLevel,
+      eventTitle: latest.title,
+      physicalDescription: latest.description,
+      primaryParameter: latest.primaryParameter,
+      activeSignals: latest.activeSignals,
+    }, latestCurrentLevel);
     return {
       id: `alarm-${backendEventId}`,
-      kind: 'alarm',
+      kind: 'alarm' as const,
       level: currentLevel,
       currentLevel,
       peakLevel,
       startTime: group.reduce((earliest, alert, index) => starts[index] < earliest.timestamp ? { timestamp: starts[index], value: dateTimeLabel(alert.date, alert.time) } : earliest, { timestamp: Number.POSITIVE_INFINITY, value: dateTimeLabel(latest.date, latest.time) }).value,
       endTime: dateTimeLabel(latest.lastDate || latest.date, latest.lastTime || latest.time),
       lastTime: dateTimeLabel(latest.lastDate || latest.date, latest.lastTime || latest.time),
-      message: latest.message,
+      message: presentation.title,
+      description: presentation.description,
       lifecycleStatus: normalizedLifecycle,
       ackStatus: ackStatus(latest),
       duration: durationMs(startTimestamp, lastTimestamp),

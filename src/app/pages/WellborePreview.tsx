@@ -2,6 +2,7 @@ import { Activity, AlertTriangle, ArrowLeft, CheckCircle2, Database, Flame, Gaug
 import { Link, useSearchParams } from 'react-router';
 import { WellboreSchemaFigure } from '../components/WellboreSchemaFigure';
 import type { BackendLevel } from '../context/WellControlContext';
+import { operatorEventPresentation } from '../lib/operatorEventPresentation';
 
 const LEVEL_LABELS: Record<BackendLevel, string> = {
   0: '正常循环',
@@ -17,6 +18,8 @@ function toLevel(value: string | null): BackendLevel {
 }
 
 function previewData(level: BackendLevel) {
+  const activeSignals = level >= 2 ? ['OutletIncreaseResidual', 'pit_gain', 'pit_volume', 'total_gas', 'casing_pressure'] : level === 1 ? ['OutletIncreaseResidual'] : [];
+  const presentation = operatorEventPresentation({ publicLevel: level, activeSignals }, level);
   return {
     wellDepth: 4200,
     bitDepth: 4160,
@@ -29,7 +32,9 @@ function previewData(level: BackendLevel) {
     pitVolume: level >= 2 ? 122.6 : 118.2,
     totalGas: level >= 2 ? 1.42 : 0.18,
     mudWeight: 1.22,
-    activeSignals: level >= 2 ? ['OutletIncreaseResidual', 'pit_gain', 'pit_volume', 'total_gas', 'casing_pressure'] : level === 1 ? ['OutletIncreaseResidual'] : [],
+    activeSignals,
+    eventTitle: presentation.title,
+    physicalDescription: presentation.description,
     condition: level >= 2 ? '循环异常' : level === 1 ? '循环观察' : '稳定监测',
   };
 }
@@ -46,13 +51,13 @@ export default function WellborePreview() {
         { label: '流量差', value: `ΔQ +${deltaQ.toFixed(1)} L/s`, tone: 'critical' },
         { label: '池体积', value: `池增 ${data.pitGain.toFixed(2)} m³`, tone: 'warning' },
         { label: '气侵段', value: '示意前缘 / 非现场反演结果', tone: 'critical' },
-        { label: '压力窗', value: `MW ${data.mudWeight.toFixed(2)}；PP / ECD 未接入`, tone: 'warning' },
+        { label: '压力关系', value: `泥浆密度 ${data.mudWeight.toFixed(2)} g/cm³；地层压力资料未接入`, tone: 'warning' },
       ]
     : [
         { label: '流量差', value: `ΔQ ${deltaQ.toFixed(1)} L/s`, tone: watch ? 'warning' : 'normal' },
         { label: '池体积', value: `池增 ${data.pitGain.toFixed(2)} m³`, tone: watch ? 'warning' : 'normal' },
         { label: '气测', value: `全烃 ${data.totalGas.toFixed(2)}%`, tone: 'normal' },
-        { label: '压力窗', value: `MW ${data.mudWeight.toFixed(2)}；PP / ECD 未接入`, tone: 'normal' },
+        { label: '压力关系', value: `泥浆密度 ${data.mudWeight.toFixed(2)} g/cm³；地层压力资料未接入`, tone: 'normal' },
       ];
   const actionSteps = abnormal
     ? [
@@ -92,6 +97,8 @@ export default function WellborePreview() {
           <WellboreSchemaFigure
             mode="detail"
             backendLevel={level}
+            eventTitle={data.eventTitle}
+            physicalDescription={data.physicalDescription}
             wellDepth={data.wellDepth}
             bitDepth={data.bitDepth}
             flowIn={data.flowIn}
@@ -118,8 +125,8 @@ export default function WellborePreview() {
 
         <aside className="wellbore-preview-side">
           <section>
-            <h1>L{level} {LEVEL_LABELS[level]}</h1>
-            <p>{abnormal ? '推测侵入区保持局部偏侧，总体钻井液沿左右环空共同返出；前缘为示意数据。' : level === 1 ? '观察路径和浅色证据带用于展示轻微偏离。' : '正常循环路径以绿色虚线展示，井筒结构保持清晰可读。'}</p>
+            <h1>{data.eventTitle}</h1>
+            <p>{data.physicalDescription} {abnormal ? '推测侵入区保持局部偏侧，总体钻井液沿左右环空共同返出；前缘为示意数据。' : level === 1 ? '观察路径和浅色证据带用于展示轻微偏离。' : '正常循环路径以绿色虚线展示，井筒结构保持清晰可读。'}</p>
           </section>
           <div className="wellbore-preview-metrics">
             <div data-tone={abnormal ? 'critical' : watch ? 'warning' : 'normal'}><Activity size={18} /><span>出口流量</span><strong>{data.flowOut.toFixed(1)} L/s</strong></div>

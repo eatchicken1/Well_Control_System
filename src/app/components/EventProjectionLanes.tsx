@@ -8,7 +8,10 @@ function shortTime(value: string) {
 }
 
 function spanTone(level: number, status: string) {
-  if (status.toLowerCase() === 'recovering') return 'is-recovering';
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'recovering' || normalized === 'recovery') return 'is-recovering';
+  if (normalized === 'hold') return 'is-hold';
+  if (normalized === 'closedunresolved') return 'is-watch';
   if (level >= 4) return 'is-critical';
   if (level >= 2) return 'is-warning';
   return 'is-watch';

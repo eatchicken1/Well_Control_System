@@ -410,7 +410,7 @@ export default function Settings() {
 
   const handleOutletSemanticSave = async () => {
     if (!outletSemanticDraft) {
-      setOutletSemanticState({ type: 'error', message: '请先明确出口通道是实际流量还是挡板开度。' });
+      setOutletSemanticState({ type: 'error', message: '请先明确出口流量通道是实际流量还是代理测量。' });
       return;
     }
     setOutletSemanticState({ type: 'saving', message: '' });
@@ -607,7 +607,7 @@ export default function Settings() {
                   <Gauge className="h-4 w-4 text-cyan-500" />
                   出口通道定义
                 </h3>
-                <p className="mt-1 max-w-2xl text-[11px] leading-5 ops-muted">这是一项后端持久化的物理语义声明。真实流量允许使用入口/出口差值；挡板开度仅作为代理信号，系统不得把百分比当作流量参与物料平衡。实时判级仍以服务端随帧发布的通道配置为准。</p>
+                <p className="mt-1 max-w-2xl text-[11px] leading-5 ops-muted">这是一项后端持久化的物理语义声明。真实出口流量允许使用入口/出口差值；代理测量仅用于出口流量趋势观察，系统不会把百分比当作流量参与物料平衡。实时判级仍以服务端随帧发布的通道配置为准。</p>
               </div>
               <span className={`rounded px-2 py-1 text-xs font-medium ${outletSemanticSaved ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-100'}`}>
                 {outletSemanticSaved ? '后端已声明' : '待明确'}
@@ -629,8 +629,8 @@ export default function Settings() {
                 onClick={() => { setOutletSemanticDraft('ValveOpeningProxy'); setOutletSemanticState({ type: 'idle', message: '' }); }}
                 className={`rounded-md border p-3 text-left transition-colors ${outletSemanticDraft === 'ValveOpeningProxy' ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-300 dark:border-amber-500 dark:bg-amber-950/25 dark:ring-amber-800' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-slate-600'}`}
               >
-                <div className="flex items-center justify-between gap-2"><strong className="text-sm text-slate-900 dark:text-slate-100">出口挡板开度</strong><span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">%</span></div>
-                <div className="mt-2 text-xs leading-5 ops-muted">可监测相对异常与趋势；禁止与入口排量相减，也不生成流量差类物料平衡结论。</div>
+                <div className="flex items-center justify-between gap-2"><strong className="text-sm text-slate-900 dark:text-slate-100">出口流量（代理测量）</strong><span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">%</span></div>
+                <div className="mt-2 text-xs leading-5 ops-muted">可监测出口流量的相对异常与趋势；禁止与入口排量相减，也不生成流量差类物料平衡结论。</div>
               </button>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">

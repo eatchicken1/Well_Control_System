@@ -17,6 +17,10 @@ export interface WarningEventReviewItem {
   status: string;
   candidateState: string;
   needsManualReview: boolean;
+  eventTitle: string;
+  physicalDescription: string;
+  primaryParameter: string;
+  abnormalParameters: string[];
   primarySignal: string;
   activeSignals: string[];
   reason: string;
@@ -36,6 +40,9 @@ export interface WarningEventLatestFrame {
   publicLevel: number;
   formalEvalLevel: number;
   eventState: string;
+  eventTitle: string;
+  physicalDescription: string;
+  abnormalParameters: string[];
   activeSignals: string;
   reason: string;
   cycleResolution: string;

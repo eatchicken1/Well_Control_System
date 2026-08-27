@@ -9,6 +9,7 @@ import { saveSelectedWells } from '../api/authApi';
 import { resetRealtimeBaseline } from '../api/realtimeBaselineApi';
 import { fallbackQueueCandidateFromFrame, mergeQueueAlertSnapshot } from '../lib/alertQueueProjection';
 import { markEventExplanationRevision } from '../lib/eventExplanationCache';
+import { operatorEventPresentation } from '../lib/operatorEventPresentation';
 import { useAuth } from './AuthContext';
 
 export type AlertStatus = 'normal' | 'warning' | 'critical';
@@ -191,6 +192,11 @@ export interface Alert {
   lastTime?: string;
   lastDate?: string;
   level: 'info' | 'warning' | 'critical';
+  /** Parameter-specific operator title, for example “L2：总池体积持续增加”. */
+  title?: string;
+  /** Measured physical facts supplied by the backend. */
+  description?: string;
+  primaryParameter?: string;
   message: string;
   acknowledged: boolean;
   code?: string;
@@ -207,8 +213,13 @@ export interface Alert {
 }
 
 export interface BackendDetectionState {
+  /** Canonical L0-L4 advisory level from the backend HMI contract ("L0".."L4"). */
+  advisoryLevel: BackendLevel;
   publicLevel: BackendLevel;
   formalEvalLevel: BackendLevel;
+  eventTitle: string;
+  physicalDescription: string;
+  primaryParameter: string;
   reason: string;
   activeSignals: string[];
   eventState: string;
@@ -264,6 +275,9 @@ export interface FlowDataPoint {
   timestampMs?: number;
   backendLevel?: BackendLevel;
   eventId?: string | null;
+  eventTitle?: string;
+  eventDescription?: string;
+  abnormalParameters?: string[];
   flowIn: number | null;
   flowOut: number | null;
   pitGain?: number | null;
@@ -288,6 +302,9 @@ export interface PressureDataPoint {
   timestampMs?: number;
   backendLevel?: BackendLevel;
   eventId?: string | null;
+  eventTitle?: string;
+  eventDescription?: string;
+  abnormalParameters?: string[];
   casingPressure: number | null;
   drillPipePressure: number | null;
   spp?: number | null;
@@ -1503,8 +1520,12 @@ function sanitizeStoredBackendDetection(value: unknown): BackendDetectionState {
   return {
     ...INITIAL_BACKEND_DETECTION,
     ...row,
+    advisoryLevel: normalizeBackendLevel(row.advisoryLevel ?? row.publicLevel),
     publicLevel: normalizeBackendLevel(row.publicLevel),
     formalEvalLevel: normalizeBackendLevel(row.formalEvalLevel),
+    eventTitle: String(row.eventTitle || INITIAL_BACKEND_DETECTION.eventTitle),
+    physicalDescription: String(row.physicalDescription || row.reason || INITIAL_BACKEND_DETECTION.physicalDescription),
+    primaryParameter: String(row.primaryParameter || INITIAL_BACKEND_DETECTION.primaryParameter),
     reason: String(row.reason || INITIAL_BACKEND_DETECTION.reason),
     activeSignals: parseActiveSignals(row.activeSignals),
     eventState: String(row.eventState || INITIAL_BACKEND_DETECTION.eventState),
@@ -2032,8 +2053,12 @@ function buildRealtimeStreamUrl(endpoint: string, wellId: string, startTime: str
 }
 
 const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
+  advisoryLevel: 0,
   publicLevel: 0,
   formalEvalLevel: 0,
+  eventTitle: 'L0：当前未发现需提示的参数异常',
+  physicalDescription: '当前未发现需要提示的参数异常。',
+  primaryParameter: '',
   reason: '',
   activeSignals: [],
   eventState: 'normal',
@@ -2102,6 +2127,12 @@ function unwrapCollection(payload: unknown, keys: string[]) {
 }
 
 function normalizeBackendLevel(value: unknown): BackendLevel {
+  // The canonical backend HMI field is the advisory level and arrives as an
+  // "L0".."L4" string; accept both string and numeric forms everywhere.
+  if (typeof value === 'string') {
+    const match = value.trim().match(/^L([0-4])$/i);
+    if (match) return Number(match[1]) as BackendLevel;
+  }
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.min(4, Math.round(numeric))) as BackendLevel;
@@ -2116,7 +2147,7 @@ function backendLevelToStatus(level: BackendLevel): AlertStatus {
 function parseActiveSignals(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
   return String(value || '')
-    .split(',')
+    .split(/[,、;；]/g)
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -2139,6 +2170,9 @@ interface BackendLogEntry {
   acknowledgementCount?: number;
   publicLevel: BackendLevel;
   formalEvalLevel: BackendLevel;
+  title: string;
+  description: string;
+  primaryParameter: string;
   reason: string;
   activeSignals: string[];
   eventState: string;
@@ -2166,6 +2200,7 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
     const eventState = String(readValue(row, ['event_state', 'eventState']) || (publicLevel >= 4 ? 'confirmed' : publicLevel >= 2 ? 'tracking' : publicLevel === 1 ? 'recovering' : 'normal'));
     const shouldKeep = publicLevel >= 2 || eventState === 'recovering' || eventState === 'normal';
     if (!shouldKeep) return [];
+    const presentation = operatorEventPresentation(row, publicLevel);
     return [{
       eventId,
       candidateId,
@@ -2177,8 +2212,11 @@ function normalizeBackendLogEntries(record: RealTimeRecord): BackendLogEntry[] {
       acknowledgementCount: Math.max(0, Math.round(finite(readValue(row, ['acknowledgement_count', 'acknowledgementCount']), 0))),
       publicLevel,
       formalEvalLevel: normalizeBackendLevel(readValue(row, ['formal_eval_level', 'formalEvalLevel']) ?? publicLevel),
-      reason: displayAlarmText(readValue(row, ['reason']) || `实时判级 L${publicLevel}`),
-      activeSignals: parseActiveSignals(readValue(row, ['active_signals', 'activeSignals'])),
+      title: presentation.title,
+      description: presentation.description,
+      primaryParameter: presentation.primaryParameter,
+      reason: presentation.description,
+      activeSignals: presentation.abnormalParameters,
       eventState,
       pumpState: String(readValue(row, ['pump_state', 'pumpState']) || record.pump_state || record.pumpState || 'Unknown'),
       timestamp,
@@ -2205,13 +2243,14 @@ function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry
   const rawEventId = String(readValue(source, ['event_id', 'eventId']) || '').trim();
   const eventId = rawEventId || (candidateId ? `candidate-${candidateId}` : '');
   const timestamp = String(readValue(source, ['timestamp', 'sampleTime', 'sample_time']) || '');
+  const presentation = operatorEventPresentation(source, publicLevel);
   const candidate = fallbackQueueCandidateFromFrame({
     eventId,
     candidateId,
     publicLevel,
     formalEvalLevel: normalizeBackendLevel(readValue(source, ['formal_eval_level', 'formalEvalLevel']) ?? publicLevel),
-    reason: displayAlarmText(readValue(source, ['reason']) || `实时判级 L${publicLevel}`),
-    activeSignals: parseActiveSignals(readValue(source, ['active_signals', 'activeSignals'])),
+    reason: presentation.description,
+    activeSignals: presentation.abnormalParameters,
     eventState: String(readValue(source, ['event_state', 'eventState']) || 'tracking'),
     pumpState: String(readValue(source, ['pump_state', 'pumpState']) || 'Unknown'),
     timestamp,
@@ -2224,6 +2263,9 @@ function fallbackQueueLogEntryFromFrame(record: RealTimeRecord): BackendLogEntry
     ...candidate,
     publicLevel: normalizeBackendLevel(candidate.publicLevel),
     formalEvalLevel: normalizeBackendLevel(candidate.formalEvalLevel),
+    title: presentation.title,
+    description: presentation.description,
+    primaryParameter: presentation.primaryParameter,
   };
 }
 
@@ -2241,10 +2283,19 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
   const source = record as Record<string, unknown>;
   const logs = normalizeBackendLogEntries(record);
   const latestLog = logs.at(-1);
+  // advisoryLevel is the backend's canonical HMI value (see RealtimeDtos:
+  // "Canonical L0--L4 level for HMI and API consumers"). It is read FIRST;
+  // publicLevel and formalEvalLevel remain as audit/context fields only.
+  const advisoryLevel = normalizeBackendLevel(
+    readValue(source, ['advisory_level', 'advisoryLevel'])
+      ?? readValue((readValue(source, ['warning', 'Warning']) as Record<string, unknown> | undefined) ?? {}, ['advisory_level', 'advisoryLevel'])
+      ?? latestLog?.publicLevel,
+  );
   const publicLevel = normalizeBackendLevel(
     readValue(source, ['public_level', 'publicLevel', 'formal_eval_level', 'formalEvalLevel', 'confidence_level', 'confidenceLevel'])
       ?? latestLog?.publicLevel,
   );
+  const effectiveLevel = Math.max(advisoryLevel, publicLevel);
   const formalEvalLevel = normalizeBackendLevel(
     readValue(source, ['formal_eval_level', 'formalEvalLevel']) ?? latestLog?.formalEvalLevel ?? publicLevel,
   );
@@ -2271,11 +2322,16 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
   const monitoringReady = readBoolean(readValue(source, ['monitoring_ready', 'monitoringReady']), publicLevel >= 0);
   const baselineValid = readBoolean(readValue(source, ['baseline_valid', 'baselineValid']), baselineSnapshot.ready);
   const baselineInvalidReason = String(readValue(source, ['baseline_invalid_reason', 'baselineInvalidReason']) || '');
+  const presentation = operatorEventPresentation(source, effectiveLevel);
   return {
-    publicLevel,
+    advisoryLevel,
+    publicLevel: Math.max(0, Math.min(4, effectiveLevel)) as BackendLevel,
     formalEvalLevel,
-    reason: displayAlarmText(readValue(source, ['reason']) || latestLog?.reason || ''),
-    activeSignals: activeSignals.length > 0 ? activeSignals : latestLog?.activeSignals || [],
+    eventTitle: presentation.title || latestLog?.title || '',
+    physicalDescription: presentation.description || latestLog?.description || '',
+    primaryParameter: presentation.primaryParameter || latestLog?.primaryParameter || '',
+    reason: presentation.description || latestLog?.reason || '',
+    activeSignals: presentation.abnormalParameters.length > 0 ? presentation.abnormalParameters : activeSignals.length > 0 ? activeSignals : latestLog?.activeSignals || [],
     eventState: String(
       readValue(source, ['event_state', 'eventState'])
         || latestLog?.eventState
@@ -2288,7 +2344,7 @@ function normalizeBackendDetection(record: RealTimeRecord): BackendDetectionStat
         || 'Unknown',
     ),
     timestamp,
-    eventId: latestLog?.eventId || (publicLevel >= 2 ? frameEventId : null),
+    eventId: latestLog?.eventId || (publicLevel >= 1 ? frameEventId : null),
     baselineValid,
     baselineWarmup,
     monitoringReady,
@@ -2458,7 +2514,25 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     });
     const dataText = dataLines.join('\n');
     if (!dataText) return;
-    const data = JSON.parse(dataText) as RealTimeRecord & Record<string, unknown>;
+    // One malformed frame must never kill the whole transport: parsing it
+    // here keeps the reconnect cycle (and its cursor) intact and skips only
+    // the bad block.
+    let data: RealTimeRecord & Record<string, unknown>;
+    try {
+      data = JSON.parse(dataText) as RealTimeRecord & Record<string, unknown>;
+    } catch (error) {
+      this.emitStatus({
+        mode: this.mode,
+        adapterName: 'V7 实时检测流',
+        status: 'connected',
+        endpoint: this.endpoint,
+        message: `跳过一帧无法解析的数据（${error instanceof Error ? error.message : '格式错误'}），连接保持`,
+        lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
+        recordCount: this.recordCount,
+        sessionCode: this.sessionCode,
+      });
+      return;
+    }
     if (eventName === 'event_explanation' || eventName === 'event.explanation') {
       markEventExplanationRevision(data);
       window.dispatchEvent(new CustomEvent('wcs:event-explanation', { detail: data }));
@@ -2477,6 +2551,22 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
         this.completed = true;
         if (this.replayQueue.length === 0) this.emitReplayCompleted();
       }
+      return;
+    }
+    if (eventName === 'session.error') {
+      // Backend rejected the attachment (e.g. no running monitoring session).
+      // Surface it to the operator; the stream client keeps its cursor so a
+      // later "start monitoring" + reconnect resumes cleanly.
+      this.emitStatus({
+        mode: this.mode,
+        adapterName: 'V7 实时检测流',
+        status: 'error',
+        endpoint: this.endpoint,
+        message: String(data.error || data.message || '后端没有正在运行的监测会话，请先开始监测'),
+        lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
+        recordCount: this.recordCount,
+        sessionCode: this.sessionCode,
+      });
       return;
     }
     if (eventName === 'catchup_frame') {
@@ -3647,7 +3737,10 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
             acknowledgedAt: entry.acknowledgedAt || alert.acknowledgedAt,
             acknowledgementCount: entry.acknowledgementCount ?? alert.acknowledgementCount,
             level: entry.publicLevel >= 4 ? 'critical' as const : entry.publicLevel >= 2 ? 'warning' as const : 'info' as const,
-            message: entry.reason || alert.message,
+            title: entry.title || alert.title,
+            description: entry.description || alert.description,
+            primaryParameter: entry.primaryParameter || alert.primaryParameter,
+            message: entry.title || alert.message,
             time: eventTime.timeStr,
             date: eventTime.dateStr,
             lastTime: eventEndTime.timeStr,
@@ -3692,7 +3785,10 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           lastTime: eventEndTime.timeStr,
           lastDate: eventEndTime.dateStr,
           level: entry.publicLevel >= 4 ? 'critical' as const : 'warning' as const,
-          message: entry.reason,
+          title: entry.title,
+          description: entry.description,
+          primaryParameter: entry.primaryParameter,
+          message: entry.title,
           acknowledged: acknowledgedEventsRef.current[eventKey] === true,
           code: entry.eventId,
           backendEventId: eventKey,
@@ -3916,7 +4012,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const canPaintEvent = isMonitorableEventRecord(record, lastData);
       cycleState = cycleInfoFromRecord(record, cycleState);
       if (sampleTimeText) sampleTime = sampleTimeText.replace('T', ' ');
-      const activeEventId = nextDetection.publicLevel >= 2 && canPaintEvent ? (nextDetection.eventId || null) : null;
+      const activeEventId = nextDetection.publicLevel >= 1 && canPaintEvent ? (nextDetection.eventId || null) : null;
       backendState = nextDetection;
       flowItems = appendMonitoringPoint(flowItems,
         {
@@ -3924,6 +4020,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           timestampMs,
           backendLevel: nextDetection.publicLevel,
           eventId: activeEventId,
+          eventTitle: nextDetection.eventTitle,
+          eventDescription: nextDetection.physicalDescription,
+          abnormalParameters: nextDetection.activeSignals,
           flowIn: lastData.flowIn,
           flowOut: lastData.flowOut,
           wellDepth: lastData.wellDepth,
@@ -3949,6 +4048,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           timestampMs,
           backendLevel: nextDetection.publicLevel,
           eventId: activeEventId,
+          eventTitle: nextDetection.eventTitle,
+          eventDescription: nextDetection.physicalDescription,
+          abnormalParameters: nextDetection.activeSignals,
           casingPressure: lastData.casingPressure,
           drillPipePressure: lastData.drillPipePressure,
           spp: lastData.spp,
@@ -4253,6 +4355,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           const level = normalizeBackendLevel(readValue(row, ['current_level', 'currentLevel', 'public_level', 'publicLevel', 'level']));
           const highestLevel = normalizeBackendLevel(readValue(row, ['highest_level', 'highestLevel', 'peak_level', 'peakLevel']) ?? level);
           const displayLevel = Math.max(level, highestLevel) as BackendLevel;
+          const presentation = operatorEventPresentation(row, displayLevel);
           const ackStatus = String(readValue(row, ['ack_status', 'ackStatus']) || 'unacknowledged');
           const eventKey = eventId.startsWith('candidate-')
             ? eventId
@@ -4268,7 +4371,10 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
             lastTime: endTime.timeStr,
             lastDate: endTime.dateStr,
             level: alertLevelFromBackend(displayLevel),
-            message: displayAlarmText(readValue(row, ['reason', 'message']) || `后端报警 L${level}`),
+            title: presentation.title,
+            description: presentation.description,
+            primaryParameter: presentation.primaryParameter,
+            message: presentation.title,
             acknowledged: isAcknowledgedStatus(ackStatus),
             code: eventId,
             backendEventId,
@@ -4277,7 +4383,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
             peakBackendLevel: highestLevel,
             formalEvalLevel: normalizeBackendLevel(readValue(row, ['formal_eval_level', 'formalEvalLevel']) ?? level),
             peakFormalEvalLevel: normalizeBackendLevel(readValue(row, ['peak_formal_eval_level', 'peakFormalEvalLevel']) ?? level),
-            activeSignals: parseActiveSignals(readValue(row, ['active_signals', 'activeSignals'])),
+            activeSignals: presentation.abnormalParameters,
             eventState: String(readValue(row, ['event_state', 'eventState', 'lifecycle_status', 'lifecycleStatus']) || 'tracking'),
             pumpState: String(readValue(row, ['pump_state', 'pumpState']) || 'Unknown'),
             lifecycleStatus: String(readValue(row, ['lifecycle_status', 'lifecycleStatus']) || ''),
@@ -4556,16 +4662,19 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const canPaintEvent = isMonitorableEventRecord(record, nextData);
       if (nextDetection.eventId && canPaintEvent) {
         activeEventIdRef.current = nextDetection.eventId;
-      } else if (nextDetection.publicLevel < 2 || !canPaintEvent) {
+      } else if (nextDetection.publicLevel < 1 || !canPaintEvent) {
         activeEventIdRef.current = null;
       }
-      const activeEventId = nextDetection.publicLevel >= 2 && canPaintEvent ? activeEventIdRef.current : null;
+      const activeEventId = nextDetection.publicLevel >= 1 && canPaintEvent ? activeEventIdRef.current : null;
       const nextFlowHistory = appendMonitoringPoint(previousSnapshot.flowHistory,
         {
           time: recordTime.timeStr,
           timestampMs,
           backendLevel: nextDetection.publicLevel,
           eventId: activeEventId,
+          eventTitle: nextDetection.eventTitle,
+          eventDescription: nextDetection.physicalDescription,
+          abnormalParameters: nextDetection.activeSignals,
           flowIn: nextData.flowIn,
           flowOut: nextData.flowOut,
           wellDepth: nextData.wellDepth,

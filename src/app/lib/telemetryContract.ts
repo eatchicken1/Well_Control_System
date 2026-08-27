@@ -29,9 +29,10 @@ export function isUnknownSemantic(semantic: string | undefined | null): boolean 
 }
 
 export function outletDisplayLabel(semantic: string | undefined | null): string {
-  if (isValveOpeningSemantic(semantic)) return '出口挡板开度';
-  if (isTrueFlowSemantic(semantic)) return '出口流量';
-  return '出口信号';
+  // The operator-facing HMI has one stable parameter name.  The semantic
+  // still controls what calculations are permitted, but must not rename the
+  // displayed measurement to a hardware-specific term.
+  return '出口流量';
 }
 
 export function outletDisplayUnit(

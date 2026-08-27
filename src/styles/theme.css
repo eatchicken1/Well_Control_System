@@ -6595,3 +6595,9 @@ body {
     gap: 12px;
   }
 }
+
+/* Backend Hold state: interpretation framework switched (telemetry gap /
+   hydraulic boundary / pump-rate change); incident identity retained,
+   reference learning frozen. Distinct from recovery (quiet evidence). */
+.event-projection-row span.is-hold { border-color: #a16207; background: #fef3c7; color: #713f12; }
+.dark .event-projection-row span.is-hold { border-color: #d97706; background: #451a03; color: #fde68a; }

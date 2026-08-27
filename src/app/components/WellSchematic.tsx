@@ -501,9 +501,7 @@ export function WellSchematic({
   const metricLevelTone: WellboreTone = backendLevel >= 2 ? 'warning' : backendLevel === 1 ? 'watch' : 'normal';
   const evidenceNote = model.evidenceNotes[0] || model.statusDescription;
 
-  const resolvedOutletLabel = outletSemantic === 'ValveOpeningProxy' ? '\u51fa\u53e3\u6321\u677f\u5f00\u5ea6'
-    : outletSemantic === 'TrueVolumetricFlow' || outletSemantic === 'TrueReturnFlow' ? '\u51fa\u53e3\u6d41\u91cf'
-    : '\u51fa\u53e3\u4fe1\u53f7';
+  const resolvedOutletLabel = '\u51fa\u53e3\u6d41\u91cf';
   const resolvedOutletUnit = outletSemantic === 'ValveOpeningProxy' ? '%'
     : outletUnit && !/^unknown$/i.test(outletUnit) ? outletUnit
     : outletSemantic === 'TrueVolumetricFlow' || outletSemantic === 'TrueReturnFlow' ? 'L/s'

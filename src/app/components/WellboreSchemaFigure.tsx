@@ -5,6 +5,8 @@ import { computeObservedFlowDelta } from '../lib/telemetryContract';
 interface WellboreSchemaFigureProps {
   mode?: 'thumbnail' | 'detail';
   backendLevel: BackendLevel;
+  eventTitle?: string;
+  physicalDescription?: string;
   wellDepth?: number | null;
   bitDepth?: number | null;
   casingShoeDepth?: number;
@@ -444,7 +446,7 @@ function EngineeringCallouts({ model, g, compact }: { model: WellboreSimulationM
   );
 }
 
-export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, flowIn, flowOut, spm = 0, casingPressure, drillPipePressure, pitGain, pitVolume, outletSemantic, totalGas = 0, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals = [], pumpState, condition, cycleInfo, hasSamples = true, isRecovering = false, isStopped = false }: WellboreSchemaFigureProps) {
+export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, eventTitle, physicalDescription, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, flowIn, flowOut, spm = 0, casingPressure, drillPipePressure, pitGain, pitVolume, outletSemantic, totalGas = 0, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals = [], pumpState, condition, cycleInfo, hasSamples = true, isRecovering = false, isStopped = false }: WellboreSchemaFigureProps) {
   const flowDelta = computeObservedFlowDelta(flowIn, flowOut, outletSemantic);
   const model = buildWellboreSimulationModel({ backendLevel, flowIn, flowOut, flowDelta, pitGain, pitVolume: pitVolume ?? pitGain, drillPipePressure, casingPressure, totalGas, spm, wellDepth, bitDepth, casingShoeDepth, drillPipeOD, bhaOD, bitOD, casingID, openHoleDiameter, formation, wellboreSections, mudWeight, ecd, porePressureEquivalent, fractureGradientEquivalent, influxFromDepth, influxToDepth, influxConfidence, influxSource, influxSide, gasFrontDepth, gasColumnBottomDepth, gasFraction, inclination, highSideDirection, activeSignals, pumpState, condition, cycleInfo, hasSamples, isRecovering, isStopped });
   const compact = mode !== 'detail';
@@ -454,7 +456,7 @@ export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, wellDep
   const showFlow = model.flowState.circulationActive || backendLevel > 0;
   return (
     <div className={`wellbore-schema-figure wellbore-schema-figure-${mode}`} data-animation={visual.animationIntensity}>
-      <svg className="wellbore-schema-overlay" viewBox={g.viewBox} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`${TEXT.aria} L${backendLevel} ${model.statusLabel}`}>
+      <svg className="wellbore-schema-overlay" viewBox={g.viewBox} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`${TEXT.aria} ${eventTitle || `L${backendLevel} ${model.statusLabel}`}${physicalDescription ? `：${physicalDescription}` : ''}`}>
         <Defs id={id} />
         <defs><marker id={`arrow-critical-${backendLevel}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill={visual.returnFlowColor} /></marker><marker id="arrow-influx" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill="#f97316" /></marker></defs>
         <rect width="100%" height="100%" fill={`url(#panel-${id})`} />

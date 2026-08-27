@@ -4,6 +4,7 @@ import type { Alert, BackendLevel } from '../context/WellControlContext';
 import { fetchEventExplanation } from '../api/eventExplanationApi';
 import { getEventExplanationCache, setEventExplanationCache } from '../lib/eventExplanationCache';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
+import { operatorEventPresentation } from '../lib/operatorEventPresentation';
 import type { EventExplanation, EventPhaseSegment, ParameterBehavior } from '../types/eventExplanation';
 
 const PHASE_LABELS: Record<string, string> = {
@@ -200,6 +201,15 @@ export function EventExplanationDrawer({ alert, wellKey, endpoint, onClose }: { 
   const contradictingEvidence = explanation.contradictingEvidence?.length ? explanation.contradictingEvidence : summary.contradictingEvidence || [];
   const operatorChecks = summary.operatorChecks?.length ? summary.operatorChecks : ['复核泵冲、入口排量、返出流量和总池体积'];
   const reviewItems = [...(summary.alternativeExplanations || []), ...(summary.dataLimitations || [])];
+  const presentation = operatorEventPresentation({
+    publicLevel: currentLevel,
+    eventTitle: alert.title,
+    physicalDescription: alert.description,
+    primaryParameter: alert.primaryParameter,
+    activeSignals: alert.activeSignals,
+  }, currentLevel);
+  const operatorTitle = presentation.title;
+  const physicalDescription = presentation.description || summary.currentPhaseSummary || summary.currentConclusion;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/45" onClick={onClose}>
@@ -209,7 +219,7 @@ export function EventExplanationDrawer({ alert, wellKey, endpoint, onClose }: { 
             <div className="min-w-0">
               <div className="text-[11px] font-semibold tracking-[0.16em] text-cyan-700 dark:text-cyan-300">事件现场简报</div>
               <h2 id="event-explanation-title" className="mt-1 break-words text-lg font-semibold text-slate-900 dark:text-slate-100">
-                {alert.wellName || wellKey} · L{currentLevel} {levelMeta.label}
+                {alert.wellName || wellKey} · {operatorTitle}
               </h2>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ops-muted">
                 <span>{resolution}</span>
@@ -233,8 +243,8 @@ export function EventExplanationDrawer({ alert, wellKey, endpoint, onClose }: { 
                     {highestLevel > currentLevel && <span className="rounded-full bg-white/70 px-2.5 py-1 dark:bg-slate-950/30">最高到 L{highestLevel}</span>}
                   </div>
                 </div>
-                <div className="mt-3 break-words text-xl font-semibold leading-8 text-slate-950 dark:text-white">{summary.currentConclusion}</div>
-                <p className="mt-2 break-words text-sm leading-6 text-slate-700 dark:text-slate-200">{summary.currentPhaseSummary}</p>
+                <div className="mt-3 break-words text-xl font-semibold leading-8 text-slate-950 dark:text-white">{operatorTitle}</div>
+                <p className="mt-2 break-words text-sm leading-6 text-slate-700 dark:text-slate-200">{physicalDescription}</p>
                 <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t border-current/15 pt-3 text-xs">
                   <span><strong>系统建议：</strong>{levelMeta.action}</span>
                   <span><strong>事件状态：</strong>{resolution}</span>
