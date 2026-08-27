@@ -142,7 +142,7 @@ export default function WellManagement() {
     setFeedback('');
     try {
       const saved = editingProfile
-        ? await updateWellProfile(editingProfile.wellId, request)
+        ? await updateWellProfile(editingProfile.wellId, { ...request, wellCode: request.wellCode || editingProfile.wellCode })
         : await createWellProfile(request);
       setProfiles((current) => {
         const next = editingProfile

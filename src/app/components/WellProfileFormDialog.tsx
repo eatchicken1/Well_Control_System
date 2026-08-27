@@ -56,7 +56,7 @@ function normalized(form: WellProfileMutationRequest): WellProfileMutationReques
   return {
     ...form,
     wellName: form.wellName.trim(),
-    wellCode: form.wellCode.trim(),
+    wellCode: form.wellCode?.trim() || undefined,
     blockName: form.blockName?.trim(),
     fieldName: form.fieldName?.trim(),
     targetLayer: form.targetLayer?.trim(),
@@ -101,14 +101,14 @@ export function WellProfileFormDialog({
 
   const validationMessage = useMemo(() => {
     if (!form.wellName.trim()) return '请填写井名。';
-    if (!form.wellCode.trim()) return '请填写规范井号。';
-    if (form.wellName.trim().length > 128 || form.wellCode.trim().length > 128) return '井名和井号不能超过 128 个字符。';
+    if (isEditing && !form.wellCode?.trim()) return '请填写规范井号。';
+    if (form.wellName.trim().length > 128 || (form.wellCode?.trim().length || 0) > 128) return '井名和井号不能超过 128 个字符。';
     return '';
-  }, [form.wellCode, form.wellName]);
+  }, [form.wellCode, form.wellName, isEditing]);
 
   const visibleValidationMessage = !form.wellName.trim() && touched.wellName
     ? '请填写井名。'
-    : !form.wellCode.trim() && touched.wellCode
+    : isEditing && !form.wellCode?.trim() && touched.wellCode
       ? '请填写规范井号。'
       : '';
 
@@ -134,7 +134,7 @@ export function WellProfileFormDialog({
       <DialogHeader>
         <DialogTitle>{isEditing ? `编辑 ${profile?.wellName}` : '新增井'}</DialogTitle>
         <DialogDescription>
-          维护井主表中的基础属性。井身结构、测斜、BHA 和实时数据仍使用现有规范表，不会创建平行数据表。
+          维护井主表中的基础属性。新井只需填写井名，系统会自动生成井号、创建空实时表并完成实时数据集注册。
         </DialogDescription>
       </DialogHeader>
       <form className="space-y-5" onSubmit={submit}>
@@ -153,17 +153,17 @@ export function WellProfileFormDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="well-code">规范井号 <span className="text-red-500">*</span></Label>
+            <Label htmlFor="well-code">规范井号 {isEditing && <span className="text-red-500">*</span>}</Label>
             <Input
               id="well-code"
-              value={form.wellCode}
+              value={form.wellCode || ''}
               maxLength={128}
-              placeholder="用于系统匹配，需保持唯一"
-              aria-invalid={!form.wellCode.trim() && touched.wellCode}
+              placeholder={isEditing ? '用于系统匹配，需保持唯一' : '可留空，系统自动生成'}
+              aria-invalid={isEditing && !form.wellCode?.trim() && touched.wellCode}
               onChange={(event) => update('wellCode', event.target.value)}
               onBlur={() => setTouched((current) => ({ ...current, wellCode: true }))}
             />
-            <p className="text-xs ops-muted">{isEditing ? '修改井号会同步更新井主表标识，已有从表关联仍按井 ID 保持不变。' : '井号用于系统匹配且必须唯一，创建后仍可在井档案中修改。'}</p>
+            <p className="text-xs ops-muted">{isEditing ? '修改井号会同步更新井主表标识，已有从表关联仍按井 ID 保持不变。' : '留空时按井名自动生成唯一井号，创建后仍可在井档案中修改。'}</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="block-name">区块</Label>

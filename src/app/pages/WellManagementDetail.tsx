@@ -154,7 +154,7 @@ export default function WellManagementDetail() {
     setEditError('');
     setFeedback('');
     try {
-      const updated = await updateWellProfile(profile.wellId, request);
+      const updated = await updateWellProfile(profile.wellId, { ...request, wellCode: request.wellCode || profile.wellCode });
       setProfile(updated);
       setEditOpen(false);
       setFeedback('井基础信息已更新。');

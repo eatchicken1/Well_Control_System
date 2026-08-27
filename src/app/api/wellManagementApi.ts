@@ -22,7 +22,8 @@ export interface WellProfile {
 
 export interface WellProfileMutationRequest {
   wellName: string;
-  wellCode: string;
+  /** Optional for create: the backend generates a unique key from wellName. */
+  wellCode?: string;
   blockName?: string;
   fieldName?: string;
   targetLayer?: string;
@@ -32,7 +33,7 @@ export interface WellProfileMutationRequest {
 }
 
 export type CreateWellProfileRequest = WellProfileMutationRequest;
-export type UpdateWellProfileRequest = WellProfileMutationRequest;
+export type UpdateWellProfileRequest = Omit<WellProfileMutationRequest, 'wellCode'> & { wellCode: string };
 
 const baseUrl = '/api/well-management';
 
