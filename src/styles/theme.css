@@ -3230,8 +3230,22 @@ body {
 .monitoring-side-panel {
   display: grid;
   align-content: start;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
+}
+
+/* Wellbore thumbnail must yield to the live event stream on short laptop
+   screens: bound it to a viewport-relative height instead of its intrinsic
+   diagram height. */
+.monitoring-thumbnail-slot {
+  max-height: min(320px, 34vh);
+}
+.monitoring-thumbnail-slot > * {
+  max-height: 100%;
+  overflow: hidden;
+}
+.monitoring-stream-slot {
+  min-height: 200px;
 }
 
 .realtime-kpi-strip {
@@ -3252,7 +3266,17 @@ body {
   border-radius: 8px;
   background: #fff;
 }
-.wellbore-thumbnail-card { padding: 10px; }
+.monitoring-thumbnail-slot .wellbore-thumbnail-card {
+  display: flex;
+  height: 100%;
+  max-height: 100%;
+  flex-direction: column;
+}
+.monitoring-thumbnail-slot .wellbore-thumbnail-figure {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
 .wellbore-thumbnail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .wellbore-thumbnail-head h2 { margin: 2px 0 0; color: #0f172a; font-size: 14px; font-weight: 700; }
 .wellbore-thumbnail-title-row { display: flex; align-items: center; gap: 7px; }
@@ -3526,13 +3550,30 @@ body {
 
 @media (min-width: 1024px) {
   body .monitoring-main-grid { grid-template-columns: minmax(0, 1fr) 360px !important; gap: 10px; }
-  body .monitoring-side-panel { grid-template-rows: auto minmax(0, 1fr) !important; }
+  body .monitoring-side-panel { grid-template-rows: auto minmax(0, 1fr) auto !important; }
   .wellbore-detail-grid { grid-template-columns: minmax(0, 1.9fr) minmax(360px, 0.8fr); }
 }
 @media (min-width: 1536px) {
   body .monitoring-main-grid { grid-template-columns: minmax(0, 1fr) 400px !important; }
   .wellbore-detail-grid { grid-template-columns: minmax(0, 2fr) minmax(400px, 0.78fr); }
 }
+/* Short laptop screens (e.g. 1366x768): compress fixed chrome so the
+   monitoring workspace keeps its curves and the live event stream visible. */
+@media (max-height: 860px) {
+  .app-topbar { min-height: 44px; padding: 4px 12px; }
+  .app-topbar .top-status-chip, .app-topbar .top-data-source { padding-top: 2px; padding-bottom: 2px; }
+  .realtime-kpi-strip > div { padding: 5px 9px; }
+  .realtime-kpi-strip strong { font-size: 11px; }
+  .monitoring-workspace { gap: 6px !important; }
+  .monitoring-main-grid { gap: 6px !important; }
+  .monitoring-stream-slot { min-height: 170px; }
+  .monitoring-thumbnail-slot { max-height: min(240px, 30vh); }
+  .alerts-event-scroll { max-height: calc(100vh - 300px); }
+  .well-management-table-wrap { max-height: calc(100vh - 290px); }
+  .ops-page-header h1 { font-size: 1.05rem; }
+  .ops-page-header p { font-size: 0.75rem; }
+}
+
 @media (max-width: 1200px) {
   .realtime-kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .wellbore-detail-title span:nth-last-child(-n+2) { display: none; }

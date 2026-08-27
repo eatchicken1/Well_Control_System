@@ -229,9 +229,9 @@ export default function WellManagement() {
           <p className="text-sm text-slate-700 dark:text-slate-200">没有匹配“{query.trim()}”的井</p>
           <Button className="mt-3" size="sm" variant="outline" onClick={() => setQuery('')}>清除搜索</Button>
         </div>
-      </div> : <div className="overflow-x-auto">
-        <table className="w-full min-w-[1120px] text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500 dark:bg-slate-900/60">
+      </div> : <div className="well-management-table-wrap max-h-[calc(100vh-330px)] overflow-y-auto">
+        <table className="w-full min-w-[960px] text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs text-slate-500 shadow-[0_1px_0_rgba(148,163,184,0.35)] dark:bg-slate-900/95">
             <tr>
               <th className="px-4 py-3 font-medium">井档案</th>
               <th className="px-4 py-3 font-medium">区域与层位</th>

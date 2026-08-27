@@ -44,6 +44,7 @@ export interface WellInfo {
   realtimeTableName?: string;
   sampleStartTime?: string;
   sampleEndTime?: string;
+  lastRealtimeSampleTime?: string;
 }
 
 export interface MonitoringData {
@@ -1212,6 +1213,9 @@ function normalizeMonitoringMode(value: unknown): MonitoringMode {
 
 export const REPLAY_SPEED_OPTIONS: readonly ReplaySpeed[] = [1, 2, 5, 10];
 const REPLAY_BASE_INTERVAL_MS = 1200;
+// The field sender publishes one sample every five seconds. Realtime mode
+// follows that cadence; it never advances a cursor when there is no new row.
+const REALTIME_FRAME_INTERVAL_MS = 5000;
 
 function normalizeReplaySpeed(value: unknown): ReplaySpeed {
   const speed = Number(value);
@@ -1223,7 +1227,10 @@ function replayIntervalMs(speed: ReplaySpeed) {
 }
 
 function wellLatestSampleTime(well?: WellInfo | null) {
-  return normalizeSampleTime(well?.sampleEndTime || well?.endTime || well?.discoveryTime || well?.startTime || '');
+  // sampleEndTime is the source wall-clock value used by the stream query.
+  // Prefer it over the transport status timestamp, which may be serialized
+  // with a UTC offset by the API.
+  return normalizeSampleTime(well?.sampleEndTime || well?.lastRealtimeSampleTime || well?.endTime || well?.discoveryTime || well?.startTime || '');
 }
 
 function wellEarliestSampleTime(well?: WellInfo | null) {
@@ -2465,6 +2472,7 @@ function normalizeRealtimeWell(item: unknown): WellInfo | null {
     realtimeTableName: String(row.realtimeTableName || row.realtime_table_name || row.tableName || row.table_name || ''),
     sampleStartTime: String(row.sampleStartTime || row.sample_start_time || ''),
     sampleEndTime: String(row.sampleEndTime || row.sample_end_time || ''),
+    lastRealtimeSampleTime: String(row.lastRealtimeSampleTime || row.last_realtime_sample_time || ''),
   };
 }
 
@@ -2479,7 +2487,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
   private replayQueue: RealTimeRecord[] = [];
   private replayTimer: number | null = null;
 
-  constructor(private endpoint: string, private startTime: string, private rateMs = 1200, private sessionCode?: string, initialSampleTime?: string | null, private lastSourceRowNo?: number, private lastEventId?: string, private mode: DataSourceMode = 'realtime') {
+  constructor(private endpoint: string, private startTime: string, private rateMs = REALTIME_FRAME_INTERVAL_MS, private sessionCode?: string, initialSampleTime?: string | null, private lastSourceRowNo?: number, private lastEventId?: string, private mode: DataSourceMode = 'realtime') {
     this.lastSampleTime = normalizeSampleTime(initialSampleTime || '') || null;
   }
 
@@ -2687,7 +2695,7 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
   constructor(
     private endpoint: string,
     private startTime: string,
-    private rateMs = 1200,
+    private rateMs = REALTIME_FRAME_INTERVAL_MS,
     private batchLimit = PREVIEW_BATCH_LIMIT,
     private idlePollMs = PREVIEW_IDLE_POLL_MS,
     private fallbackReason = '',
@@ -2917,7 +2925,7 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
   constructor(
     private endpoint: string,
     private startTime: string,
-    private rateMs = 1200,
+    private rateMs = REALTIME_FRAME_INTERVAL_MS,
     private connectTimeoutMs = STREAM_CONNECT_TIMEOUT_MS,
     sessionCode = '',
     lastSampleTime?: string | null,
@@ -3038,6 +3046,15 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
           ? sourceRowNo >= (this.lastSourceRowNo as number)
           : sampleMs > previousSampleMs || sourceRowNo >= (this.lastSourceRowNo as number);
       const cursorIsNotOlder = sampleIsNotOlder && sourceIsNotOlder;
+      const sameCursor = Boolean(
+        sampleTime && previousSampleTime && sampleMs !== null && previousSampleMs !== null
+          && sampleMs === previousSampleMs
+          && ((!Number.isFinite(sourceRowNo) || !Number.isFinite(this.lastSourceRowNo))
+            || sourceRowNo === this.lastSourceRowNo),
+      );
+      // A reconnect/catch-up query can include the boundary row again. It is
+      // already represented in the UI and must not be delivered twice.
+      if (sameCursor) return;
       if (sampleTime && cursorIsNotOlder) this.lastSampleTime = sampleTime;
       const resumeSourceRowNo = this.lastSourceRowNo;
       if (sampleTime && !cursorIsNotOlder) return;
@@ -3205,7 +3222,7 @@ class DisabledDataSourceAdapter implements DataSourceAdapter {
   }
 }
 
-function createMonitoringAdapter(mode: MonitoringMode, endpoint: string, startTime: string, rateMs = 1200, sessionCode = '', lastSampleTime?: string | null, lastSourceRowNo?: number): DataSourceAdapter {
+function createMonitoringAdapter(mode: MonitoringMode, endpoint: string, startTime: string, rateMs = REALTIME_FRAME_INTERVAL_MS, sessionCode = '', lastSampleTime?: string | null, lastSourceRowNo?: number): DataSourceAdapter {
   if (!endpoint) return new DisabledDataSourceAdapter();
   // History replay is a durable backend session too; it must attach to SSE rather than re-run frontend preview batches.
   return new ResilientRealtimeDataSourceAdapter(endpoint, startTime, rateMs, STREAM_CONNECT_TIMEOUT_MS, sessionCode, lastSampleTime, lastSourceRowNo, mode);
@@ -3301,6 +3318,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const autoRestoringWellIdsRef = useRef<Set<string>>(new Set());
   const autoRestoreFailureAtRef = useRef<Record<string, number>>({});
   const timeIndexRequestKeyRef = useRef('');
+  const realtimeWellsRefreshInFlightRef = useRef(false);
   const runtimePersistTimerRef = useRef<number | null>(null);
   const snapshotPersistTimerRef = useRef<number | null>(null);
   const snapshotCacheLoadedRef = useRef(false);
@@ -3988,7 +4006,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       mode,
       realtimeEndpoint,
       adapterStartTime,
-      mode === 'historyReplay' ? replayIntervalMs(priorRuntime?.replaySpeed || 1) : 1200,
+      mode === 'historyReplay' ? replayIntervalMs(priorRuntime?.replaySpeed || 1) : REALTIME_FRAME_INTERVAL_MS,
       effectiveSessionCode,
       streamSampleTime,
       streamCursor,
@@ -4299,16 +4317,29 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       status: 'connecting',
       message: '正在读取实时井列表',
     }));
-    authenticatedFetch(buildRealtimeApiUrl(realtimeEndpoint, '/wells'), { cache: 'no-store', signal: controller.signal })
-      .then((response) => {
+    const loadRealtimeWells = async () => {
+      if (realtimeWellsRefreshInFlightRef.current) return;
+      realtimeWellsRefreshInFlightRef.current = true;
+      try {
+        const response = await authenticatedFetch(buildRealtimeApiUrl(realtimeEndpoint, '/wells'), { cache: 'no-store', signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
-      })
-      .then((payload: { wells?: unknown[] }) => {
+        const payload = await response.json() as { wells?: unknown[] };
         if (controller.signal.aborted) return;
         const nextWells = (payload.wells || []).map(normalizeRealtimeWell).filter(Boolean) as WellInfo[];
         setRealtimeWellsLoaded(true);
-        setWells(nextWells);
+        setWells((previous) => {
+          // Keep the currently displayed metadata stable while replacing the
+          // server-owned realtime tail fields with the newest values.
+          const previousById = new Map(previous.map((well) => [well.wellId, well]));
+          const merged = nextWells.map((well) => {
+            const previousWell = previousById.get(well.wellId);
+            if (previousWell && JSON.stringify(previousWell) === JSON.stringify(well)) return previousWell;
+            return { ...previousWell, ...well };
+          });
+          return merged.length === previous.length && merged.every((well, index) => well === previous[index])
+            ? previous
+            : merged;
+        });
         const validWellIds = new Set(nextWells.map((well) => well.wellId));
         setMonitoredWellIds((current) => {
           const next = current.filter((wellId) => validWellIds.has(wellId));
@@ -4326,27 +4357,31 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           else window.localStorage.removeItem(STORAGE_SELECTED_WELL);
           return nextSelected;
         });
-        setRawDataSourceState((prev) => ({
-          ...prev,
-          status: nextWells.length > 0 ? 'connecting' : 'paused',
-          message: nextWells.length > 0
-            ? `已读取 ${nextWells.length} 口实时井，等待选择起始时间`
-            : '数据库中未读取到可监测井',
-        }));
-      })
-      .catch((error: Error) => {
-        if (controller.signal.aborted || error.name === 'AbortError') return;
-        setWells([]);
-        setSelectedWellId('');
-        setRealtimeWellsLoaded(true);
-        setRawDataSourceState((prev) => ({
-          ...prev,
-          status: 'error',
-          message: `井列表读取失败：${error.message}`,
-        }));
-      });
+        setRawDataSourceState((prev) => {
+          if (adapterRef.current || Object.keys(backgroundAdaptersRef.current).length > 0) return prev;
+          return {
+            ...prev,
+            status: nextWells.length > 0 ? 'connecting' : 'paused',
+            message: nextWells.length > 0
+              ? `已同步 ${nextWells.length} 口实时井，等待选择起始时间`
+              : '数据库中未读取到可监测井',
+          };
+        });
+      } catch (error) {
+        if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+        // Keep the last good list during a transient network failure. The
+        // next scheduled refresh will retry without forcing a page reload.
+        setRawDataSourceState((prev) => ({ ...prev, status: 'error', message: `井列表刷新失败：${error instanceof Error ? error.message : '未知错误'}` }));
+      } finally {
+        realtimeWellsRefreshInFlightRef.current = false;
+      }
+    };
+    void loadRealtimeWells();
+    const refreshTimer = window.setInterval(() => void loadRealtimeWells(), 5000);
     return () => {
       controller.abort();
+      window.clearInterval(refreshTimer);
+      realtimeWellsRefreshInFlightRef.current = false;
     };
   }, [authLoading, hasAccessToken, realtimeEndpoint, user?.id]);
 
@@ -4646,7 +4681,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       mode,
       realtimeEndpoint,
       adapterStartTime,
-      mode === 'historyReplay' ? replayIntervalMs(selectedWellRuntime?.replaySpeed || 1) : 1200,
+      mode === 'historyReplay' ? replayIntervalMs(selectedWellRuntime?.replaySpeed || 1) : REALTIME_FRAME_INTERVAL_MS,
       selectedWellRuntime?.sessionCode || '',
       selectedWellRuntime?.lastSeenSampleTime,
       selectedWellRuntime?.lastSeenSourceRowNo,
@@ -4803,7 +4838,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     return () => {
       adapter.disconnect();
     };
-  }, [appendAlertsFromRecord, getWellSnapshot, isRunning, realtimeEndpoint, selectedStartTime, selectedWellRuntime?.monitoringMode, selectedWellRuntime?.selectedReplayStartTime, selectedWellRuntime?.startedSampleTime, wellInfo]);
+  }, [appendAlertsFromRecord, getWellSnapshot, isRunning, realtimeEndpoint, selectedStartTime, selectedWellRuntime?.monitoringMode, selectedWellRuntime?.selectedReplayStartTime, selectedWellRuntime?.startedSampleTime, wellInfo?.wellId]);
 
   const resetForWell = (well: WellInfo, startTime = selectedStartTime, clearEvents = false) => {
     const nextInitial = makeInitialData(well);
@@ -5162,7 +5197,42 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     const explicitRestartStart = monitoringMode === 'historyReplay' && requestedAction === 'restart'
       ? clampReplayStartTime(options?.restartFrom || '', nextWell)
       : '';
-    const latestRealtimeStart = wellLatestSampleTime(nextWell);
+    let latestRealtimeStart = wellLatestSampleTime(nextWell);
+    // The list loaded when the page opened can be behind the receiver by one
+    // or more sender frames. Before creating a realtime session, ask the
+    // backend for the current tail so the first attach never depends on a
+    // manual page refresh.
+    if (monitoringMode === 'realtime') {
+      try {
+        const latestResponse = await authenticatedFetch(
+          buildRealtimeApiUrl(realtimeEndpoint, `/wells/${encodeURIComponent(wellId)}/times?maxOptions=1`),
+          { cache: 'no-store', signal: requestController.signal },
+        );
+        if (latestResponse.ok) {
+          const latestPayload = await latestResponse.json() as Record<string, unknown>;
+          const serverLatest = normalizeSampleTime(String(
+            latestPayload.last_time
+              || latestPayload.lastTime
+              || latestPayload.end_time
+              || latestPayload.endTime
+              || '',
+          ));
+          if (serverLatest) {
+            latestRealtimeStart = serverLatest;
+            setWells((current) => current.map((item) => item.wellId === wellId
+              ? { ...item, sampleEndTime: serverLatest, endTime: serverLatest, lastRealtimeSampleTime: serverLatest }
+              : item));
+          }
+        }
+      } catch (error) {
+        if (requestController.signal.aborted) {
+          releaseStartRequest();
+          return;
+        }
+        // The already loaded tail remains a safe fallback for a transient
+        // time-index failure; the stream itself still uses no-store reads.
+      }
+    }
     const resumeFrom = monitoringMode === 'historyReplay'
       ? isHistoryContinue
         ? (options?.resumeFrom || priorRuntime?.lastSeenSampleTime || priorRuntime?.lastRecordAt || '')
@@ -5297,7 +5367,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         mode: monitoringMode === 'historyReplay' ? 'history_replay' : 'realtime',
         startTime: toApiDateTimeOffset(directStartTime),
         followTail: monitoringMode !== 'historyReplay',
-        rateMs: monitoringMode === 'historyReplay' ? replayIntervalMs(priorRuntime?.replaySpeed || 1) : 1200,
+        rateMs: monitoringMode === 'historyReplay' ? replayIntervalMs(priorRuntime?.replaySpeed || 1) : REALTIME_FRAME_INTERVAL_MS,
         action: requestedAction,
         sessionCode: isHistoryContinue ? priorRuntime?.sessionCode : undefined,
       }),

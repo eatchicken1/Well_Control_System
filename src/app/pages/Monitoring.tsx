@@ -184,7 +184,7 @@ export default function Monitoring() {
           </section>
 
           <aside className="monitoring-side-panel monitoring-side-stack min-h-0 min-w-0 gap-2 overflow-hidden">
-            <div className="min-h-0 overflow-hidden">
+            <div className="monitoring-thumbnail-slot min-h-0 overflow-hidden">
               <WellboreStatusThumbnail
                 wellName={activeWell.wellName}
                 wellDepth={selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? activeWell.depth}
@@ -212,7 +212,7 @@ export default function Monitoring() {
                 isStopped={selectedWellManuallyStopped}
               />
             </div>
-            <div className="min-h-0 overflow-hidden">
+            <div className="monitoring-stream-slot min-h-0 overflow-hidden">
               <MonitoringEventStream
                 items={monitoringEvents}
                 alerts={currentWellAlerts}
@@ -221,11 +221,23 @@ export default function Monitoring() {
                 endpoint={realtimeEndpoint}
               />
             </div>
-            <PreprocessingDiagnosticsPanel snapshot={viewBackendDetection.preprocessing} />
-            <ReferenceExperimentPanel snapshot={viewBackendDetection.referenceExperiment} />
-            <PumpTopologyGatePanel snapshot={viewBackendDetection.pumpGate} />
-            <PrecursorEligibilityPanel snapshot={viewBackendDetection.precursorEligibility} />
-            <OperationContextV2Panel snapshot={viewBackendDetection.operationContextV2} v1FineLabel={viewCurrentData.condition} />
+            {/* Shadow diagnostics share one collapsed group: on short laptop
+                screens seven stacked side-panel children pushed the live
+                event stream out of the viewport entirely. Collapsed by
+                default, so the operator sees wellbore + events first. */}
+            <details className="monitoring-diagnostics-group ops-panel-soft shrink-0 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                <span>算法诊断（预处理 / 参考 / 泵拓扑 / 先兆 / V2 工况）</span>
+                <span className="text-[10px] font-normal ops-muted">展开</span>
+              </summary>
+              <div className="monitoring-diagnostics-body ops-scroll max-h-[46vh] space-y-2 overflow-y-auto p-2">
+                <PreprocessingDiagnosticsPanel snapshot={viewBackendDetection.preprocessing} />
+                <ReferenceExperimentPanel snapshot={viewBackendDetection.referenceExperiment} />
+                <PumpTopologyGatePanel snapshot={viewBackendDetection.pumpGate} />
+                <PrecursorEligibilityPanel snapshot={viewBackendDetection.precursorEligibility} />
+                <OperationContextV2Panel snapshot={viewBackendDetection.operationContextV2} v1FineLabel={viewCurrentData.condition} />
+              </div>
+            </details>
           </aside>
         </div>
       )}

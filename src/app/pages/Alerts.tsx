@@ -565,7 +565,7 @@ export default function Alerts() {
           )}
         </div>
 
-        <div className="ops-surface-body ops-scroll max-h-[calc(100vh-390px)] overflow-y-auto">
+        <div className="alerts-event-scroll ops-surface-body ops-scroll max-h-[calc(100vh-360px)] overflow-y-auto">
           {loading ? (
             <div className="ops-empty-state m-3 min-h-[220px]"><RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin text-cyan-600" /><div className="text-sm ops-muted">正在读取后端报警事件…</div></div>
           ) : events.length === 0 ? (
