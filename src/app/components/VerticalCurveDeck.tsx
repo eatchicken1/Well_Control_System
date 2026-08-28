@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BackendLevel, FlowDataPoint, PressureDataPoint, ThresholdSettings } from '../context/WellControlContext';
 import { outletDisplayLabel, outletDisplayUnit } from '../lib/telemetryContract';
+import { parseSourceDateMs } from '../lib/sourceTime';
 import { useIsDarkMode } from '../hooks/useChartTheme';
 
 interface VerticalCurveDeckProps {
@@ -350,8 +351,7 @@ interface FrameLevelBand {
 
 function curvePointTimeMs(point: CurvePoint) {
   if (Number.isFinite(point.timestampMs)) return Number(point.timestampMs);
-  const parsed = Date.parse(point.time);
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
+  return parseSourceDateMs(point.time) ?? Number.NaN;
 }
 
 /**
@@ -633,6 +633,9 @@ function VerticalTrack({
       const tickIndices = [0, 0.25, 0.5, 0.75, 1].map((ratio) =>
         Math.min(points.length - 1, Math.round((points.length - 1) * ratio)),
       );
+      const latestIndex = points.length - 1;
+      const latestTickY = yForIndex(latestIndex);
+      const latestLabelY = Math.min(plotY + plotH - labelHeight - 4, Math.max(plotY + 4, latestTickY - labelHeight / 2));
       const placed: number[] = [];
 
       ctx.strokeStyle = palette.ruler;
@@ -649,7 +652,11 @@ function VerticalTrack({
         const point = points[index];
         const tickY = yForIndex(index);
         const y = Math.min(plotY + plotH - labelHeight - 4, Math.max(plotY + 4, tickY - labelHeight / 2));
-        if (placed.some((previousY) => Math.abs(previousY - y) < minGap)) return;
+        const isLatest = index === latestIndex;
+        // Reserve the bottom label for the newest sample. On short panels the
+        // 75% tick can otherwise claim the same vertical slot and the final
+        // timestamp disappears entirely.
+        if (!isLatest && (Math.abs(latestLabelY - y) < minGap || placed.some((previousY) => Math.abs(previousY - y) < minGap))) return;
         placed.push(y);
 
         ctx.strokeStyle = palette.rulerMinor;
@@ -661,7 +668,7 @@ function VerticalTrack({
 
         ctx.fillStyle = palette.axisText;
         ctx.font = `${mobileDense ? '8.5px' : '9.5px'} 'JetBrains Mono', monospace`;
-        ctx.fillText(timeLabel(point.time), 14, y + 5);
+        ctx.fillText(timeLabel(point.time) || '--:--', 14, y + 5);
         ctx.fillStyle = palette.depth;
         ctx.font = `700 ${mobileDense ? '8.5px' : '9.5px'} 'JetBrains Mono', monospace`;
         ctx.fillText(`井深 ${fmtDepthWithUnit(point.depth)}`, 14, y + (mobileDense ? 17 : 19));
@@ -858,12 +865,6 @@ export function VerticalCurveDeck({
       className="vertical-curve-deck relative flex h-full min-h-[360px] flex-col overflow-hidden rounded-md border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950"
       data-fill-viewport={fillTracks ? 'true' : undefined}
     >
-      <div className="pointer-events-none absolute right-2 top-1 z-10 flex items-center gap-1 rounded bg-white/85 px-1.5 py-1 text-[9px] font-semibold text-slate-600 shadow-sm dark:bg-slate-900/85 dark:text-slate-300" aria-label="事件等级背景色图例">
-        <span className="h-2 w-2 rounded-sm bg-yellow-300" />L1
-        <span className="h-2 w-2 rounded-sm bg-orange-400" />L2
-        <span className="h-2 w-2 rounded-sm bg-red-400" />L3
-        <span className="h-2 w-2 rounded-sm bg-pink-700" />L4
-      </div>
       <div className={`vertical-curve-body flex min-h-0 flex-1 overflow-y-hidden ${fillTracks ? 'overflow-x-hidden' : 'overflow-x-auto'}`}>
         <AxisLane points={renderPoints} compact={compact} mobileDense={mobileDense} />
         {displayTracks.map((track) => (

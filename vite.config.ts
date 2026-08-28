@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -16,12 +16,16 @@ function figmaAssetResolver() {
   }
 }
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
   // Dev proxy target is environment-configurable (VITE_API_TARGET in .env
   // or shell). Runtime code always uses relative /api paths, so production
   // only needs a reverse proxy; this only removes the hardcoded localhost
   // from local development.
-  const apiTarget = process.env.VITE_API_TARGET || 'http://127.0.0.1:5007'
+  // Vite does not automatically expose .env values to the config through
+  // process.env. Load the mode-specific files explicitly so local dev and CI
+  // use the same API target that the project documents.
+  const env = loadEnv(mode, process.cwd(), '')
+  const apiTarget = env.VITE_API_TARGET || process.env.VITE_API_TARGET || 'http://127.0.0.1:5007'
   return {
     plugins: [
       figmaAssetResolver(),
@@ -38,6 +42,12 @@ export default defineConfig(() => {
     },
 
     server: {
+      // Browser tooling may create a temporary profile inside the workspace.
+      // Keep Vite from watching its locked cache files and crashing the dev
+      // server when the profile is active.
+      watch: {
+        ignored: ['**/.edge-temp/**'],
+      },
       proxy: {
         '/api/realtime': {
           target: apiTarget,

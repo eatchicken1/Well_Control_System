@@ -40,8 +40,15 @@ function alert(overrides: Partial<Alert> = {}): Alert {
   };
 }
 
+test('single L1 frame is not projected as an event', () => {
+  assert.equal(projectL1ObservationWindows([flow('2026-08-13 10:00:00')]).length, 0);
+});
+
 test('L1IsNeutralObservation', () => {
-  const [item] = projectL1ObservationWindows([flow('2026-08-13 10:00:00')]);
+  const [item] = projectL1ObservationWindows([
+    flow('2026-08-13 10:00:00'),
+    flow('2026-08-13 10:00:30'),
+  ]);
   assert.equal(item.kind, 'observation');
   assert.equal(monitoringEventVisualTone(item), 'neutral');
 });
@@ -95,6 +102,7 @@ test('WatchStateMapsToObservationLifecycle', () => {
 test('L1AndL2AppearInSameChronologicalStream', () => {
   const observations = projectL1ObservationWindows([
     flow('2026-08-13 10:00:00'),
+    flow('2026-08-13 10:00:30'),
     flow('2026-08-13 10:01:00', 0),
   ]);
   const merged = mergeMonitoringEvents(observations, projectAlarmEvents([alert()]));
@@ -114,6 +122,7 @@ test('SameBackendEventIdProducesOneRow', () => {
 test('SameBackendEventIdProducesOneRow across L1 and L2 projections', () => {
   const observations = projectL1ObservationWindows([
     flow('2026-08-13 10:00:00', 1, 'shared-event'),
+    flow('2026-08-13 10:00:30', 1, 'shared-event'),
     flow('2026-08-13 10:01:00', 0),
   ]);
   const alarms = projectAlarmEvents([alert({ backendEventId: 'shared-event' })]);
@@ -178,12 +187,15 @@ test('FollowLatestRestoresAutoScroll', () => {
 
 test('EmptyStateOnlyWhenNoObservationAndNoAlarm', () => {
   assert.equal(mergeMonitoringEvents([], []).length, 0);
-  assert.equal(mergeMonitoringEvents(projectL1ObservationWindows([flow('2026-08-13 10:00:00')]), []).length, 1);
+  assert.equal(mergeMonitoringEvents(projectL1ObservationWindows([flow('2026-08-13 10:00:00')]), []).length, 0);
   assert.equal(mergeMonitoringEvents([], projectAlarmEvents([alert()])).length, 1);
 });
 
 test('L1DoesNotRequireAck', () => {
-  const [item] = projectL1ObservationWindows([flow('2026-08-13 10:00:00')]);
+  const [item] = projectL1ObservationWindows([
+    flow('2026-08-13 10:00:00'),
+    flow('2026-08-13 10:00:30'),
+  ]);
   assert.equal(item.ackStatus, 'not-required');
 });
 

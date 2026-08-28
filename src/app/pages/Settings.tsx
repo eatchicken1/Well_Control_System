@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle, Gauge, Info, KeyRound, RadioTower, RotateCcw, Save, Server, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
-import { DEFAULT_REALTIME_ENDPOINT, DEFAULT_THRESHOLDS, useWellControl } from '../context/WellControlContext';
+import { DEFAULT_REALTIME_ENDPOINT, DEFAULT_THRESHOLDS, MONITORING_WINDOW_OPTIONS, useWellControl, type MonitoringWindowMinutes } from '../context/WellControlContext';
 import { OpsProcedureRail } from '../components/OpsProcedureRail';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { useAuth } from '../context/AuthContext';
@@ -332,7 +332,7 @@ function ConfigRiskBanner({
 }
 
 export default function Settings() {
-  const { thresholds, updateThresholds, dataSourceState, realtimeEndpoint, updateRealtimeEndpoint } = useWellControl();
+  const { thresholds, updateThresholds, monitoringWindowMinutes, updateMonitoringWindowMinutes, dataSourceState, realtimeEndpoint, updateRealtimeEndpoint } = useWellControl();
   const { changePassword } = useAuth();
   const [draft, setDraft] = useState({ ...thresholds });
   const [endpointDraft, setEndpointDraft] = useState(realtimeEndpoint);
@@ -598,6 +598,25 @@ export default function Settings() {
                 <div className="mt-2 tabular-nums opacity-75">样本 {dataSourceState.recordCount} · {dataSourceState.lastRecordAt || '--:--:--'}</div>
               </div>
             </div>
+          </section>
+
+          <section className="ops-surface p-4" aria-labelledby="monitoring-window-setting-title">
+            <h3 id="monitoring-window-setting-title" className="mb-2 flex items-center gap-2 text-base text-slate-800 dark:text-slate-100">
+              <SlidersHorizontal className="h-4 w-4 text-cyan-500" />泳道时间窗口
+            </h3>
+            <p className="mb-3 text-[11px] leading-5 ops-muted">限制实时监测泳道保留的最近数据范围，避免长期运行累积过多点位。仅影响显示缓存，不改变后端检测结果。</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {MONITORING_WINDOW_OPTIONS.map((minutes) => (
+                <button
+                  key={minutes}
+                  type="button"
+                  aria-pressed={monitoringWindowMinutes === minutes}
+                  onClick={() => updateMonitoringWindowMinutes(minutes as MonitoringWindowMinutes)}
+                  className={`rounded-md border px-3 py-2 text-sm transition-colors ${monitoringWindowMinutes === minutes ? 'border-cyan-400 bg-cyan-50 font-semibold text-cyan-800 ring-1 ring-cyan-300 dark:border-cyan-500 dark:bg-cyan-950/25 dark:text-cyan-100' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200'}`}
+                >{minutes === 30 ? '半小时' : minutes === 60 ? '一小时' : '一个半小时'}</button>
+              ))}
+            </div>
+            <div className="mt-2 text-xs ops-muted">当前：最近 {monitoringWindowMinutes} 分钟</div>
           </section>
 
           <section className="ops-surface p-4" aria-labelledby="outlet-signal-setting-title">

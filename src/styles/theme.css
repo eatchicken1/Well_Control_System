@@ -6642,3 +6642,204 @@ body {
    reference learning frozen. Distinct from recovery (quiet evidence). */
 .event-projection-row span.is-hold { border-color: #a16207; background: #fef3c7; color: #713f12; }
 .dark .event-projection-row span.is-hold { border-color: #d97706; background: #451a03; color: #fde68a; }
+
+/* Monitoring workspace layout pass: keep the live curves dominant while
+   giving the secondary wellbore preview a bounded, complete drawing. */
+.monitoring-route-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: 8px 12px 10px;
+}
+
+.app-topbar-monitoring {
+  min-height: 40px;
+  gap: 6px;
+  padding: 2px 10px;
+}
+
+.app-topbar-monitoring > button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 4px !important;
+}
+
+.app-topbar-monitoring .topbar-icon-action {
+  width: 30px;
+  height: 30px;
+}
+
+.app-topbar-monitoring .top-user-chip,
+.app-topbar-monitoring .top-status-chip {
+  padding: 4px 8px;
+}
+
+.app-topbar-monitoring .top-data-source {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.monitoring-tabbar-compact {
+  gap: 8px;
+  padding: 5px 8px;
+}
+
+.monitoring-tabbar-compact .monitoring-tab {
+  min-height: 34px;
+  padding: 4px 8px;
+}
+
+.monitoring-tabbar-compact .monitoring-tabbar-actions {
+  gap: 6px;
+}
+
+.monitoring-tabbar-compact .monitoring-stop-action {
+  min-width: 104px;
+  min-height: 34px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.monitoring-main-grid,
+.monitoring-primary-panel,
+.monitoring-side-panel {
+  min-height: 0;
+}
+
+.monitoring-primary-panel .realtime-kpi-strip > div {
+  padding: 4px 8px;
+}
+
+.monitoring-thumbnail-slot .wellbore-thumbnail-card {
+  height: clamp(180px, 30vh, 280px);
+  min-height: 0;
+  padding: 6px;
+}
+
+.monitoring-thumbnail-slot .wellbore-thumbnail-head {
+  flex: 0 0 auto;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.monitoring-thumbnail-slot .wellbore-thumbnail-head h2 {
+  font-size: 13px;
+}
+
+.monitoring-thumbnail-slot .wellbore-ghost-button {
+  height: 26px;
+  padding-inline: 7px;
+}
+
+.monitoring-thumbnail-slot .wellbore-thumbnail-figure {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-items: stretch;
+}
+
+.monitoring-thumbnail-slot .wellbore-thumbnail-figure > .wellbore-schema-figure,
+.monitoring-thumbnail-slot .wellbore-schema-figure {
+  min-height: 0 !important;
+  height: 100%;
+  flex: 1 1 auto;
+}
+
+.monitoring-thumbnail-slot .wellbore-thumbnail-readouts {
+  flex: 0 0 auto;
+  margin-top: 5px;
+}
+
+@media (max-height: 700px) {
+  /* At extremely short heights the event stream is more useful than a
+     thumbnail that would otherwise become unreadably small. */
+  .monitoring-thumbnail-slot {
+    display: none;
+  }
+
+  body .monitoring-side-panel.monitoring-side-stack {
+    grid-template-rows: minmax(0, 1fr) auto !important;
+  }
+}
+
+/* The monitoring split is intentionally lane-first. The event panel uses a
+   fixed, user-adjustable width; drag the divider on its left edge to give
+   more room to the curves or to the event list. */
+@media (min-width: 1024px) {
+  body .monitoring-main-grid {
+    grid-template-columns: minmax(0, 1fr) var(--monitoring-event-width, 340px) !important;
+  }
+}
+
+.monitoring-primary-panel,
+.monitoring-primary-panel > div,
+.monitoring-primary-panel .vertical-curve-deck {
+  min-width: 0;
+}
+
+.monitoring-primary-panel .vertical-curve-body {
+  overflow-x: hidden;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
+}
+
+.monitoring-event-resize-handle {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.monitoring-event-resize-handle::before {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 2px;
+  height: 44px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.45);
+  content: '';
+  transform: translateY(-50%);
+  transition: background-color 140ms ease, height 140ms ease;
+}
+
+.monitoring-event-resize-handle:hover::before,
+.monitoring-event-resize-handle:focus-visible::before {
+  height: 72px;
+  background: #0f766e;
+}
+
+.monitoring-side-panel {
+  position: relative;
+}
+
+.monitoring-stream-slot,
+.monitoring-stream-slot > .monitoring-alert-queue,
+.monitoring-stream-slot .ops-scroll {
+  min-width: 0;
+  overscroll-behavior: contain;
+}
+
+.monitoring-stream-slot .ops-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+@media (min-width: 1536px) {
+  body .monitoring-main-grid {
+    --monitoring-event-width: 360px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .monitoring-event-resize-handle {
+    display: none;
+  }
+}

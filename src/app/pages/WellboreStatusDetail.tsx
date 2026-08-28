@@ -5,6 +5,7 @@ import { useWellControl, type BackendLevel } from '../context/WellControlContext
 import { WellboreSchemaFigure } from '../components/WellboreSchemaFigure';
 import { deriveWellboreState, formatWellboreConditionLabel, getWellboreStateMeta } from '../lib/wellboreState';
 import { normalizeWellboreStructureSections } from '../lib/wellboreSimulation';
+import { parseSourceDateMs } from '../lib/sourceTime';
 import { fetchWellboreProfile, getCachedWellboreProfile, type WellboreProfile } from '../api/wellboreProfileApi';
 
 const LEVEL_LABELS: Record<BackendLevel, string> = {
@@ -24,8 +25,8 @@ function diagramWidth(value: number | undefined, fallback: number) {
 
 function dataDelaySeconds(lastRecordAt: string | null) {
   if (!lastRecordAt) return null;
-  const parsed = Date.parse(lastRecordAt.replace(' ', 'T'));
-  if (!Number.isFinite(parsed)) return null;
+  const parsed = parseSourceDateMs(lastRecordAt);
+  if (parsed === null) return null;
   return Math.max(0, (Date.now() - parsed) / 1000);
 }
 

@@ -365,7 +365,7 @@ export function Layout() {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top bar */}
-        <header className="app-topbar flex flex-shrink-0 flex-wrap items-center gap-3">
+        <header className={`app-topbar ${isMonitoringRoute ? 'app-topbar-monitoring' : ''} flex flex-shrink-0 flex-wrap items-center gap-3`}>
           <button type="button" className="lg:hidden p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => setSidebarOpen(true)} title="打开导航" aria-label="打开导航">
             <Menu className="w-5 h-5" />
           </button>
@@ -407,7 +407,7 @@ export function Layout() {
         {showFleetStrip && <WellFleetStrip />}
 
         {/* Page content */}
-        <main className={`ops-scroll flex-1 p-3 lg:p-4 ${isMonitoringRoute ? 'overflow-auto lg:overflow-hidden' : 'overflow-auto'}`} data-current-sample-time={currentSampleTime}>
+        <main className={`ops-scroll flex-1 min-h-0 ${isMonitoringRoute ? 'monitoring-route-main overflow-auto lg:overflow-hidden' : 'overflow-auto p-3 lg:p-4'}`} data-current-sample-time={currentSampleTime}>
           <Outlet />
         </main>
       </div>

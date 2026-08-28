@@ -1,5 +1,6 @@
 import type { Alert, BackendLevel, FlowDataPoint } from '../context/WellControlContext';
 import { operatorEventPresentation } from './operatorEventPresentation';
+import { parseSourceDateMs } from './sourceTime';
 
 export type MonitoringEventKind = 'observation' | 'alarm';
 /**
@@ -44,6 +45,11 @@ export interface MonitoringEventStreamItem {
 export type MonitoringEventFilter = 'all' | 'alarms' | 'unacknowledged';
 export type MonitoringEventVisualTone = 'neutral' | 'amber' | 'orange' | 'red';
 
+// A single L1 frame is an observation, not an operator event. Requiring the
+// smallest two-frame span removes one-frame spikes while leaving the backend
+// incident engine as the sole source of formal L2+ events.
+const MIN_L1_OBSERVATION_SAMPLES = 2;
+
 interface TimedPoint {
   value: FlowDataPoint;
   index: number;
@@ -58,11 +64,11 @@ function safeLevel(value: unknown): BackendLevel {
 function parseTimestamp(date: string | undefined, time: string | undefined, fallback = Number.NaN) {
   const rawTime = String(time || '').trim();
   if (!rawTime) return fallback;
-  const direct = Date.parse(rawTime.replace(' ', 'T'));
-  if (Number.isFinite(direct)) return direct;
+  const direct = parseSourceDateMs(rawTime);
+  if (direct !== null) return direct;
   const rawDate = String(date || '').trim().replaceAll('/', '-');
-  const combined = rawDate ? Date.parse(`${rawDate}T${rawTime}`) : Number.NaN;
-  return Number.isFinite(combined) ? combined : fallback;
+  const combined = rawDate ? parseSourceDateMs(`${rawDate} ${rawTime}`) : null;
+  return combined ?? fallback;
 }
 
 function pointTimestamp(point: FlowDataPoint, index: number) {
@@ -129,6 +135,10 @@ export function projectL1ObservationWindows(flowHistory: FlowDataPoint[]): Monit
 
   const close = (isActive: boolean) => {
     if (!current) return;
+    if (current.sampleCount < MIN_L1_OBSERVATION_SAMPLES) {
+      current = null;
+      return;
+    }
     const suffix = `${current.eventId || 'local'}-${current.startTimestamp}-${projected.length}`;
     projected.push({
       id: `observation-${suffix}`,
@@ -136,6 +146,8 @@ export function projectL1ObservationWindows(flowHistory: FlowDataPoint[]): Monit
       level: 1,
       currentLevel: isActive ? 1 : 0,
       peakLevel: 1,
+      // The first source frame is the canonical start. It is never replaced
+      // by a later refresh; only lastTime/endTime advances with the span.
       startTime: current.startTime,
       endTime: current.lastTime,
       lastTime: current.lastTime,
@@ -204,6 +216,13 @@ export function projectAlarmEvents(alerts: Alert[]): MonitoringEventStreamItem[]
     const currentLevel = safeLevel(alert.currentBackendLevel ?? alert.backendLevel);
     const peakLevel = safeLevel(alert.peakBackendLevel ?? alert.backendLevel);
     if (Math.max(currentLevel, peakLevel) < 2) return;
+    // A formal alarm needs continuity. The first raw SSE frame is only a
+    // candidate; keep it out of the operator event list until a second frame
+    // confirms the same backend event identity. Terminal lifecycle records
+    // are also subject to this rule so a transition cannot appear as a
+    // one-frame alarm.
+    const observedSamples = Math.max(0, Math.round(Number(alert.count) || 0));
+    if (observedSamples < 2) return;
     const backendEventId = String(alert.backendEventId || '').trim() || `local-${alert.id}-${index}`;
     const group = groups.get(backendEventId) || [];
     group.push(alert);
@@ -237,15 +256,18 @@ export function projectAlarmEvents(alerts: Alert[]): MonitoringEventStreamItem[]
       primaryParameter: latest.primaryParameter,
       activeSignals: latest.activeSignals,
     }, latestCurrentLevel);
+    const earliestAlert = group[starts.indexOf(startTimestamp)] || group[0];
+    const canonicalStart = dateTimeLabel(earliestAlert.date, earliestAlert.time);
+    const canonicalEnd = dateTimeLabel(latest.lastDate || latest.date, latest.lastTime || latest.time);
     return {
       id: `alarm-${backendEventId}`,
       kind: 'alarm' as const,
       level: currentLevel,
       currentLevel,
       peakLevel,
-      startTime: group.reduce((earliest, alert, index) => starts[index] < earliest.timestamp ? { timestamp: starts[index], value: dateTimeLabel(alert.date, alert.time) } : earliest, { timestamp: Number.POSITIVE_INFINITY, value: dateTimeLabel(latest.date, latest.time) }).value,
-      endTime: dateTimeLabel(latest.lastDate || latest.date, latest.lastTime || latest.time),
-      lastTime: dateTimeLabel(latest.lastDate || latest.date, latest.lastTime || latest.time),
+      startTime: canonicalStart,
+      endTime: canonicalEnd,
+      lastTime: canonicalEnd,
       message: presentation.title,
       description: presentation.description,
       lifecycleStatus: normalizedLifecycle,

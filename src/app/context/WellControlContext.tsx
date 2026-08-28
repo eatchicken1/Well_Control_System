@@ -10,6 +10,15 @@ import { resetRealtimeBaseline } from '../api/realtimeBaselineApi';
 import { fallbackQueueCandidateFromFrame, mergeQueueAlertSnapshot } from '../lib/alertQueueProjection';
 import { markEventExplanationRevision } from '../lib/eventExplanationCache';
 import { operatorEventPresentation } from '../lib/operatorEventPresentation';
+import { withMonitoringModeQuery } from '../lib/realtimeStreamUrl';
+import {
+  formatSourceDate,
+  formatSourceDateTime,
+  formatSourceTime,
+  parseSourceDate,
+  parseSourceDateMs,
+  toSourceDateTimeOffset,
+} from '../lib/sourceTime';
 import { useAuth } from './AuthContext';
 
 export type AlertStatus = 'normal' | 'warning' | 'critical';
@@ -150,6 +159,7 @@ export interface BaselineSnapshot {
   ready: boolean;
   warmup: boolean;
   minimumReferenceSamples: number;
+  minimumReferenceExposureSeconds: number;
   readyChannelCount: number;
   channelCount: number;
   frozenChannelCount: number;
@@ -364,6 +374,7 @@ const STORAGE_SELECTED_WELL = `${STORAGE_PREFIX}:selected-well-id`;
 const STORAGE_MONITORED_WELLS = `${STORAGE_PREFIX}:monitored-well-ids`;
 const STORAGE_REALTIME_TABS = `${STORAGE_PREFIX}:realtime-tab-well-ids`;
 const STORAGE_REALTIME_ENDPOINT = `${STORAGE_PREFIX}:realtime-endpoint`;
+const STORAGE_MONITORING_WINDOW_MINUTES = `${STORAGE_PREFIX}:monitoring-window-minutes`;
 const STORAGE_WELL_RUNTIME_STATES = `${STORAGE_PREFIX}:well-runtime-states`;
 const SNAPSHOT_DB_NAME = `${STORAGE_PREFIX}:cache`;
 const SNAPSHOT_STORE_NAME = 'wellSnapshots';
@@ -521,15 +532,7 @@ function hasWellResumeProgress(runtime?: WellRuntimeState | null, snapshot?: Wel
 }
 
 function parseDateLikeMs(value?: string | number | null) {
-  if (value === undefined || value === null || value === '') return null;
-  const text = String(value).trim();
-  if (!text) return null;
-  const variants = text.includes('T') ? [text] : [text, text.replace(' ', 'T')];
-  for (const variant of variants) {
-    const parsed = new Date(variant).getTime();
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
+  return parseSourceDateMs(value);
 }
 
 function sampleTimeFromRecord(record?: Partial<RealTimeRecord> | null) {
@@ -538,41 +541,28 @@ function sampleTimeFromRecord(record?: Partial<RealTimeRecord> | null) {
   return String(row.sampleTime ?? row.SampleTime ?? row.sample_time ?? row.timestamp ?? row.Timestamp ?? '').trim();
 }
 
+function sourceRowNoFromRecord(record?: Partial<RealTimeRecord> | null) {
+  if (!record || typeof record !== 'object') return undefined;
+  const value = finite(
+    readValue(record as Record<string, unknown>, ['source_row_no', 'sourceRowNo']),
+    Number.NaN,
+  );
+  return Number.isFinite(value) ? value : undefined;
+}
+
 function normalizeSampleTime(value?: string | null) {
   return value ? value.replace('T', ' ').trim() : '';
 }
 
 function toApiDateTimeOffset(value?: string | null) {
-  const text = String(value || '').trim();
-  if (!text) return undefined;
-  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) {
-    const millis = parseDateLikeMs(text);
-    return millis === null ? undefined : new Date(millis).toISOString();
-  }
-  const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})$/);
-  if (!match) return undefined;
-  const localDate = new Date(`${match[1]}T${match[2]}`);
-  if (Number.isNaN(localDate.getTime())) return undefined;
-  const offsetMinutes = -localDate.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const absoluteOffset = Math.abs(offsetMinutes);
-  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, '0');
-  const offsetRemainder = String(absoluteOffset % 60).padStart(2, '0');
-  return `${match[1]}T${match[2]}${sign}${offsetHours}:${offsetRemainder}`;
-}
-
-function isStrictlyNewerSampleTime(candidate?: string | null, previous?: string | null) {
-  const candidateMs = parseDateLikeMs(candidate);
-  const previousMs = parseDateLikeMs(previous);
-  if (candidateMs === null) return false;
-  if (previousMs === null) return true;
-  return candidateMs > previousMs;
+  return toSourceDateTimeOffset(value);
 }
 
 function nextPreviewCursorFrom(sampleTime?: string | null) {
-  const normalized = normalizeSampleTime(sampleTime);
-  if (!normalized) return '';
-  return shiftTimestamp(normalized, 1000) || normalized;
+  // Kept as a compatibility helper for callers that only have a timestamp.
+  // A source-row cursor must be supplied separately; advancing the timestamp
+  // by one second would skip valid rows sharing the same source second.
+  return normalizeSampleTime(sampleTime);
 }
 
 function formatRuntimeFrameMessage(message: string, recordCount: number) {
@@ -610,6 +600,7 @@ interface WellControlContextType {
   alerts: Alert[];
   historyRecords: HistoryRecord[];
   thresholds: ThresholdSettings;
+  monitoringWindowMinutes: MonitoringWindowMinutes;
   alertStatus: AlertStatus;
   backendDetection: BackendDetectionState;
   cycleInfo: CycleInfo;
@@ -659,21 +650,45 @@ interface WellControlContextType {
   updateSelectedStartTime: (value: string) => void;
   startShutInProcedure: () => void;
   updateThresholds: (t: ThresholdSettings) => void;
+  updateMonitoringWindowMinutes: (minutes: MonitoringWindowMinutes) => void;
   updateRealtimeEndpoint: (endpoint: string) => void;
 }
 
 const WellControlContext = createContext<WellControlContextType | null>(null);
-const MONITORING_WINDOW_MS = 30 * 60 * 1000;
-const MIN_MONITORING_POINTS = 1500;
-// Backend stream rate is clamped to >=200ms, so a full 30min window is ~9000 frames.
-// Keep a small hard cap to protect the browser from malformed/high-frequency streams
-// without truncating the intended 30min window under the current backend contract.
-const MAX_MONITORING_POINTS = 10000;
+export const MONITORING_WINDOW_OPTIONS = [30, 60, 90] as const;
+export type MonitoringWindowMinutes = typeof MONITORING_WINDOW_OPTIONS[number];
+export const DEFAULT_MONITORING_WINDOW_MINUTES: MonitoringWindowMinutes = 60;
+let configuredMonitoringWindowMinutes: MonitoringWindowMinutes = DEFAULT_MONITORING_WINDOW_MINUTES;
+function normalizeMonitoringWindowMinutes(value: unknown): MonitoringWindowMinutes {
+  const numeric = Number(value);
+  return (MONITORING_WINDOW_OPTIONS.find((option) => option === numeric) || DEFAULT_MONITORING_WINDOW_MINUTES) as MonitoringWindowMinutes;
+}
+function getInitialMonitoringWindowMinutes(): MonitoringWindowMinutes {
+  if (typeof window === 'undefined') return DEFAULT_MONITORING_WINDOW_MINUTES;
+  return normalizeMonitoringWindowMinutes(window.localStorage.getItem(STORAGE_MONITORING_WINDOW_MINUTES));
+}
+function monitoringWindowMs() { return configuredMonitoringWindowMinutes * 60 * 1000; }
+// Backend stream rate is clamped to >=200ms, so the largest selectable
+// 90-minute window is at most ~27,000 frames. Keep a bounded cap above that
+// value to protect the browser from malformed/high-frequency streams while
+// still honoring the configured 30/60/90-minute time window.
+const MAX_MONITORING_POINTS = 30000;
 const MAX_STORED_SNAPSHOT_POINTS = 1800;
 const MAX_STORED_HISTORY_RECORDS = 2200;
 // A live well can legitimately have no newly committed samples for several minutes.
 // Keep the browser transport open for five minutes before reconnecting; the backend Runtime keeps running either way.
 const STREAM_CONNECT_TIMEOUT_MS = 5 * 60 * 1000;
+// A live SSE connection can remain TCP-open while the backend worker or an
+// intermediary has stopped forwarding frames. Reconnect after a bounded
+// period of frame silence so the UI does not stay frozen indefinitely after
+// it has already received the first sample.
+const STREAM_INACTIVITY_TIMEOUT_MS = 90 * 1000;
+// A broken SSE path normally fails immediately and reconnects several times
+// before a user would think to refresh.  Keep the primary transport first,
+// then use the database-backed preview reader when it is demonstrably not
+// recovering.  A successful frame clears this short failure window.
+const SSE_RECONNECT_FALLBACK_WINDOW_MS = 30 * 1000;
+const SSE_RECONNECT_FALLBACK_THRESHOLD = 3;
 const PREVIEW_BATCH_LIMIT = 240;
 const PREVIEW_IDLE_POLL_MS = 4000;
 const SNAPSHOT_PERSIST_DEBOUNCE_MS = 20_000;
@@ -794,41 +809,29 @@ function formatNow() {
 
 function formatRecordTime(value?: string | number) {
   if (value === undefined || value === null || value === '') return formatNow();
-  const parsed = typeof value === 'number' ? new Date(value) : new Date(value);
-  if (Number.isNaN(parsed.getTime())) return formatNow();
-  const timeStr = `${parsed.getHours().toString().padStart(2, '0')}:${parsed.getMinutes().toString().padStart(2, '0')}:${parsed.getSeconds().toString().padStart(2, '0')}`;
-  const dateStr = `${parsed.getFullYear()}-${(parsed.getMonth() + 1).toString().padStart(2, '0')}-${parsed.getDate().toString().padStart(2, '0')}`;
-  return { timeStr, dateStr };
+  const parsed = parseSourceDate(value);
+  if (!parsed) return formatNow();
+  return { timeStr: formatSourceTime(parsed), dateStr: formatSourceDate(parsed) };
 }
 
 function formatRecordDateTime(value?: string | number) {
   if (value === undefined || value === null || value === '') return '';
-  const parsed = typeof value === 'number' ? new Date(value) : new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '';
-  const yyyy = parsed.getFullYear();
-  const mm = String(parsed.getMonth() + 1).padStart(2, '0');
-  const dd = String(parsed.getDate()).padStart(2, '0');
-  const hh = String(parsed.getHours()).padStart(2, '0');
-  const mi = String(parsed.getMinutes()).padStart(2, '0');
-  const ss = String(parsed.getSeconds()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+  return formatSourceDateTime(value);
 }
 
 function recordMillis(value?: string | number) {
   if (value === undefined || value === null || value === '') return Date.now();
-  const parsed = typeof value === 'number' ? new Date(value) : new Date(value);
-  return Number.isNaN(parsed.getTime()) ? Date.now() : parsed.getTime();
+  const parsed = parseSourceDateMs(value);
+  return parsed === null ? Date.now() : parsed;
 }
 
-function keepMonitoringWindow<T extends { timestampMs?: number }>(items: T[]) {
+function keepMonitoringWindow<T extends { timestampMs?: number }>(items: T[], windowMs = monitoringWindowMs()) {
   const bounded = items.length > MAX_MONITORING_POINTS ? items.slice(-MAX_MONITORING_POINTS) : items;
-  if (bounded.length <= MIN_MONITORING_POINTS) return bounded;
   const latest = bounded.at(-1)?.timestampMs;
-  if (!Number.isFinite(latest)) return bounded.slice(-MIN_MONITORING_POINTS);
-  const cutoff = Number(latest) - MONITORING_WINDOW_MS;
+  if (!Number.isFinite(latest)) return bounded;
+  const cutoff = Number(latest) - windowMs;
   const byTime = bounded.filter((item) => !Number.isFinite(item.timestampMs) || Number(item.timestampMs) >= cutoff);
-  const kept = byTime.length < MIN_MONITORING_POINTS ? bounded.slice(-MIN_MONITORING_POINTS) : byTime;
-  return kept.length > MAX_MONITORING_POINTS ? kept.slice(-MAX_MONITORING_POINTS) : kept;
+  return byTime.length > MAX_MONITORING_POINTS ? byTime.slice(-MAX_MONITORING_POINTS) : byTime;
 }
 
 function sortMonitoringPoints<T extends { timestampMs?: number }>(items: T[]) {
@@ -856,12 +859,12 @@ function dedupeMonitoringPoints<T extends { timestampMs?: number; time?: string 
   return deduped;
 }
 
-function trimMonitoringBufferInPlace<T extends { timestampMs?: number }>(items: T[]) {
+function trimMonitoringBufferInPlace<T extends { timestampMs?: number }>(items: T[], windowMs = monitoringWindowMs()) {
   if (items.length === 0) return items;
   const latestTimestamp = Number(items.at(-1)?.timestampMs ?? 0);
-  const cutoff = Number.isFinite(latestTimestamp) ? latestTimestamp - MONITORING_WINDOW_MS : Number.NEGATIVE_INFINITY;
+  const cutoff = Number.isFinite(latestTimestamp) ? latestTimestamp - windowMs : Number.NEGATIVE_INFINITY;
   let removeCount = 0;
-  while (removeCount < items.length - MIN_MONITORING_POINTS) {
+  while (removeCount < items.length) {
     const timestamp = Number(items[removeCount]?.timestampMs ?? Number.NaN);
     if (!Number.isFinite(timestamp) || timestamp >= cutoff) break;
     removeCount += 1;
@@ -998,8 +1001,8 @@ function readBoolean(value: unknown, fallback = false) {
 
 function parseFrameMillis(value?: string) {
   if (!value) return Number.NaN;
-  const millis = Date.parse(value.replace(' ', 'T'));
-  return Number.isFinite(millis) ? millis : Number.NaN;
+  const millis = parseSourceDateMs(value);
+  return millis !== null && Number.isFinite(millis) ? millis : Number.NaN;
 }
 
 function toDatetimeLocalValue(value?: string) {
@@ -1011,20 +1014,6 @@ function toDatetimeLocalValue(value?: string) {
 function fromDatetimeLocalValue(value: string) {
   if (!value) return '';
   return value.replace('T', ' ') + (value.length === 16 ? ':00' : '');
-}
-
-function shiftTimestamp(value: string, deltaMs: number) {
-  if (!value) return '';
-  const parsed = new Date(value.replace(' ', 'T'));
-  if (Number.isNaN(parsed.getTime())) return value;
-  const shifted = new Date(parsed.getTime() + deltaMs);
-  const yyyy = shifted.getFullYear();
-  const mm = String(shifted.getMonth() + 1).padStart(2, '0');
-  const dd = String(shifted.getDate()).padStart(2, '0');
-  const hh = String(shifted.getHours()).padStart(2, '0');
-  const mi = String(shifted.getMinutes()).padStart(2, '0');
-  const ss = String(shifted.getSeconds()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
 function readStoredJson<T>(key: string, fallback: T): T {
@@ -1421,6 +1410,7 @@ function normalizeBaselineSnapshot(value: unknown): BaselineSnapshot {
   if (!value || typeof value !== 'object') return INITIAL_BASELINE_SNAPSHOT;
   const row = value as Record<string, unknown>;
   const minimumReferenceSamples = Math.max(1, Math.round(finite(readValue(row, ['minimumReferenceSamples', 'minimum_reference_samples']), 60)));
+  const minimumReferenceExposureSeconds = Math.max(0, finite(readValue(row, ['minimumReferenceExposureSeconds', 'minimum_reference_exposure_seconds']), 0));
   const rawChannels = readValue(row, ['channels']) ?? [];
   const channels = Array.isArray(rawChannels)
     ? rawChannels.map((item) => {
@@ -1451,6 +1441,7 @@ function normalizeBaselineSnapshot(value: unknown): BaselineSnapshot {
     ready,
     warmup: readBoolean(readValue(row, ['warmup']), !ready),
     minimumReferenceSamples,
+    minimumReferenceExposureSeconds,
     readyChannelCount: Math.max(0, Math.round(finite(readValue(row, ['readyChannelCount', 'ready_channel_count']), channels.filter((item) => item.ready).length))),
     channelCount: Math.max(0, Math.round(finite(readValue(row, ['channelCount', 'channel_count']), channels.length))),
     frozenChannelCount: Math.max(0, Math.round(finite(readValue(row, ['frozenChannelCount', 'frozen_channel_count']), channels.filter((item) => item.frozen).length))),
@@ -1512,6 +1503,7 @@ function buildBaselineSnapshotFromReferences(value: unknown): BaselineSnapshot {
     ready: hasCoreReference,
     warmup: !hasCoreReference,
     minimumReferenceSamples: 60,
+    minimumReferenceExposureSeconds: 0,
     readyChannelCount,
     channelCount: channels.length,
     frozenChannelCount: 0,
@@ -1700,6 +1692,8 @@ function buildStartOptionsFromTimeIndex(data: {
   firstTime?: string;
   last_time?: string;
   lastTime?: string;
+  last_source_row_no?: number;
+  lastSourceRowNo?: number;
   start_time?: string;
   startTime?: string;
   end_time?: string;
@@ -2037,6 +2031,7 @@ const INITIAL_BASELINE_SNAPSHOT: BaselineSnapshot = {
   ready: false,
   warmup: true,
   minimumReferenceSamples: 60,
+  minimumReferenceExposureSeconds: 0,
   readyChannelCount: 0,
   channelCount: 0,
   frozenChannelCount: 0,
@@ -2047,18 +2042,19 @@ const INITIAL_BASELINE_SNAPSHOT: BaselineSnapshot = {
 };
 
 function buildRealtimeStreamUrl(endpoint: string, wellId: string, startTime: string, rateMs: number, sessionCode?: string, lastSampleTime?: string | null, lastSourceRowNo?: number, lastEventId?: string, mode: DataSourceMode = 'realtime') {
-    const url = new URL(buildRealtimeApiUrl(endpoint, `/wells/${encodeURIComponent(wellId)}/stream`));
-    url.searchParams.set('rateMs', String(rateMs));
-    if (mode === 'historyReplay') {
-      url.searchParams.set('limit', String(HISTORY_REPLAY_MAX_FRAMES));
-      url.searchParams.set('monitoringMode', 'history_replay');
-    }
-    if (startTime) url.searchParams.set('startTime', startTime);
-    if (sessionCode) url.searchParams.set('sessionCode', sessionCode);
-    if (lastSampleTime) url.searchParams.set('afterSampleTime', lastSampleTime);
-    if (Number.isFinite(lastSourceRowNo)) url.searchParams.set('afterSourceRowNo', String(lastSourceRowNo));
-    if (lastEventId) url.searchParams.set('lastEventId', lastEventId);
-    return url.toString();
+  let url = new URL(buildRealtimeApiUrl(endpoint, `/wells/${encodeURIComponent(wellId)}/stream`));
+  url.searchParams.set('rateMs', String(rateMs));
+  if (mode === 'historyReplay') url.searchParams.set('limit', String(HISTORY_REPLAY_MAX_FRAMES));
+  if (startTime) url.searchParams.set('startTime', startTime);
+  if (sessionCode) url.searchParams.set('sessionCode', sessionCode);
+  if (lastSampleTime) url.searchParams.set('afterSampleTime', lastSampleTime);
+  if (Number.isFinite(lastSourceRowNo)) url.searchParams.set('afterSourceRowNo', String(lastSourceRowNo));
+  if (lastEventId) url.searchParams.set('lastEventId', lastEventId);
+  // Always declare the mode. Realtime must not depend on an API default: an
+  // omitted value can otherwise be interpreted as a finite replay by older
+  // servers, leaving the live UI at the current database tail.
+  url = withMonitoringModeQuery(url, mode);
+  return url.toString();
 }
 
 const INITIAL_BACKEND_DETECTION: BackendDetectionState = {
@@ -2665,6 +2661,8 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
   private deliverFrame(data: RealTimeRecord, well: WellInfo) {
     const sampleTime = sampleTimeFromRecord(data);
     if (sampleTime) this.lastSampleTime = sampleTime;
+    const sourceRowNo = finite(readValue(data as Record<string, unknown>, ['source_row_no', 'sourceRowNo']), NaN);
+    if (Number.isFinite(sourceRowNo)) this.lastSourceRowNo = sourceRowNo;
     this.recordCount += 1;
     this.recordCallback(data);
     this.emitStatus({ mode: this.mode, adapterName: 'V7 实时检测流', status: 'connected', endpoint: this.endpoint, message: `检测流推送中 · ${well.wellName} · ${this.recordCount} 帧`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount, sessionCode: this.sessionCode });
@@ -2683,7 +2681,9 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
   private replayTimer: number | null = null;
   private queue: RealTimeRecord[] = [];
   private recordCount = 0;
+  private previewErrorAttempt = 0;
   private lastSampleTime: string | null = null;
+  private lastSourceRowNo: number | undefined;
   private closedByClient = false;
   private fetching = false;
   private previewUrl: string | null = null;
@@ -2700,13 +2700,17 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
     private idlePollMs = PREVIEW_IDLE_POLL_MS,
     private fallbackReason = '',
     private mode: DataSourceMode = 'historyReplay',
+    private initialSampleTime?: string | null,
+    private initialSourceRowNo?: number,
   ) {}
 
   connect(well: WellInfo, _seed?: MonitoringData) {
     this.disconnect();
     this.closedByClient = false;
     this.recordCount = 0;
-    this.lastSampleTime = null;
+    this.previewErrorAttempt = 0;
+    this.lastSampleTime = normalizeSampleTime(this.initialSampleTime || '') || null;
+    this.lastSourceRowNo = Number.isFinite(this.initialSourceRowNo) ? this.initialSourceRowNo : undefined;
     this.started = false;
     this.queue = [];
     this.fetching = false;
@@ -2761,7 +2765,7 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
   }
 
   getReplayCursor() {
-    return { sampleTime: this.lastSampleTime };
+    return { sampleTime: this.lastSampleTime, sourceRowNo: this.lastSourceRowNo };
   }
 
   private scheduleFetch(delayMs: number) {
@@ -2778,9 +2782,20 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
     this.controller?.abort();
     const controller = new AbortController();
     this.controller = controller;
-    const url = new URL(this.previewUrl, window.location.origin);
+    let url = new URL(this.previewUrl, window.location.origin);
     url.searchParams.set('limit', String(this.batchLimit));
+    // Keep the fallback request on the same realtime contract as the SSE
+    // attachment.  Without an explicit mode an older API may interpret this
+    // as a finite history preview and stop at the registry tail.
+    url = withMonitoringModeQuery(url, this.mode);
     if (this.cursorStartTime) url.searchParams.set('startTime', this.cursorStartTime);
+    // The source cursor is a tuple.  Sending the exact timestamp together
+    // with source_row_no lets the API return additional rows that share the
+    // same second without the old +1-second skip.
+    if (this.lastSampleTime) {
+      url.searchParams.set('afterSampleTime', this.lastSampleTime);
+      if (Number.isFinite(this.lastSourceRowNo)) url.searchParams.set('afterSourceRowNo', String(this.lastSourceRowNo));
+    }
     if (this.accessToken) url.searchParams.set('access_token', this.accessToken);
 
     try {
@@ -2796,12 +2811,25 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
         realtimeEngine?: { startTime?: string; endTime?: string; mode?: string };
       };
       if (controller.signal.aborted || this.closedByClient) return;
+      this.previewErrorAttempt = 0;
 
       const frames = Array.isArray(data.frames) ? data.frames : [];
       const freshFrames = frames.filter((frame) => {
         const sampleTime = normalizeSampleTime(sampleTimeFromRecord(frame));
         if (!sampleTime) return true;
-        return isStrictlyNewerSampleTime(sampleTime, this.lastSampleTime);
+        const sampleMs = parseDateLikeMs(sampleTime);
+        const cursorMs = parseDateLikeMs(this.lastSampleTime);
+        if (!this.lastSampleTime || sampleMs === null || cursorMs === null) return true;
+        if (sampleMs > cursorMs) return true;
+        if (sampleMs < cursorMs) return false;
+        const sourceRowNo = sourceRowNoFromRecord(frame);
+        if (Number.isFinite(sourceRowNo) && Number.isFinite(this.lastSourceRowNo)) {
+          return (sourceRowNo as number) > (this.lastSourceRowNo as number);
+        }
+        // When the API has no row ordinal, an equal-timestamp frame cannot be
+        // distinguished from the boundary row. Keep it deduplicated; APIs
+        // that expose source_row_no take the tuple path above.
+        return Number.isFinite(sourceRowNo) && !Number.isFinite(this.lastSourceRowNo);
       });
       const engineStart = normalizeSampleTime(String(data.realtimeEngine?.startTime || this.cursorStartTime || this.startTime || ''));
 
@@ -2837,21 +2865,31 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
       this.queue.push(...freshFrames);
       const lastQueuedTime = normalizeSampleTime(sampleTimeFromRecord(freshFrames.at(-1)));
       if (lastQueuedTime) {
-        this.cursorStartTime = nextPreviewCursorFrom(lastQueuedTime) || lastQueuedTime;
+        // Keep the exact boundary. `afterSourceRowNo` disambiguates rows in
+        // the same source second; advancing by one second loses valid rows.
+        this.cursorStartTime = lastQueuedTime;
       }
       this.drainQueue();
     } catch (error) {
       if (controller.signal.aborted || this.closedByClient) return;
       const message = error instanceof Error ? error.message : '未知错误';
+      this.previewErrorAttempt = Math.min(this.previewErrorAttempt + 1, 5);
+      const retryDelay = Math.min(
+        30_000,
+        Math.max(this.idlePollMs, this.idlePollMs * (2 ** (this.previewErrorAttempt - 1))),
+      );
       this.emitStatus({
         mode: this.mode,
         adapterName: 'V7 预览回放',
         status: 'error',
         endpoint: this.previewUrl,
-        message: `预览回放失败：${message}`,
+        message: `预览回放失败：${message}，${Math.ceil(retryDelay / 1000)} 秒后重试`,
         lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
         recordCount: this.recordCount,
       });
+      // A fallback must survive a transient API restart.  Without a retry,
+      // one ECONNRESET/5xx leaves the browser waiting forever until refresh.
+      this.scheduleFetch(retryDelay);
     } finally {
       if (this.controller === controller) {
         this.controller = null;
@@ -2874,6 +2912,8 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
 
       const sampleTime = normalizeSampleTime(sampleTimeFromRecord(frame));
       if (sampleTime) this.lastSampleTime = sampleTime;
+      const sourceRowNo = sourceRowNoFromRecord(frame);
+      if (Number.isFinite(sourceRowNo)) this.lastSourceRowNo = sourceRowNo;
       this.recordCount += 1;
       this.recordCallback(frame);
       this.emitStatus({
@@ -2887,13 +2927,20 @@ class PreviewPollingDataSourceAdapter implements DataSourceAdapter {
       });
 
       if (this.queue.length > 0) {
-        this.replayTimer = window.setTimeout(emitNext, this.rateMs);
+        // Realtime preview is a transport fallback, not a paced replay.  A
+        // five-second frame interval across a 240-frame batch would leave the
+        // browser more than twenty minutes behind the database tail.  History
+        // replay retains its deliberate playback cadence; live fallback drains
+        // the bounded batch immediately and polls the tail again afterward.
+        const drainDelay = this.mode === 'historyReplay' ? this.rateMs : 0;
+        this.replayTimer = window.setTimeout(emitNext, drainDelay);
       } else {
         this.scheduleFetch(this.idlePollMs);
       }
     };
 
-    this.replayTimer = window.setTimeout(emitNext, this.recordCount === 0 ? 0 : this.rateMs);
+    const initialDelay = this.recordCount === 0 || this.mode !== 'historyReplay' ? 0 : this.rateMs;
+    this.replayTimer = window.setTimeout(emitNext, initialDelay);
   }
 
   private emitStatus(state: DataSourceState) {
@@ -2913,8 +2960,10 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
   private lastSampleTime: string | null = null;
   private fallbackActivated = false;
   private connectWatchdog: number | null = null;
+  private inactivityWatchdog: number | null = null;
   private reconnectTimer: number | null = null;
   private reconnectAttempt = 0;
+  private recentSseReconnectAt: number[] = [];
   private lastStreamSequence: number | null = null;
   private lastSourceRowNo: number | undefined;
   private lastEventId = '';
@@ -2947,6 +2996,7 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     this.lastSampleTime = normalizeSampleTime(this.lastSampleTime || '') || null;
     this.fallbackActivated = false;
     this.reconnectAttempt = 0;
+    this.recentSseReconnectAt = [];
     this.lastStreamSequence = null;
     // Keep the persisted session cursor across reconnects; disconnect only closes this browser transport.
     this.lastEventId = '';
@@ -2959,6 +3009,10 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     if (this.connectWatchdog !== null) {
       window.clearTimeout(this.connectWatchdog);
       this.connectWatchdog = null;
+    }
+    if (this.inactivityWatchdog !== null) {
+      window.clearTimeout(this.inactivityWatchdog);
+      this.inactivityWatchdog = null;
     }
     if (this.reconnectTimer !== null) {
       window.clearTimeout(this.reconnectTimer);
@@ -2994,9 +3048,11 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     const activeSourceRowNo = activeCursor?.sourceRowNo;
     if (Number.isFinite(activeSourceRowNo)) this.lastSourceRowNo = activeSourceRowNo;
     else if (Number.isFinite(sourceRowNo) && externalResume) this.lastSourceRowNo = sourceRowNo;
+    // Keep the exact event-time boundary. The backend cursor is the tuple
+    // (sample_time, source_row_no); advancing by one second can skip valid
+    // rows that share a timestamp (or have sub-second precision).
     const resumeCursor = normalizeSampleTime(
-      nextPreviewCursorFrom(this.lastSampleTime)
-      || this.lastSampleTime
+      this.lastSampleTime
       || this.startTime
       || this.activeWell.discoveryTime
       || this.activeWell.startTime
@@ -3022,6 +3078,7 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     this.activeAdapter = adapter;
     this.bindAdapter(adapter, false);
     this.armWatchdog();
+    this.armInactivityWatchdog();
     adapter.connect(this.activeWell, this.seedData);
   }
 
@@ -3055,11 +3112,14 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
       // A reconnect/catch-up query can include the boundary row again. It is
       // already represented in the UI and must not be delivered twice.
       if (sameCursor) return;
-      if (sampleTime && cursorIsNotOlder) this.lastSampleTime = sampleTime;
-      const resumeSourceRowNo = this.lastSourceRowNo;
       if (sampleTime && !cursorIsNotOlder) return;
+      const resumeSourceRowNo = this.lastSourceRowNo;
       const hasGap = Number.isFinite(streamSequence) && this.lastStreamSequence !== null && streamSequence !== this.lastStreamSequence + 1;
       if (hasGap && !isFallback) {
+        // Do not advance the durable cursor to the first frame after a stream
+        // gap: that frame is intentionally withheld until catch-up replay has
+        // filled the missing sequence range. Advancing here would make the
+        // next request start after the gap and lose rows permanently.
         this.lastSourceRowNo = resumeSourceRowNo;
         this.scheduleSseReconnect({
           mode: this.mode,
@@ -3076,12 +3136,15 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
         }, '流序号缺口');
         return;
       }
+      if (sampleTime && cursorIsNotOlder) this.lastSampleTime = sampleTime;
       if (Number.isFinite(streamSequence)) this.lastStreamSequence = streamSequence;
       if (Number.isFinite(sourceRowNo) && cursorIsNotOlder) this.lastSourceRowNo = sourceRowNo;
       if (Number.isFinite(lifecycleRevision)) this.lifecycleRevision = lifecycleRevision;
       if (eventId) this.lastEventId = eventId;
       this.reconnectAttempt = 0;
+      if (!isFallback) this.recentSseReconnectAt = [];
       this.totalRecordCount += 1;
+      this.armInactivityWatchdog();
       if (!isFallback && this.connectWatchdog !== null) {
         window.clearTimeout(this.connectWatchdog);
         this.connectWatchdog = null;
@@ -3092,7 +3155,11 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     adapter.onStatus((state) => {
       if (this.closedByClient) return;
       const reportedSampleTime = normalizeSampleTime(state.lastRecordAt || '');
-      if (reportedSampleTime) this.lastSampleTime = reportedSampleTime;
+      // `lastRecordAt` is a display value (seconds precision) and may be
+      // emitted after a frame whose source timestamp carries microseconds.
+      // Never overwrite the exact frame cursor with that lossy presentation;
+      // only use a reported value to initialize an otherwise empty cursor.
+      if (reportedSampleTime && !this.lastSampleTime) this.lastSampleTime = reportedSampleTime;
       if (Number.isFinite(state.sourceRowNo)) this.lastSourceRowNo = state.sourceRowNo;
       const adjustedState: DataSourceState = {
         ...state,
@@ -3114,9 +3181,19 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
 
   private scheduleSseReconnect(state: DataSourceState, reason: string) {
     if (this.closedByClient || this.fallbackActivated || !this.activeWell || !this.seedData || this.reconnectTimer !== null) return;
+    if (this.inactivityWatchdog !== null) {
+      window.clearTimeout(this.inactivityWatchdog);
+      this.inactivityWatchdog = null;
+    }
+    const reconnectsInWindow = this.noteSseReconnect();
+    if (this.mode === 'realtime' && reconnectsInWindow >= SSE_RECONNECT_FALLBACK_THRESHOLD) {
+      this.switchToPreview(`${reason}（${SSE_RECONNECT_FALLBACK_WINDOW_MS / 1000} 秒内连续 ${reconnectsInWindow} 次重连）`);
+      return;
+    }
+    // Reconnect from the exact last tuple. `afterSourceRowNo` disambiguates
+    // rows in the same second; adding +1s would permanently skip them.
     const resumeFrom = normalizeSampleTime(
-      nextPreviewCursorFrom(this.lastSampleTime)
-      || this.lastSampleTime
+      this.lastSampleTime
       || this.startTime
       || this.activeWell.discoveryTime
       || this.activeWell.startTime
@@ -3145,6 +3222,14 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     }, delay);
   }
 
+  private noteSseReconnect() {
+    const now = Date.now();
+    this.recentSseReconnectAt = this.recentSseReconnectAt
+      .filter((attemptedAt) => now - attemptedAt <= SSE_RECONNECT_FALLBACK_WINDOW_MS);
+    this.recentSseReconnectAt.push(now);
+    return this.recentSseReconnectAt.length;
+  }
+
   private armWatchdog() {
     if (this.connectWatchdog !== null) {
       window.clearTimeout(this.connectWatchdog);
@@ -3156,12 +3241,37 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
     }, this.connectTimeoutMs);
   }
 
+  private armInactivityWatchdog() {
+    if (this.inactivityWatchdog !== null) {
+      window.clearTimeout(this.inactivityWatchdog);
+    }
+    if (this.closedByClient || this.fallbackActivated || this.mode !== 'realtime') return;
+    this.inactivityWatchdog = window.setTimeout(() => {
+      this.inactivityWatchdog = null;
+      if (this.closedByClient || this.fallbackActivated) return;
+      this.scheduleSseReconnect({
+        mode: this.mode,
+        adapterName: 'V7 实时检测流',
+        status: 'reconnecting',
+        endpoint: this.endpoint,
+        message: '检测流长时间未收到新帧，保持原 Session 重连',
+        lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
+        recordCount: this.totalRecordCount,
+        sessionCode: this.sessionCode,
+      }, '检测流长时间未收到新帧');
+    }, STREAM_INACTIVITY_TIMEOUT_MS);
+  }
+
   private switchToPreview(reason: string) {
     if (this.closedByClient || this.fallbackActivated || !this.activeWell || !this.seedData) return;
     this.fallbackActivated = true;
     if (this.connectWatchdog !== null) {
       window.clearTimeout(this.connectWatchdog);
       this.connectWatchdog = null;
+    }
+    if (this.inactivityWatchdog !== null) {
+      window.clearTimeout(this.inactivityWatchdog);
+      this.inactivityWatchdog = null;
     }
     this.activeAdapter?.disconnect();
     this.emitStatus({
@@ -3182,6 +3292,8 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
       PREVIEW_IDLE_POLL_MS,
       reason,
       this.mode,
+      this.lastSampleTime,
+      this.lastSourceRowNo,
     );
     this.activeAdapter = previewAdapter;
     this.bindAdapter(previewAdapter, true);
@@ -3251,6 +3363,8 @@ function getCycleInfo(_totalSeconds: number): CycleInfo {
 export function WellControlProvider({ children }: { children: ReactNode }) {
   const [isRunning, setIsRunning] = useState(false);
   const [thresholds, setThresholds] = useState<ThresholdSettings>(DEFAULT_THRESHOLDS);
+  const [monitoringWindowMinutes, setMonitoringWindowMinutes] = useState<MonitoringWindowMinutes>(getInitialMonitoringWindowMinutes);
+  configuredMonitoringWindowMinutes = monitoringWindowMinutes;
   const [wells, setWells] = useState<WellInfo[]>([]);
   const { user, loading: authLoading } = useAuth();
   const hasAccessToken = Boolean(user && getAccessToken());
@@ -3337,6 +3451,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const [eventProjectionState, setEventProjectionState] = useState<EventProjectionState>({ status: 'loading', message: '等待读取服务端事件投影', lastUpdatedAt: null });
 
   useEffect(() => {
+    configuredMonitoringWindowMinutes = monitoringWindowMinutes;
+    try { window.localStorage.setItem(STORAGE_MONITORING_WINDOW_MINUTES, String(monitoringWindowMinutes)); } catch { /* session-only fallback */ }
+    setFlowHistory((previous) => keepMonitoringWindow([...previous]));
+    setPressureHistory((previous) => keepMonitoringWindow([...previous]));
+  }, [monitoringWindowMinutes]);
+
+  useEffect(() => {
     const handleStorageError = (event: Event) => {
       const detail = (event as CustomEvent<{ key?: string; message?: string }>).detail;
       setRawDataSourceState((previous) => ({
@@ -3356,6 +3477,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   const dataSourceState = useMemo<DataSourceState>(() => {
     if (!wellInfo?.wellId) return rawDataSourceState;
     const runtime = selectedWellRuntime;
+    const mode = runtime?.monitoringMode || rawDataSourceState.mode || 'realtime';
     const snapshot = wellSnapshotsRef.current[wellInfo.wellId];
     const isManuallyStopped = manualStoppedWellIds.includes(wellInfo.wellId);
     const hasActiveStream = Boolean(backgroundAdaptersRef.current[wellInfo.wellId] || (selectedWellIdRef.current === wellInfo.wellId && adapterRef.current));
@@ -3391,7 +3513,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
                 ? 'connected'
                 : 'connecting';
       return {
-        mode: 'realtime',
+        mode,
         adapterName: rawDataSourceState.adapterName || 'MySQL 实时数据接口',
         status,
         endpoint: rawDataSourceState.endpoint || realtimeEndpoint || null,
@@ -3406,7 +3528,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
 
     if (isManuallyStopped) {
       return {
-        mode: 'realtime',
+        mode,
         adapterName: rawDataSourceState.adapterName || 'MySQL 实时数据接口',
         status: 'paused',
         endpoint: rawDataSourceState.endpoint || realtimeEndpoint || null,
@@ -3418,7 +3540,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
 
     if (pausedWithResume) {
       return {
-        mode: 'realtime',
+        mode,
         adapterName: rawDataSourceState.adapterName || 'MySQL 实时数据接口',
         status: 'paused',
         endpoint: rawDataSourceState.endpoint || realtimeEndpoint || null,
@@ -3430,7 +3552,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
 
     if (pausedWithHistory) {
       return {
-        mode: 'realtime',
+        mode,
         adapterName: rawDataSourceState.adapterName || 'MySQL 实时数据接口',
         status: 'paused',
         endpoint: rawDataSourceState.endpoint || realtimeEndpoint || null,
@@ -3572,7 +3694,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     const snapshot = getWellSnapshot(well);
     if (runtime?.monitoringMode === 'realtime') {
       const pausedCursor = runtime.pausedSampleTime || runtime.lastRecordAt || snapshot.lastRecordAt || snapshot.currentSampleTime || '';
-      return nextPreviewCursorFrom(pausedCursor) || wellLatestSampleTime(well) || '';
+      // Resume at the exact source-civil cursor; source_row_no is carried by
+      // the runtime separately and prevents same-timestamp rows being lost.
+      return normalizeSampleTime(pausedCursor) || wellLatestSampleTime(well) || '';
     }
     if (runtime?.pausedSampleTime) return runtime.pausedSampleTime;
     return runtime?.lastRecordAt || snapshot.lastRecordAt || snapshot.currentSampleTime || runtime?.startedSampleTime || snapshot.startedSampleTime || well.discoveryTime || well.startTime || '';
@@ -4058,7 +4182,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
       const nextDetection = normalizeBackendDetection(record);
       const canPaintEvent = isMonitorableEventRecord(record, lastData);
       cycleState = cycleInfoFromRecord(record, cycleState);
-      if (sampleTimeText) sampleTime = sampleTimeText.replace('T', ' ');
+      if (sampleTimeText) sampleTime = formatRecordDateTime(sampleTimeText) || sampleTimeText.replace('T', ' ');
       const activeEventId = nextDetection.advisoryLevel >= 1 && canPaintEvent ? (nextDetection.eventId || null) : null;
       backendState = nextDetection;
       flowItems = appendMonitoringPoint(flowItems,
@@ -4416,7 +4540,13 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           const startTimeValue = readValue(row, ['start_time', 'startTime', 'timestamp']) as string | number | undefined;
           const endTimeValue = readValue(row, ['end_time', 'endTime']) as string | number | undefined;
           const eventTime = formatRecordTime(startTimeValue);
-          const endTime = formatRecordTime(endTimeValue || startTimeValue);
+          // Active warning rows intentionally have a NULL end_time.  Using
+          // start_time as a display fallback made every refresh render an
+          // active incident as `start–start / <1秒`.  Advance the visible end
+          // only to the latest source sample known by this session; terminal
+          // rows still use their persisted resolution time.
+          const latestKnownSample = currentSampleTime || selectedWellRuntime?.lastRecordAt || rawDataSourceState.lastRecordAt || '';
+          const endTime = formatRecordTime(endTimeValue || latestKnownSample || startTimeValue);
           const level = normalizeBackendLevel(readValue(row, ['current_level', 'currentLevel', 'public_level', 'publicLevel', 'level']));
           const highestLevel = normalizeBackendLevel(readValue(row, ['highest_level', 'highestLevel', 'peak_level', 'peakLevel']) ?? level);
           // Current advisory level drives the list presentation; peak is
@@ -4474,7 +4604,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     void loadWarnings();
     const timer = window.setInterval(() => void loadWarnings(), 15000);
     return () => { controller.abort(); window.clearInterval(timer); };
-  }, [hasAccessToken, selectedWellRuntime?.sessionCode, wellInfo?.wellId, wellInfo?.wellName]);
+  }, [currentSampleTime, hasAccessToken, rawDataSourceState.lastRecordAt, selectedWellRuntime?.lastRecordAt, selectedWellRuntime?.sessionCode, wellInfo?.wellId, wellInfo?.wellName]);
   useEffect(() => {
     const selectedWellId = wellInfo?.wellId;
     const sessionCode = selectedWellRuntime?.sessionCode || '';
@@ -4812,19 +4942,19 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         isBackendRunning: true,
         isSubscriberConnected: true,
         lastSeenSourceRowNo: finite(readValue(record as Record<string, unknown>, ['source_row_no', 'sourceRowNo']), wellRuntimeStatesRef.current[wellInfo.wellId]?.lastSeenSourceRowNo ?? NaN),
-        lastSeenSampleTime: sampleTimeText ? sampleTimeText.replace('T', ' ') : `${recordTime.dateStr} ${recordTime.timeStr}`,
+        lastSeenSampleTime: sampleTimeText ? (formatRecordDateTime(sampleTimeText) || sampleTimeText.replace('T', ' ')) : `${recordTime.dateStr} ${recordTime.timeStr}`,
         latestWellDepth: nextData.wellDepth,
         latestBitDepth: nextData.bitDepth,
         latestFormation: nextData.formation,
         recordCount: historyIdCounter.current,
-        lastRecordAt: sampleTimeText ? sampleTimeText.replace('T', ' ') : `${recordTime.dateStr} ${recordTime.timeStr}`,
+        lastRecordAt: sampleTimeText ? (formatRecordDateTime(sampleTimeText) || sampleTimeText.replace('T', ' ')) : `${recordTime.dateStr} ${recordTime.timeStr}`,
         message: `检测流推送中 · ${historyIdCounter.current} 帧`,
       });
       appendAlertsFromRecord(wellInfo, record, nextData);
       syncWellSnapshotFromSample(
         wellInfo,
         nextData,
-        sampleTimeText ? sampleTimeText.replace('T', ' ') : recordTime.timeStr,
+        sampleTimeText ? (formatRecordDateTime(sampleTimeText) || sampleTimeText.replace('T', ' ')) : `${recordTime.dateStr} ${recordTime.timeStr}`,
         nextDetection,
         nextCycleInfo,
         nextFlowHistory,
@@ -5202,6 +5332,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
     // or more sender frames. Before creating a realtime session, ask the
     // backend for the current tail so the first attach never depends on a
     // manual page refresh.
+    let latestRealtimeSourceRowNo: number | undefined;
     if (monitoringMode === 'realtime') {
       try {
         const latestResponse = await authenticatedFetch(
@@ -5216,7 +5347,9 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
               || latestPayload.end_time
               || latestPayload.endTime
               || '',
-          ));
+           ));
+           const parsedRowNo = finite(latestPayload.last_source_row_no ?? latestPayload.lastSourceRowNo, NaN);
+           latestRealtimeSourceRowNo = Number.isFinite(parsedRowNo) ? parsedRowNo : undefined;
           if (serverLatest) {
             latestRealtimeStart = serverLatest;
             setWells((current) => current.map((item) => item.wellId === wellId
@@ -5366,6 +5499,8 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         wellId,
         mode: monitoringMode === 'historyReplay' ? 'history_replay' : 'realtime',
         startTime: toApiDateTimeOffset(directStartTime),
+        afterSampleTime: monitoringMode === 'realtime' ? directStartTime : undefined,
+        afterSourceRowNo: monitoringMode === 'realtime' ? latestRealtimeSourceRowNo : undefined,
         followTail: monitoringMode !== 'historyReplay',
         rateMs: monitoringMode === 'historyReplay' ? replayIntervalMs(priorRuntime?.replaySpeed || 1) : REALTIME_FRAME_INTERVAL_MS,
         action: requestedAction,
@@ -5430,12 +5565,18 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hasAccessToken || !realtimeWellsLoaded) return;
     const controller = new AbortController();
-    void authenticatedFetch(buildRealtimeApiUrl('', '/api/monitoring/sessions/active'), { cache: 'no-store', signal: controller.signal })
-      .then(async (response) => {
+    let requestInFlight = false;
+    const loadActiveSessions = async () => {
+      if (controller.signal.aborted || requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const response = await authenticatedFetch(
+          buildRealtimeApiUrl('', '/api/monitoring/sessions/active'),
+          { cache: 'no-store', signal: controller.signal },
+        );
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json() as Promise<{ sessions?: Array<Record<string, unknown>> }>;
-      })
-      .then((payload) => {
+        const payload = await response.json() as { sessions?: Array<Record<string, unknown>> };
+        if (controller.signal.aborted) return;
         for (const session of payload.sessions || []) {
           const wellId = String(session.wellId || session.well_id || '');
           const well = wells.find((item) => item.wellId === wellId);
@@ -5445,72 +5586,81 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
           // restart behave like a continuation from the old backend cursor.
           if (startRequestControllersRef.current[wellId]) continue;
           const prior = wellRuntimeStatesRef.current[wellId];
-           const manuallyStopped = manualStoppedWellIds.includes(wellId) || getInitialManualStoppedWellIds().includes(wellId);
-           if (manuallyStopped || prior?.shouldAutoRestore === false || prior?.runtimeStopReason === 'ManualBackendStop') continue;
-           const sessionCode = String(session.sessionCode || session.session_code || prior?.sessionCode || '');
-           const sessionMode = String(session.mode || '').trim().toLowerCase().replace('-', '_') === 'history_replay'
-             ? 'historyReplay'
-             : 'realtime';
-            const backendRequestedStartTime = String(
-              session.startTime
-              || session.start_time
-              || '',
-            ).replace('T', ' ').trim();
-            const backendSessionStartedAt = String(
-              session.startedAt
-              || session.started_at
-              || '',
-            ).replace('T', ' ').trim();
-            const hasStableReplayStart = sessionMode !== 'historyReplay'
-              || Boolean(backendRequestedStartTime || prior?.selectedReplayStartTime || prior?.startedSampleTime);
-            const backendStartTime = sessionMode === 'historyReplay'
-              ? backendRequestedStartTime
-                || prior?.selectedReplayStartTime
-                || prior?.startedSampleTime
-                || wellEarliestSampleTime(well)
-              : backendRequestedStartTime || backendSessionStartedAt;
-            const currentSampleTime = String(session.currentSampleTime || session.current_sample_time || '').replace('T', ' ').trim();
-            const resumeSampleTime = hasStableReplayStart
-              ? currentSampleTime || prior?.lastSeenSampleTime
-              : '';
-            const sourceRowValue = finite(session.currentSourceRowNo ?? session.current_source_row_no, NaN);
-            const sourceRowNo = Number.isFinite(sourceRowValue) && sourceRowValue > 0 ? sourceRowValue : undefined;
-            updateWellRuntime(wellId, {
-             monitoringMode: sessionMode,
-             sessionCode,
-             runtimeId: String(session.runtimeId || session.runtime_id || prior?.runtimeId || ''),
-             backendRuntimeStatus: 'Running',
-             isBackendRunning: true,
-              connectionStatus: 'connecting',
-             status: 'connecting',
-             isRunning: true,
-              shouldAutoRestore: true,
-              startedSampleTime: backendStartTime || prior?.startedSampleTime || currentSampleTime || null,
-              selectedReplayStartTime: sessionMode === 'historyReplay'
-                ? (backendStartTime || prior?.selectedReplayStartTime || prior?.startedSampleTime || null)
-                : prior?.selectedReplayStartTime || null,
-              lastSeenSourceRowNo: sourceRowNo,
-              lastSeenSampleTime: resumeSampleTime || prior?.lastSeenSampleTime,
-              lastRecordAt: resumeSampleTime || prior?.lastRecordAt || null,
-              backendCurrentSourceRowNo: sourceRowNo,
-              backendCurrentSampleTime: resumeSampleTime || null,
-             message: '已发现后端持续监测 Session，正在附着并补齐数据',
-           });
-            startBackgroundMonitoring(
-              well,
-              backendStartTime || currentSampleTime || prior?.lastSeenSampleTime || prior?.lastRecordAt || wellLatestSampleTime(well),
-              true,
-              sessionMode,
-              sessionCode,
-              resumeSampleTime || undefined,
-              sourceRowNo,
-            );
+          const manuallyStopped = manualStoppedWellIds.includes(wellId) || getInitialManualStoppedWellIds().includes(wellId);
+          if (manuallyStopped || prior?.shouldAutoRestore === false || prior?.runtimeStopReason === 'ManualBackendStop') continue;
+          const sessionCode = String(session.sessionCode || session.session_code || prior?.sessionCode || '');
+          const sessionMode = String(session.mode || '').trim().toLowerCase().replace('-', '_') === 'history_replay'
+            ? 'historyReplay'
+            : 'realtime';
+          const backendRequestedStartTime = String(
+            session.startTime
+            || session.start_time
+            || '',
+          ).replace('T', ' ').trim();
+          const backendSessionStartedAt = String(
+            session.startedAt
+            || session.started_at
+            || '',
+          ).replace('T', ' ').trim();
+          const hasStableReplayStart = sessionMode !== 'historyReplay'
+            || Boolean(backendRequestedStartTime || prior?.selectedReplayStartTime || prior?.startedSampleTime);
+          const backendStartTime = sessionMode === 'historyReplay'
+            ? backendRequestedStartTime
+              || prior?.selectedReplayStartTime
+              || prior?.startedSampleTime
+              || wellEarliestSampleTime(well)
+            : backendRequestedStartTime || backendSessionStartedAt;
+          const currentSampleTime = String(session.currentSampleTime || session.current_sample_time || '').replace('T', ' ').trim();
+          const resumeSampleTime = hasStableReplayStart
+            ? currentSampleTime || prior?.lastSeenSampleTime
+            : '';
+          const sourceRowValue = finite(session.currentSourceRowNo ?? session.current_source_row_no, NaN);
+          const sourceRowNo = Number.isFinite(sourceRowValue) && sourceRowValue > 0 ? sourceRowValue : undefined;
+          updateWellRuntime(wellId, {
+            monitoringMode: sessionMode,
+            sessionCode,
+            runtimeId: String(session.runtimeId || session.runtime_id || prior?.runtimeId || ''),
+            backendRuntimeStatus: 'Running',
+            isBackendRunning: true,
+            connectionStatus: 'connecting',
+            status: 'connecting',
+            isRunning: true,
+            shouldAutoRestore: true,
+            startedSampleTime: backendStartTime || prior?.startedSampleTime || currentSampleTime || null,
+            selectedReplayStartTime: sessionMode === 'historyReplay'
+              ? (backendStartTime || prior?.selectedReplayStartTime || prior?.startedSampleTime || null)
+              : prior?.selectedReplayStartTime || null,
+            lastSeenSourceRowNo: sourceRowNo,
+            lastSeenSampleTime: resumeSampleTime || prior?.lastSeenSampleTime,
+            lastRecordAt: resumeSampleTime || prior?.lastRecordAt || null,
+            backendCurrentSourceRowNo: sourceRowNo,
+            backendCurrentSampleTime: resumeSampleTime || null,
+            message: '已发现后端持续监测 Session，正在附着并补齐数据',
+          });
+          startBackgroundMonitoring(
+            well,
+            backendStartTime || currentSampleTime || prior?.lastSeenSampleTime || prior?.lastRecordAt || wellLatestSampleTime(well),
+            true,
+            sessionMode,
+            sessionCode,
+            resumeSampleTime || undefined,
+            sourceRowNo,
+          );
         }
-      })
-      .catch(() => {
-        // Preserve local session identity; a later auth/network recovery will retry without creating a new session.
-      });
-    return () => controller.abort();
+      } catch (error) {
+        if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+        // Preserve local session identity; a later auth/network recovery or
+        // the next polling tick will retry without creating a new session.
+      } finally {
+        requestInFlight = false;
+      }
+    };
+    void loadActiveSessions();
+    const refreshTimer = window.setInterval(() => void loadActiveSessions(), 5000);
+    return () => {
+      controller.abort();
+      window.clearInterval(refreshTimer);
+    };
   }, [hasAccessToken, manualStoppedWellIds, realtimeWellsLoaded, startBackgroundMonitoring, updateWellRuntime, wells]);
 
   useEffect(() => {
@@ -5833,6 +5983,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
   };
 
   const updateThresholds = (t: ThresholdSettings) => setThresholds(t);
+  const updateMonitoringWindowMinutes = (minutes: MonitoringWindowMinutes) => setMonitoringWindowMinutes(normalizeMonitoringWindowMinutes(minutes));
 
   const updateRealtimeEndpoint = (endpoint: string) => {
     const safe = normalizeRealtimeEndpoint(endpoint);
@@ -5854,6 +6005,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         alerts,
         historyRecords,
         thresholds,
+        monitoringWindowMinutes,
         alertStatus,
         backendDetection,
         cycleInfo,
@@ -5903,6 +6055,7 @@ export function WellControlProvider({ children }: { children: ReactNode }) {
         updateSelectedStartTime,
         startShutInProcedure,
         updateThresholds,
+        updateMonitoringWindowMinutes,
         updateRealtimeEndpoint,
       }}
     >

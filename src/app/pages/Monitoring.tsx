@@ -40,6 +40,7 @@ export default function Monitoring() {
     realtimeEndpoint,
     buildRealtimeApiUrl,
   } = useWellControl();
+  const [eventPanelWidth, setEventPanelWidth] = useState(340);
   const [thumbnailSections, setThumbnailSections] = useState<WellboreStructureSection[]>([]);
   const [thumbnailRegisteredDepth, setThumbnailRegisteredDepth] = useState(0);
   const activeWellIds = monitoredWellIds.length > 0
@@ -127,9 +128,33 @@ export default function Monitoring() {
     || selectedRuntime?.lastRecordAt)
   );
 
+  const resizeEventPanel = (delta: number) => {
+    setEventPanelWidth((width) => Math.max(280, Math.min(520, width + delta)));
+  };
+
+  const handleEventPanelResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = eventPanelWidth;
+    const handle = event.currentTarget;
+    const move = (moveEvent: PointerEvent) => {
+      const delta = startX - moveEvent.clientX;
+      setEventPanelWidth(Math.max(280, Math.min(520, startWidth + delta)));
+    };
+    const stop = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', stop);
+      handle.removeEventListener('pointercancel', stop);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', stop, { once: true });
+    handle.addEventListener('pointercancel', stop, { once: true });
+  };
+
   return (
     <div className="monitoring-workspace flex h-full min-h-0 flex-col gap-2 overflow-auto lg:overflow-hidden">
       <MonitoringWellTabs
+        className="monitoring-tabbar-compact"
         rightSlot={
           <button
             type="button"
@@ -152,12 +177,15 @@ export default function Monitoring() {
           </div>
         </div>
       ) : (
-        <div className="monitoring-main-grid grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-visible lg:overflow-hidden">
+        <div
+          className="monitoring-main-grid grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-visible lg:overflow-hidden"
+          style={{ '--monitoring-event-width': `${eventPanelWidth}px` } as React.CSSProperties}
+        >
           <section className="ops-panel monitoring-primary-panel monitoring-lane-panel flex min-h-0 flex-col overflow-hidden">
             <div className="realtime-kpi-strip">
               <div><span>当前井深</span><strong>{formatMetricOrPlaceholder(selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? activeWell.depth, 0, hasSamples)} m</strong></div>
               <div><span>钻头深度</span><strong>{formatMetricOrPlaceholder(viewCurrentData.bitDepth, 0, hasSamples)} m</strong></div>
-              <div><span>地层</span><strong>{selectedWellView.latestFormation || viewCurrentData.formation || activeWell.targetLayer || '--'}</strong></div>
+              <div><span>工况</span><strong>{viewCurrentData.condition || '--'}</strong></div>
               <div><span>总池体积</span><strong>{formatMetricOrPlaceholder(viewCurrentData.pitVolume, 2, hasSamples)} m³</strong></div>
               <div><span>立压</span><strong>{formatMetricOrPlaceholder(viewCurrentData.spp, 2, hasSamples)} MPa</strong></div>
               <div><span>套压</span><strong>{formatMetricOrPlaceholder(viewCurrentData.casingPressure, 2, hasSamples)} MPa</strong></div>
@@ -184,6 +212,24 @@ export default function Monitoring() {
           </section>
 
           <aside className="monitoring-side-panel monitoring-side-stack min-h-0 min-w-0 gap-2 overflow-hidden">
+            <div
+              className="monitoring-event-resize-handle"
+              role="separator"
+              aria-label="调整事件列表宽度"
+              aria-orientation="vertical"
+              aria-valuemin={280}
+              aria-valuemax={520}
+              aria-valuenow={eventPanelWidth}
+              tabIndex={0}
+              title="拖动调整事件列表宽度"
+              onPointerDown={handleEventPanelResize}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowLeft') { event.preventDefault(); resizeEventPanel(16); }
+                if (event.key === 'ArrowRight') { event.preventDefault(); resizeEventPanel(-16); }
+                if (event.key === 'Home') { event.preventDefault(); setEventPanelWidth(280); }
+                if (event.key === 'End') { event.preventDefault(); setEventPanelWidth(520); }
+              }}
+            />
             <div className="monitoring-thumbnail-slot min-h-0 overflow-hidden">
               <WellboreStatusThumbnail
                 wellName={activeWell.wellName}

@@ -243,7 +243,7 @@ export function EventExplanationDrawer({ alert, wellKey, endpoint, onClose }: { 
             <section className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
               <div className={`min-w-0 rounded-xl border p-4 sm:p-5 ${levelTone(currentLevel)}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-sm font-semibold"><Activity className="h-4 w-4 shrink-0" />现在是什么情况</div>
+                  <div className="flex items-center gap-2 text-sm font-semibold"><Activity className="h-4 w-4 shrink-0" />当前事件判定</div>
                   <div className="flex flex-wrap gap-1.5 text-xs font-semibold">
                     <span className="rounded-full bg-white/70 px-2.5 py-1 dark:bg-slate-950/30">当前 L{currentLevel}</span>
                     {highestLevel > currentLevel && <span className="rounded-full bg-white/70 px-2.5 py-1 dark:bg-slate-950/30">最高到 L{highestLevel}</span>}
@@ -325,14 +325,14 @@ function ListBlock({ title, items }: { title?: string; items: string[] }) { retu
 function EvidenceDigest({ items }: { items: EventExplanation['supportingEvidence'] }) {
   return (
     <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-      <div className="flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-100"><CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />为什么这样判断</div>
+      <div className="flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-100"><CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />判定依据与变化过程</div>
       <div className="mt-3 space-y-2.5">
         {items.length ? items.slice(0, 3).map((item) => (
           <div key={item.evidenceId} className="min-w-0 rounded-lg bg-white/75 px-3 py-2.5 dark:bg-slate-900/60">
             <div className="break-words text-sm font-medium text-slate-900 dark:text-slate-100">{item.observedFact}</div>
             {item.physicalMeaning && <div className="mt-1 break-words text-xs leading-5 ops-muted">{item.physicalMeaning}</div>}
           </div>
-        )) : <div className="text-sm ops-muted">当前没有足够的成熟证据，请以现场复核为准。</div>}
+        )) : <div className="text-sm ops-muted">当前尚未形成可展示的支持证据，系统继续等待连续观测并建议现场复核。</div>}
       </div>
       {items.length > 3 && <div className="mt-3 text-xs ops-muted">另有 {items.length - 3} 条证据，见“完整复核信息”。</div>}
     </div>

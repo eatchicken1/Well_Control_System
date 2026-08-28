@@ -23,6 +23,7 @@ import { OpsProcedureRail } from '../components/OpsProcedureRail';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 import { operatorEventPresentation } from '../lib/operatorEventPresentation';
+import { parseSourceDateMs } from '../lib/sourceTime';
 import {
   acknowledgeWarningEvent,
   acknowledgeWarningEvents,
@@ -110,8 +111,11 @@ function lifecycleLabel(event: WarningEventReviewItem) {
 
 function formatDuration(start: string, end: string) {
   if (!start || !end) return '持续中';
-  const milliseconds = new Date(end.replace(' ', 'T')).getTime() - new Date(start.replace(' ', 'T')).getTime();
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) return '—';
+  const startMillis = parseSourceDateMs(start);
+  const endMillis = parseSourceDateMs(end);
+  if (startMillis === null || endMillis === null) return '—';
+  const milliseconds = endMillis - startMillis;
+  if (milliseconds < 0) return '—';
   const seconds = Math.round(milliseconds / 1000);
   if (seconds < 60) return `${seconds} 秒`;
   const minutes = Math.floor(seconds / 60);
