@@ -1968,7 +1968,7 @@ function parseCycleState(value: unknown): CycleState | null {
       pumprestarting: 4,
       monitoring: 5,
     };
-    return byName[normalized.replace(/[s_-]/g, '').toLowerCase()] ?? null;
+    return byName[normalized.replace(/[\s_-]/g, '').toLowerCase()] ?? null;
   }
   return null;
 }
@@ -1979,7 +1979,7 @@ function parseOperationCycleState(value: unknown, fallbackState: CycleState | nu
 }
 
 function parseHypothesisCycleState(value: unknown): HypothesisCycleState {
-  const normalized = String(value || '').replace(/[s_-]/g, '').toLowerCase();
+  const normalized = String(value || '').replace(/[\s_-]/g, '').toLowerCase();
   const values: Record<string, HypothesisCycleState> = {
     none: 'None',
     watchingpoststop: 'WatchingPostStop',
@@ -2480,6 +2480,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
   private lastSampleTime: string | null = null;
   private closedByClient = false;
   private completed = false;
+  private terminalError = false;
   private replayQueue: RealTimeRecord[] = [];
   private replayTimer: number | null = null;
 
@@ -2493,6 +2494,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
     this.recordCount = 0;
     this.lastSampleTime = normalizeSampleTime(this.lastSampleTime || '') || null;
     this.completed = false;
+    this.terminalError = false;
     this.replayQueue = [];
     if (this.replayTimer !== null) {
       window.clearTimeout(this.replayTimer);
@@ -2508,7 +2510,14 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
   private async consume(url: string, well: WellInfo, controller: AbortController) {
     try {
       const response = await authenticatedFetch(url, { cache: 'no-store', signal: controller.signal, headers: { Accept: 'text/event-stream' } });
-      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok || !response.body) {
+        if ([401, 403, 409].includes(response.status)) {
+          this.terminalError = true;
+          this.emitStatus({ mode: this.mode, adapterName: 'V7 实时检测流', status: response.status === 401 || response.status === 403 ? 'unauthorized' : 'error', endpoint: url, message: `检测流请求被后端拒绝（HTTP ${response.status}）`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount, sessionCode: this.sessionCode });
+          return;
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
       this.emitStatus({ mode: this.mode, adapterName: 'V7 实时检测流', status: 'connected', endpoint: url, message: '检测流已接入，等待数据帧', lastRecordAt: null, recordCount: this.recordCount });
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -2525,9 +2534,10 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
           boundary = buffer.indexOf('\n\n');
         }
       }
-      if (!controller.signal.aborted && !this.completed) this.emitStatus({ mode: this.mode, adapterName: 'V7 实时检测流', status: 'reconnecting', endpoint: url, message: `检测流断开，正在重连 · ${this.recordCount} 帧`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount, sessionCode: this.sessionCode });
+      if (!controller.signal.aborted && !this.completed && !this.terminalError) this.emitStatus({ mode: this.mode, adapterName: 'V7 实时检测流', status: 'reconnecting', endpoint: url, message: `检测流断开，正在重连 · ${this.recordCount} 帧`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount, sessionCode: this.sessionCode });
     } catch (error) {
       if (controller.signal.aborted || this.closedByClient) return;
+      if (this.terminalError) return;
       this.emitStatus({ mode: this.mode, adapterName: 'V7 实时检测流', status: 'reconnecting', endpoint: url, message: `检测流连接中断，正在重连：${error instanceof Error ? error.message : '未知错误'}`, lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null, recordCount: this.recordCount, sessionCode: this.sessionCode });
     } finally {
       if (this.controller === controller) this.controller = null;
@@ -2586,6 +2596,7 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
       // Backend rejected the attachment (e.g. no running monitoring session).
       // Surface it to the operator; the stream client keeps its cursor so a
       // later "start monitoring" + reconnect resumes cleanly.
+      this.terminalError = true;
       this.emitStatus({
         mode: this.mode,
         adapterName: 'V7 实时检测流',
@@ -2595,6 +2606,23 @@ class SseDetectionDataSourceAdapter implements DataSourceAdapter {
         lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
         recordCount: this.recordCount,
         sessionCode: this.sessionCode,
+      });
+      return;
+    }
+    if (eventName === 'session.gap') {
+      // The backend closes a bounded subscriber after overflow. Keep the
+      // durable cursor and let the resilient wrapper establish a fresh SSE
+      // subscription; never treat a gap as a completed monitoring session.
+      this.emitStatus({
+        mode: this.mode,
+        adapterName: 'V7 实时检测流',
+        status: 'reconnecting',
+        endpoint: this.endpoint,
+        message: `检测流发生缺口，正在从游标续接：${String(data.reason || 'subscriber_gap')}`,
+        lastRecordAt: this.lastSampleTime ? formatRecordDateTime(this.lastSampleTime) : null,
+        recordCount: this.recordCount,
+        sessionCode: this.sessionCode,
+        streamGap: true,
       });
       return;
     }
@@ -3169,7 +3197,12 @@ class ResilientRealtimeDataSourceAdapter implements DataSourceAdapter {
       if (state.sessionCode) this.sessionCode = state.sessionCode;
 
       if (!isFallback && !this.fallbackActivated) {
-        if (state.status === 'paused' || state.status === 'reconnecting' || state.status === 'error') {
+        // A backend session.error is authoritative (for example 409 because
+        // the session does not exist or has the wrong mode), not a transient
+        // transport failure. Only reconnectable statuses schedule another
+        // fetch; otherwise a known terminal error would create an infinite
+        // retry storm and hide the operator-facing error.
+        if (state.status === 'paused' || state.status === 'reconnecting') {
           this.scheduleSseReconnect(adjustedState, state.message || '检测流连接中断');
           return;
         }
