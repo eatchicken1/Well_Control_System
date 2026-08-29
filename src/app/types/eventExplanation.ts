@@ -125,6 +125,28 @@ export interface EventExplanation {
   materialFactHash: string;
   generatedAt: string;
   generatorVersion: string;
+  /** Latest persisted backend frame, when the narrative service is unavailable. */
+  latestFrame?: {
+    sampleTime: string;
+    publicLevel: number;
+    formalEvalLevel: number;
+    eventState: string;
+    inletFlow?: number | null;
+    outletFlow?: number | null;
+    pitVolume?: number | null;
+    standpipePressure?: number | null;
+    casingPressure?: number | null;
+    bitDepth?: number | null;
+    wellDepth?: number | null;
+  };
+  trend?: Array<{
+    sampleTime: string;
+    inletFlow?: number | null;
+    outletFlow?: number | null;
+    pitVolume?: number | null;
+    standpipePressure?: number | null;
+    casingPressure?: number | null;
+  }>;
 }
 
 export interface EventExplanationCacheEntry {

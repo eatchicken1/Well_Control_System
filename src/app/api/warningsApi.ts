@@ -79,6 +79,7 @@ export interface WarningEventReviewDetail {
   ok: boolean;
   event: WarningEventReviewItem;
   latestFrame?: WarningEventLatestFrame | null;
+  trend?: WarningEventTrendPoint[];
   lifecycle: WarningEventLifecycleLog[];
   acknowledgements: WarningEventAcknowledgement[];
 }
@@ -149,11 +150,24 @@ export async function fetchWarningEvents(query: WarningEventQuery = {}, signal?:
   return apiJson<WarningEventReviewPage>(buildWarningEventsUrl(query), { cache: 'no-store', signal });
 }
 
-export async function fetchWarningEventDetail(eventId: string, signal?: AbortSignal) {
+export async function fetchWarningEventDetail(eventId: string, signal?: AbortSignal, endpoint?: string) {
+  const normalized = endpoint?.trim().replace(/\/+$/, '') || '';
+  // realtimeEndpoint points at /api/realtime while warning review lives at
+  // the sibling /api/warnings route on the same host.
+  const base = normalized.replace(/\/realtime$/i, '') || '/api';
   return apiJson<WarningEventReviewDetail>(
-    `/api/warnings/events/${encodeURIComponent(eventId)}/detail`,
+    `${base}/warnings/events/${encodeURIComponent(eventId)}/detail`,
     { cache: 'no-store', signal },
   );
+}
+
+export interface WarningEventTrendPoint {
+  sampleTime: string;
+  inletFlow?: number | null;
+  outletFlow?: number | null;
+  pitVolume?: number | null;
+  standpipePressure?: number | null;
+  casingPressure?: number | null;
 }
 
 export async function acknowledgeWarningEvent(warningId: number, comment?: string) {
