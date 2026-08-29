@@ -359,13 +359,6 @@ export interface ThresholdSettings {
   mudWeightWarning: number;
   sppResidualWarning: number;
   sppResidualCritical: number;
-  cusumDecisionInterval: number;
-  rlsForgettingFactor: number;
-  madTolerance: number;
-  gasLagWindowMinutes: number;
-  stopFlowDecayThreshold: number;
-  coldStartCycleCount: number;
-  covariancePenaltyThreshold: number;
 }
 
 export const DEFAULT_REALTIME_ENDPOINT = '/api/realtime';
@@ -707,13 +700,6 @@ export const DEFAULT_THRESHOLDS: ThresholdSettings = {
   mudWeightWarning: 1.15,
   sppResidualWarning: 0.42,
   sppResidualCritical: 1.15,
-  cusumDecisionInterval: 5.6,
-  rlsForgettingFactor: 0.98,
-  madTolerance: 2.8,
-  gasLagWindowMinutes: 90,
-  stopFlowDecayThreshold: 82,
-  coldStartCycleCount: 20,
-  covariancePenaltyThreshold: 0.3,
 };
 
 const EMPTY_WELL_INFO: WellInfo = {

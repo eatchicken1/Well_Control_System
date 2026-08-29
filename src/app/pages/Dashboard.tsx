@@ -30,7 +30,8 @@ function safeBackendLevel(value: unknown): BackendLevel {
 function levelTone(level: unknown) {
   const safeLevel = safeBackendLevel(level);
   if (safeLevel >= 4) return 'dashboard-chip-danger';
-  if (safeLevel >= 2) return 'dashboard-chip-warn';
+  if (safeLevel === 3) return 'dashboard-chip-orange';
+  if (safeLevel === 2) return 'dashboard-chip-warn';
   return 'dashboard-chip-ok';
 }
 
@@ -145,12 +146,15 @@ function runtimeProgressTone({
 }
 
 function runtimeDot(runtime?: WellRuntimeState, isStopped = false) {
+  // Alarm colours always win over connection state: a well that reached L2+
+  // must stay visible even while stopped or reconnecting.
+  const level = safeBackendLevel(runtime?.backendLevel);
+  if (level >= 4) return 'bg-red-500';
+  if (level === 3) return 'bg-orange-500';
+  if (level === 2) return 'bg-amber-500';
   if (isStopped || runtime?.backendRuntimeStatus === 'Stopped' || runtime?.isBackendRunning === false) {
     return 'bg-slate-400';
   }
-  const level = safeBackendLevel(runtime?.backendLevel);
-  if (level >= 4) return 'bg-red-500';
-  if (level >= 2) return 'bg-amber-500';
   if (runtime?.status === 'connected') return 'bg-emerald-500';
   if (runtime?.status === 'connecting' || runtime?.status === 'reconnecting' || runtime?.status === 'catchingUp') return 'bg-cyan-500';
   return 'bg-slate-400';
@@ -337,7 +341,7 @@ function MonitoredWellCard({
     || cleanLayerLabel(runtime?.latestFormation)
     || cleanLayerLabel(alert?.formation)
     || wellLayer(well);
-  const latestTime = isActiveWell ? activeSampleTime || runtime?.lastRecordAt : runtime?.lastRecordAt || alert?.time;
+  const latestTime = isActiveWell ? activeSampleTime || runtime?.lastRecordAt : runtime?.lastRecordAt;
   const statusText = isStopped ? '已停止' : statusLabel(runtime);
   const statusTone = runtimeStatusTone({ isRunning, isConnecting, isStopped, hasStarted });
   const cardStateTone = runtimeCardStateTone({ level, isRunning, isConnecting, isStopped });
@@ -659,9 +663,9 @@ function EventOverview({ selectedAlerts }: { selectedAlerts: Alert[] }) {
             <button
               key={alert.id}
               type="button"
-              onClick={() => navigate('/alerts')}
+              onClick={() => (alert.backendEventId ? navigate(`/alerts/${encodeURIComponent(alert.backendEventId)}`) : navigate('/alerts'))}
               className={`multiwell-event-card ${safeBackendLevel(alert.backendLevel) >= 4 ? 'multiwell-event-critical' : 'multiwell-event-warning'}`}
-              aria-label={`查看 ${alert.wellName || alert.wellId || '当前井'} 事件：${presentation.title}`}
+              aria-label={`查看 ${alert.wellName || alert.wellId || '当前井'} 事件详情：${presentation.title}`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -713,6 +717,21 @@ export default function Dashboard() {
     () => alerts.filter((alert) => !alert.wellId || monitoredSet.has(alert.wellId)),
     [alerts, monitoredSet],
   );
+  // One persisted event can emit several alert frames; the tile counts unique
+  // events so the number matches the alarm-review page.
+  const uniqueEventCount = useMemo(
+    () => new Set(selectedAlerts.map((alert) => alert.backendEventId || `local-${alert.id}`)).size,
+    [selectedAlerts],
+  );
+  // Cards must surface the most serious / newest event per well, not whichever
+  // row happens to come first.
+  const pickCardAlert = (wellId: string) => selectedAlerts
+    .filter((alert) => alert.wellId === wellId)
+    .sort((a, b) => {
+      const levelDelta = safeBackendLevel(b.backendLevel) - safeBackendLevel(a.backendLevel);
+      if (levelDelta !== 0) return levelDelta;
+      return `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
+    })[0];
 
   return (
     <div className="ops-page multiwell-dashboard space-y-3">
@@ -734,7 +753,7 @@ export default function Dashboard() {
             <div className="multiwell-summary-tile">
               <AlertTriangle className="h-4 w-4 text-amber-700" />
               <span>事件</span>
-              <strong>{selectedAlerts.length}</strong>
+              <strong>{uniqueEventCount}</strong>
             </div>
           </div>
 
@@ -743,12 +762,13 @@ export default function Dashboard() {
               <div>
                 <RadioTower className="mx-auto mb-3 h-7 w-7 text-slate-400" />
                 <div className="text-sm text-slate-700 dark:text-slate-200">请选择需要进入监测的井</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">在上方“井选择”面板勾选井后，即可开始实时监测或历史回放</div>
               </div>
             </div>
           ) : (
             <div className="multiwell-card-grid">
               {monitoredWells.map((well) => {
-                const alert = selectedAlerts.find((item) => item.wellId === well.wellId);
+                const alert = pickCardAlert(well.wellId);
                 return (
                   <MonitoredWellCard
                     key={well.wellId}

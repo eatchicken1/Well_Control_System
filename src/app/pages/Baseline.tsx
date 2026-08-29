@@ -1,6 +1,17 @@
+import { useState } from 'react';
 import { Activity, DatabaseZap, RotateCcw, ShieldCheck, Snowflake, Clock3, Layers3, LockKeyhole } from 'lucide-react';
 import { useWellControl, type BaselineChannelSnapshot } from '../context/WellControlContext';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
 import { formatSourceDateTime } from '../lib/sourceTime';
 
 const CHANNEL_ORDER = [
@@ -95,13 +106,21 @@ function ChannelRow({ channel, minimum }: { channel: BaselineChannelSnapshot; mi
   const state = formatState(channel.state);
   const meta = channelMeta(channel);
   const count = channelSampleCount(channel);
-  const progress = channel.state === 'LocalWindow' || channel.state === 'LocalAnchor'
+  const isLocal = channel.state === 'LocalWindow' || channel.state === 'LocalAnchor';
+  const progress = isLocal
     ? 100
     : Math.min(100, (count / Math.max(minimum, 1)) * 100);
   const expected = formatReferenceValue(channel, channel.expectedSiValue);
   const interval = channel.lowerBoundSiValue !== null && channel.upperBoundSiValue !== null
     ? `${formatReferenceValue(channel, channel.lowerBoundSiValue)} – ${formatReferenceValue(channel, channel.upperBoundSiValue)}`
     : '不提供长期预测';
+  // Local windows/anchors are not long-term maturity: they get a distinct
+  // pale bar so they never read as a "complete" reference.
+  const barTone = isLocal
+    ? 'bg-sky-300 dark:bg-sky-700'
+    : channel.frozen
+      ? 'bg-red-400 dark:bg-red-600'
+      : 'bg-cyan-500';
 
   return (
     <tr>
@@ -115,11 +134,11 @@ function ChannelRow({ channel, minimum }: { channel: BaselineChannelSnapshot; mi
       </td>
       <td className="min-w-[180px]">
         <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="tabular-nums">{channel.state === 'LocalWindow' || channel.state === 'LocalAnchor' ? '局部计算' : `${count} / ${minimum}`}</span>
-          <span className="ops-muted">{channel.state === 'LocalWindow' || channel.state === 'LocalAnchor' ? '—' : `${Math.round(progress)}%`}</span>
+          <span className="tabular-nums">{isLocal ? '局部计算' : `${count} / ${minimum}`}</span>
+          <span className="ops-muted">{isLocal ? '非长期成熟度' : `${Math.round(progress)}%`}</span>
         </div>
         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-          <div className="h-full rounded-full bg-cyan-500" style={{ width: `${progress}%` }} />
+          <div className={`h-full rounded-full ${barTone}`} style={{ width: `${progress}%` }} />
         </div>
       </td>
        <td>
@@ -137,6 +156,7 @@ function ChannelRow({ channel, minimum }: { channel: BaselineChannelSnapshot; mi
 
 export default function Baseline() {
   const { handleReset, selectedWellId, wells, wellInfo, selectedWellView } = useWellControl();
+  const [confirmReset, setConfirmReset] = useState(false);
   const activeWell = wells.find((well) => well.wellId === selectedWellId) || wellInfo;
   const activeWellLabel = activeWell?.wellName || '未选择井';
   const activeWellMeta = activeWell ? `${activeWell.wellId} · ${activeWell.blockName || activeWell.block || '实时监测井'}` : '未选择井';
@@ -166,11 +186,26 @@ export default function Baseline() {
           <h1 className="ops-title">基线管理</h1>
           <p className="text-sm ops-muted">展示算法条件参考库的成熟度、通道状态和异常隔离情况</p>
         </div>
-        <button type="button" onClick={handleReset} className="ops-button-secondary" aria-label={`重置 ${activeWellLabel} 基线`}>
+        <button type="button" onClick={() => setConfirmReset(true)} className="ops-button-secondary" aria-label={`重置 ${activeWellLabel} 基线`}>
           <RotateCcw className="h-4 w-4" />
           重置当前井基线
         </button>
       </div>
+
+      <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>重置 {activeWellLabel} 的基线？</AlertDialogTitle>
+            <AlertDialogDescription>
+              只清理当前井后端参考学习状态与前端快照：不会删除原始遥测和告警事件历史。重置后参考库回到候选积累阶段，期间判级参考可信度下降，需要持续正常暴露样本后才会重新成熟。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleReset()}>确认重置</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="ops-inline-tile flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
         <span className="ops-muted">当前基线井</span>

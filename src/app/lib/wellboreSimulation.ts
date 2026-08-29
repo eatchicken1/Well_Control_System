@@ -147,6 +147,13 @@ export interface WellboreZoneBand {
 export interface WellboreFlowState {
   circulationActive: boolean;
   returnActive: boolean;
+  /** Condition/pump text says pumping is stopped — circulation must not animate. */
+  pumpStopped: boolean;
+  pumpRunning: boolean;
+  /** Condition text explicitly declares 关井 (well shut in, BOP rams closed). */
+  shutIn: boolean;
+  /** Condition text declares 起下钻/接单根 (trip or connection). */
+  tripping: boolean;
   showNormalPath: boolean;
   showWatchPath: boolean;
   showKickPath: boolean;
@@ -497,7 +504,14 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   // which the caller derives with computeObservedFlowDelta() - null unless
   // the outlet semantic is a true volumetric flow and both Qin/Qout exist.
   const flowDelta = input.flowDelta;
-  const circulationActive = finite(input.flowIn, 0) > 0.5 || finite(input.spm, 0) > 8;
+  // The schematic must follow the declared operation condition first: when the
+  // condition/pump text says 停泵/关井, stale flow readings must not keep the
+  // circulation animation running.
+  const conditionText = `${input.condition ?? ''} ${input.pumpState ?? ''}`.toLowerCase();
+  const pumpStopped = /停泵|停钻|关井|pumpoff|pump[_-]?off|stopped|shut/.test(conditionText);
+  const shutIn = /关井|shut[-_ ]?in/.test(conditionText);
+  const tripping = /起下钻|接单根|划眼|trip/.test(conditionText);
+  const circulationActive = !pumpStopped && (finite(input.flowIn, 0) > 0.5 || finite(input.spm, 0) > 8);
   const returnActive = finite(input.flowOut, 0) > 0.5 || (flowDelta !== null && flowDelta > 0.5);
   const mudWeight = Number.isFinite(input.mudWeight) && Number(input.mudWeight) > 0 ? Number(input.mudWeight) : undefined;
   const ecd = Number.isFinite(input.ecd) && Number(input.ecd) > 0 ? Number(input.ecd) : undefined;
@@ -616,6 +630,10 @@ export function buildWellboreSimulationModel(input: WellboreSimulationInput): We
   const flowState: WellboreFlowState = {
     circulationActive,
     returnActive,
+    pumpStopped,
+    pumpRunning: circulationActive,
+    shutIn,
+    tripping,
     showNormalPath: input.backendLevel === 0,
     showWatchPath: input.backendLevel === 1,
     showKickPath: input.backendLevel >= 2,

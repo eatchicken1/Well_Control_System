@@ -6,6 +6,7 @@ import Monitoring from './pages/Monitoring';
 import WellboreStatusDetail from './pages/WellboreStatusDetail';
 import History from './pages/History';
 import Alerts from './pages/Alerts';
+import EventDetail from './pages/EventDetail';
 import Settings from './pages/Settings';
 import Baseline from './pages/Baseline';
 import Login from './pages/Login';
@@ -40,6 +41,7 @@ export const router = createBrowserRouter([
           { path: 'baseline', Component: Baseline },
           { path: 'history', Component: History },
           { path: 'alerts', Component: Alerts },
+          { path: 'alerts/:eventId', Component: EventDetail },
           { path: 'settings', Component: Settings },
           // Intentionally omitted from the formal-alert navigation. This is an
           // offline research workspace, never a monitoring or alarm input.

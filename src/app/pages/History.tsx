@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { AlertTriangle, Database, Download, Eye, RefreshCw, X } from 'lucide-react';
-import { useWellControl, type AlertStatus, type BackendLevel } from '../context/WellControlContext';
+import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { BACKEND_LEVEL_META, backendSignalLabel } from '../lib/backendDetection';
 import { operatorEventPresentation } from '../lib/operatorEventPresentation';
+import { LEVEL_VISUAL, safeLevel } from '../lib/levelVisual';
 import { authenticatedFetch } from '../api/authToken';
 
 type DbHistoryRecord = {
@@ -68,18 +70,19 @@ type HistoryPayload = {
 };
 
 const PAGE_SIZE = 50;
-const STATUS_LABELS: Record<AlertStatus, string> = { normal: '正常', warning: '预警', critical: '严重' };
 
-function levelStatus(level: number): AlertStatus {
-  if (level >= 4) return 'critical';
-  if (level >= 2) return 'warning';
-  return 'normal';
+/** L0-L4 keeps the canonical five-tier wording and colour everywhere. */
+function levelBadgeText(level: number) {
+  const safe = safeLevel(level);
+  return `L${safe} ${BACKEND_LEVEL_META[safe].shortLabel}`;
 }
 
-function statusBadge(status: AlertStatus) {
-  if (status === 'critical') return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-200';
-  if (status === 'warning') return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200';
-  return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200';
+function levelRowTone(level: number) {
+  const safe = safeLevel(level);
+  if (safe >= 4) return 'bg-red-50/60 dark:bg-red-950/20';
+  if (safe >= 3) return 'bg-orange-50/60 dark:bg-orange-950/20';
+  if (safe >= 2) return 'bg-amber-50/60 dark:bg-amber-950/20';
+  return '';
 }
 
 function finite(value: unknown, fallback = 0) {
@@ -213,6 +216,7 @@ function normalizeHistoryRecord(value: unknown): DbHistoryRecord {
 }
 
 export default function History() {
+  const navigate = useNavigate();
   const {
     wellInfo,
     selectedStartTime,
@@ -232,7 +236,10 @@ export default function History() {
   const [selected, setSelected] = useState<DbHistoryRecord | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [reviewMode, setReviewMode] = useState<'facts' | 'replay'>('facts');
+  const reviewModeRef = useRef(reviewMode);
+  reviewModeRef.current = reviewMode;
   const [replayMessage, setReplayMessage] = useState('');
+  const [replayRequesting, setReplayRequesting] = useState(false);
   const [replayResult, setReplayResult] = useState<HistoryPayload | null>(null);
   const currentSampleTimeRef = useRef(currentSampleTime);
   const selectedStartTimeRef = useRef(selectedStartTime);
@@ -316,8 +323,12 @@ export default function History() {
     loadPage(1);
   }, [loadPage, selectedStartTime, timeBounds.firstTime, wellInfo?.wellId]);
 
+  // Replay results are a frozen snapshot: polling the facts endpoint during
+  // replay mode would burn requests the UI never shows.
   useEffect(() => {
-    const timer = window.setInterval(() => loadPage(pageRef.current), 60_000);
+    const timer = window.setInterval(() => {
+      if (reviewModeRef.current !== 'replay') loadPage(pageRef.current);
+    }, 60_000);
     return () => window.clearInterval(timer);
   }, [loadPage]);
 
@@ -349,7 +360,8 @@ export default function History() {
     loadPage(pageRef.current);
   };
   const requestReplay = async () => {
-    if (!wellInfo?.wellId) return;
+    if (!wellInfo?.wellId || replayRequesting) return;
+    setReplayRequesting(true);
     setReplayMessage('正在创建独立算法回放 Session…');
     try {
       const response = await authenticatedFetch(buildRealtimeApiUrl(`/wells/${encodeURIComponent(wellInfo.wellId)}/replay`), {
@@ -376,6 +388,8 @@ export default function History() {
       setReplayMessage(`回放 Session ${replayPayload.sessionCode || '已创建'} · 算法 ${replayPayload.algorithmVersion || '--'} · 已预热 ${replayPayload.warmupMinutes || 0} 分钟`);
     } catch (error) {
       setReplayMessage(`回放创建失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setReplayRequesting(false);
     }
   };
   const highCount = records.filter((record) => hasFiniteValue(record.public_level) && finite(record.public_level) >= 4).length;
@@ -403,7 +417,7 @@ export default function History() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `well_algorithm_replay_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `history_${reviewMode === 'replay' ? 'algorithm_replay' : 'window_facts'}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -441,7 +455,10 @@ export default function History() {
             <div className="ops-eyebrow">独立回放 Runtime</div>
             <div className="mt-1 text-sm text-slate-800 dark:text-slate-100">{replayMessage || '使用当前井和时间窗口创建独立回放 Session，不覆盖实时监测状态。'}</div>
           </div>
-          <button type="button" className="ops-button-primary" onClick={requestReplay}>创建后端回放</button>
+          <button type="button" className="ops-button-primary" onClick={requestReplay} disabled={replayRequesting}>
+            {replayRequesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+            {replayRequesting ? '正在创建回放…' : '创建后端回放'}
+          </button>
         </div>
       )}
 
@@ -459,7 +476,7 @@ export default function History() {
           <div className="mt-1 text-sm tabular-nums text-amber-700 dark:text-amber-200">{warnCount} 条</div>
         </div>
         <div className="ops-panel-soft p-3">
-          <div className="text-[11px] ops-muted">当前页确认</div>
+          <div className="text-[11px] ops-muted">当前页 L4 确认</div>
           <div className="mt-1 text-sm tabular-nums text-red-700 dark:text-red-200">{highCount} 条</div>
         </div>
         <div className="ops-panel-soft p-3">
@@ -534,10 +551,9 @@ export default function History() {
               <tbody>
                 {records.map((record, index) => {
                   const hasLevel = hasFiniteValue(record.public_level);
-                  const level = finite(record.public_level) as BackendLevel;
-                  const status = levelStatus(level);
+                  const level = safeLevel(record.public_level);
                   return (
-                    <tr key={`${record.id || record.frame || index}-${record.timestamp}`} className={status === 'critical' ? 'bg-red-50/60 dark:bg-red-950/20' : status === 'warning' ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''}>
+                    <tr key={`${record.id || record.frame || index}-${record.timestamp}`} className={levelRowTone(level)}>
                       <td className="whitespace-nowrap text-xs ops-muted">
                         {displayTime(record.timestamp || record.sample_time)}
                         <span className="ml-1 text-[10px] text-slate-400">#{record.source_row_no || record.id || record.frame || index}</span>
@@ -550,8 +566,8 @@ export default function History() {
                       <td className="text-right tabular-nums">{formatDbNumber(record.spp, 3)}</td>
                       <td className="text-right tabular-nums">{formatDbNumber(record.gas, 2)}</td>
                       <td className="text-center">
-                        <span className={`rounded px-2 py-0.5 text-xs ${hasLevel ? statusBadge(status) : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200'}`}>
-                          {hasLevel ? `L${level} ${STATUS_LABELS[status]}` : '-- 未知'}
+                        <span className={`rounded px-2 py-0.5 text-xs ${hasLevel ? LEVEL_VISUAL[level].badge : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200'}`}>
+                          {hasLevel ? levelBadgeText(level) : '-- 未知'}
                         </span>
                       </td>
                       <td className="max-w-[240px] truncate text-xs font-medium text-slate-800 dark:text-slate-100" title={record.physical_description || undefined}>
@@ -572,17 +588,16 @@ export default function History() {
             <div className="divide-y divide-slate-200 md:hidden dark:divide-slate-800" role="list" aria-label="数据库复核记录">
               {records.map((record, index) => {
                 const hasLevel = hasFiniteValue(record.public_level);
-                const level = finite(record.public_level) as BackendLevel;
-                const status = levelStatus(level);
+                const level = safeLevel(record.public_level);
                 return (
-                  <article key={`mobile-${record.id || record.frame || index}-${record.timestamp}`} role="listitem" className={status === 'critical' ? 'bg-red-50/60 p-3 dark:bg-red-950/20' : status === 'warning' ? 'bg-amber-50/60 p-3 dark:bg-amber-950/20' : 'p-3'}>
+                  <article key={`mobile-${record.id || record.frame || index}-${record.timestamp}`} role="listitem" className={`${levelRowTone(level)} p-3`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{displayTime(record.timestamp || record.sample_time)}</div>
                         <div className="mt-0.5 text-[11px] ops-muted">记录 #{record.source_row_no || record.id || record.frame || index}</div>
                       </div>
-                      <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${hasLevel ? statusBadge(status) : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200'}`}>
-                        {hasLevel ? `L${level} ${STATUS_LABELS[status]}` : '-- 未知'}
+                      <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${hasLevel ? LEVEL_VISUAL[level].badge : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200'}`}>
+                        {hasLevel ? levelBadgeText(level) : '-- 未知'}
                       </span>
                     </div>
                     <div className="mt-2 text-sm font-semibold leading-5 text-slate-900 dark:text-slate-100">{record.event_title || (hasLevel ? operatorEventPresentation(record, level).title : '当前未发现需提示的参数异常')}</div>
@@ -625,7 +640,12 @@ export default function History() {
               <div className="ops-empty-state m-3 min-h-[160px]">
                 <div>
                   <div className="text-sm text-slate-700 dark:text-slate-200">{loading ? '正在加载算法输出' : '当前时间窗口没有算法输出'}</div>
-                  <div className="mt-1 text-xs">{loading ? '请稍候，后端正在预热并复演当前窗口。' : '请确认时间窗口内存在历史采样数据，或调整开始时间。'}</div>
+                  <div className="mt-1 text-xs">{loading ? '请稍候，后端正在预热并复演当前窗口。' : '查询窗口起点继承自监测页的数据窗口。可回到监测页调整窗口，或直接点击「刷新」重试。'}</div>
+                  {!loading && (
+                    <button type="button" className="ops-button-secondary mt-3 px-3 py-1.5 text-xs" onClick={() => navigate('/monitoring')}>
+                      回到监测页调整窗口
+                    </button>
+                  )}
                 </div>
               </div>
             )}

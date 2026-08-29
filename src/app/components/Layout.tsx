@@ -1,9 +1,10 @@
 import { NavLink, Outlet } from 'react-router';
 import { useLocation } from 'react-router';
-import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, RadioTower, BarChart3, LogOut, UserCircle, MapPinned, ChevronRight, SignalHigh, CheckCircle2, AlertTriangle, HardHat } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { LayoutDashboard, Activity, Database, Bell, Settings, Droplets, Menu, X, PanelLeftClose, PanelLeftOpen, RadioTower, BarChart3, LogOut, UserCircle, ChevronRight, HardHat } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useWellControl, type BackendLevel } from '../context/WellControlContext';
 import { BACKEND_LEVEL_META } from '../lib/backendDetection';
+import { LEVEL_VISUAL, safeLevel } from '../lib/levelVisual';
 import { useAuth } from '../context/AuthContext';
 import { AlarmEffectController } from './AlarmEffectController';
 
@@ -23,10 +24,11 @@ function safeBackendLevel(value: unknown): BackendLevel {
 }
 
 function backendLevelTone(level: BackendLevel) {
-  if (level >= 4) return { dot: 'bg-red-500', state: 'critical' as const, text: 'text-red-700 dark:text-red-200' };
-  if (level >= 2) return { dot: level === 3 ? 'bg-orange-500' : 'bg-amber-500', state: 'warning' as const, text: 'text-amber-700 dark:text-amber-200' };
-  if (level === 1) return { dot: 'bg-cyan-500', state: 'normal' as const, text: 'text-cyan-700 dark:text-cyan-200' };
-  return { dot: 'bg-emerald-500', state: 'normal' as const, text: 'text-emerald-700 dark:text-emerald-200' };
+  return {
+    dot: LEVEL_VISUAL[level].dot,
+    state: level >= 4 ? 'critical' as const : level >= 2 ? 'warning' as const : 'normal' as const,
+    text: LEVEL_VISUAL[level].text,
+  };
 }
 
 function HeaderBackendLevelChip({ detection }: { detection: ReturnType<typeof useWellControl>['backendDetection'] }) {
@@ -73,95 +75,6 @@ function DataSourcePill({
       <div className="min-w-0">
         <div className="truncate">{effectiveStatus === 'connected' ? '真实数据' : '数据源'}</div>
         <div className="truncate text-[10px] opacity-70">{isStopped ? '已停' : effectiveStatus === 'connected' ? '已连接' : effectiveStatus === 'connecting' ? '接入中' : effectiveStatus === 'reconnecting' ? '重连中' : effectiveStatus === 'catchingUp' ? '补齐中' : effectiveStatus === 'paused' ? '待启动' : '离线'} · {state.recordCount}</div>
-      </div>
-    </div>
-  );
-}
-
-function qualityTone(grade?: string) {
-  const normalized = String(grade || '').toUpperCase();
-  if (normalized === 'A') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200';
-  if (normalized === 'B') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200';
-  if (normalized === 'C') return 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900/70 dark:bg-orange-950/20 dark:text-orange-200';
-  return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300';
-}
-
-function qualityLabel(grade?: string) {
-  const normalized = String(grade || '').toUpperCase();
-  return ['A', 'B', 'C'].includes(normalized) ? `Q${normalized}` : '数据';
-}
-
-function statusLabel(status: string) {
-  if (status === 'connected') return '在线';
-  if (status === 'connecting') return '接入中';
-  if (status === 'reconnecting') return '重连中';
-  if (status === 'catchingUp') return '补齐中';
-  if (status === 'paused') return '待启动';
-  if (status === 'error') return '离线';
-  return '未知';
-}
-
-function WellFleetStrip() {
-  const { wells, wellRuntimeStates, selectedWellId, selectWell } = useWellControl();
-  const fleetStats = useMemo(() => {
-    const total = wells.length;
-    const running = Object.values(wellRuntimeStates).filter((item) => item.isRunning).length;
-    const connected = Object.values(wellRuntimeStates).filter((item) => item.status === 'connected').length;
-    const warnings = Object.values(wellRuntimeStates).filter((item) => Number(item.backendLevel) >= 2).length;
-    return { total, running, connected, warnings };
-  }, [wellRuntimeStates, wells.length]);
-
-  return (
-    <div className="hidden border-b border-slate-200 bg-white/90 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950/90 lg:block">
-      <div className="flex items-center gap-3">
-        <div className="flex shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-          <MapPinned className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-300" />
-          井群
-          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">{fleetStats.total}</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
-          <SignalHigh className="h-3.5 w-3.5" />
-          在线 {fleetStats.connected}
-        </div>
-        <div className="flex shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-          运行 {fleetStats.running}
-        </div>
-        <div className="flex shrink-0 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">
-          <AlertTriangle className="h-3.5 w-3.5" />
-          预警 {fleetStats.warnings}
-        </div>
-        <div className="ops-scroll flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
-          {wells.map((well) => {
-            const runtime = wellRuntimeStates[well.wellId];
-            const selected = selectedWellId === well.wellId;
-            const backendLevel = safeBackendLevel(runtime?.backendLevel);
-            const dotTone = backendLevel >= 4 ? 'bg-red-500' : backendLevel >= 2 ? 'bg-amber-500' : runtime?.status === 'connected' ? 'bg-emerald-500' : 'bg-slate-400';
-            const gradeTone = qualityTone(well.qualityGrade);
-            return (
-              <button
-                key={well.wellId}
-                type="button"
-                onClick={() => selectWell(well.wellId)}
-                className={`flex min-w-[210px] items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${selected ? 'border-cyan-300 bg-cyan-50/80 text-slate-900 dark:border-cyan-700/70 dark:bg-cyan-950/25 dark:text-slate-100' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900'}`}
-                title={`${well.wellName} · ${well.block || '实时监测井'} · ${statusLabel(runtime?.status || 'paused')}`}
-                aria-pressed={selected}
-                aria-label={`切换到 ${well.wellName}，当前状态 ${statusLabel(runtime?.status || 'paused')}，报警等级 L${backendLevel}`}
-              >
-                <span className={`ops-led h-2.5 w-2.5 shrink-0 rounded-full ${dotTone}`} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{well.wellName}</span>
-                  <span className="block truncate text-[10px] ops-muted">{well.block || '实时监测井'} · {well.recordCount?.toLocaleString('zh-CN') || runtime?.recordCount?.toLocaleString('zh-CN') || 0} 条</span>
-                </span>
-                <span className="flex shrink-0 flex-col items-end gap-1">
-                  <span className={`rounded px-1.5 py-0.5 text-[10px] ${gradeTone}`}>{qualityLabel(well.qualityGrade)}</span>
-                  <span className="text-[10px] ops-muted">{statusLabel(runtime?.status || 'paused')}</span>
-                </span>
-                {selected && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-300" />}
-              </button>
-            );
-          })}
-        </div>
       </div>
     </div>
   );
@@ -230,8 +143,9 @@ export function Layout() {
     selectedWellView,
     selectedWellManuallyStopped,
   } = useWellControl();
-  const currentWellAlerts = alerts.filter((a) => !a.wellId || a.wellId === selectedWellId);
-  const unacknowledgedCount = currentWellAlerts.filter((a) => !a.acknowledged && (a.level === 'critical' || a.level === 'warning')).length;
+  // Sidebar badge counts every unacknowledged L2+ event across wells: the
+  // alarm queue is a fleet-wide duty list, not a per-well one.
+  const unacknowledgedCount = alerts.filter((a) => !a.acknowledged && safeLevel(a.backendLevel) >= 2).length;
   const backendDetection = selectedWellView.backendDetection;
   const selectedWellRuntime = wellRuntimeStates[selectedWellId] || wellRuntimeStates[wellInfo.wellId];
   const selectedWellIsRunning = Boolean(
@@ -246,19 +160,13 @@ export function Layout() {
     || dataSourceState.status === 'reconnecting'
     || dataSourceState.status === 'catchingUp')
   );
-  const statusColors = {
-    normal: 'bg-green-500',
-    warning: 'bg-yellow-500',
-    critical: 'bg-red-500',
-  };
-  const backendLevel = safeBackendLevel(backendDetection.advisoryLevel);
+  const backendLevel = safeLevel(backendDetection.advisoryLevel);
   const displayAlertStatus = backendLevel >= 4 ? 'critical' : backendLevel >= 2 ? 'warning' : 'normal';
   const backendMeta = BACKEND_LEVEL_META[backendLevel];
   const sidebarWidth = sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[232px]';
   const isMonitoringRoute = location.pathname === '/monitoring';
   const topbarBackendChip = <HeaderBackendLevelChip detection={backendDetection} />;
   const topbarDataChip = <DataSourcePill state={dataSourceState} isStopped={selectedWellManuallyStopped} />;
-  const showFleetStrip = false;
 
   useEffect(() => {
     localStorage.setItem('wcs-sidebar-collapsed', String(sidebarCollapsed));
@@ -296,7 +204,7 @@ export function Layout() {
         <div className={`control-tower-status-wrap relative z-10 border-b ${sidebarCollapsed ? 'px-3 py-3' : 'px-3 py-3'}`}>
           <div className={`control-tower-status-card rounded-md border p-2 shadow-inner ${sidebarCollapsed ? 'control-tower-status-card-collapsed flex justify-center' : ''}`}>
             <div className={`flex items-center gap-2 ${sidebarCollapsed ? 'justify-center' : ''}`}>
-              <div className={`ops-led h-2.5 w-2.5 rounded-full ${statusColors[displayAlertStatus]}`} data-state={displayAlertStatus} />
+              <div className={`ops-led h-2.5 w-2.5 rounded-full ${LEVEL_VISUAL[backendLevel].dot}`} data-state={displayAlertStatus} />
               <span className={`text-xs text-slate-700 dark:text-slate-200 ${sidebarCollapsed ? 'hidden' : ''}`}>L{backendLevel} {backendMeta.shortLabel}</span>
               {!selectedWellIsRunning && !sidebarCollapsed && <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">{selectedWellManuallyStopped ? '已停' : '待启动'}</span>}
             </div>
@@ -323,7 +231,7 @@ export function Layout() {
                 onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) =>
                   `control-tower-nav-link group flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors relative ${sidebarCollapsed ? 'control-tower-nav-link-collapsed justify-center' : ''} ${isActive ? 'control-tower-active' : ''} ${
-                    isActive ? 'bg-red-50 text-red-800 ring-1 ring-red-200 dark:bg-red-950/25 dark:text-red-100 dark:ring-red-900/70' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-slate-100'
+                    isActive ? 'bg-cyan-50 text-cyan-900 ring-1 ring-cyan-200 dark:bg-cyan-950/40 dark:text-cyan-100 dark:ring-cyan-900/60' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-slate-100'
                   }`
                 }
                 title={sidebarCollapsed ? label : undefined}
@@ -332,7 +240,7 @@ export function Layout() {
                 {({ isActive }) => (
                   <div className="contents" data-active={isActive}>
                     <span className={`control-tower-nav-icon relative z-10 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border ${
-                      isActive ? 'border-red-300 bg-red-500 text-white dark:border-red-500' : 'border-slate-200 bg-white text-slate-500 group-hover:border-slate-300 group-hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:group-hover:border-slate-600 dark:group-hover:text-slate-100'
+                      isActive ? 'border-cyan-600 bg-cyan-600 text-white dark:border-cyan-500' : 'border-slate-200 bg-white text-slate-500 group-hover:border-slate-300 group-hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:group-hover:border-slate-600 dark:group-hover:text-slate-100'
                     }`}>
                       <Icon className="h-3.5 w-3.5" />
                     </span>
@@ -381,7 +289,7 @@ export function Layout() {
           </button>
           <div className="topbar-title min-w-0">
             <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">井控溢流监测系统</div>
-            <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">{wellInfo.wellName} · {location.pathname === '/' ? '多井总览' : navItems.find((item) => item.to === location.pathname)?.label || '业务页面'}</div>
+            <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">{wellInfo.wellName} · {location.pathname === '/' ? '多井总览' : navItems.find((item) => item.to !== '/' && location.pathname.startsWith(item.to))?.label || '多井总览'}</div>
           </div>
           <div className="flex-1 min-w-0" />
           <div className="hidden min-w-0 items-center gap-2 xl:flex">
@@ -403,8 +311,6 @@ export function Layout() {
             <LogOut className="h-4 w-4" />
           </button>
         </header>
-
-        {showFleetStrip && <WellFleetStrip />}
 
         {/* Page content */}
         <main className={`ops-scroll flex-1 min-h-0 ${isMonitoringRoute ? 'monitoring-route-main overflow-auto lg:overflow-hidden' : 'overflow-auto p-3 lg:p-4'}`} data-current-sample-time={currentSampleTime}>

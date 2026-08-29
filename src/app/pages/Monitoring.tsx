@@ -1,5 +1,6 @@
-import { Clock3, Square } from 'lucide-react';
+import { Clock3, LayoutDashboard, Square } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { MonitoringWellTabs } from '../components/MonitoringWellTabs';
 import { VerticalCurveDeck } from '../components/VerticalCurveDeck';
 import { WellboreStatusThumbnail } from '../components/WellboreStatusThumbnail';
@@ -23,7 +24,15 @@ function formatMetricOrPlaceholder(value: number | null, digits: number, active:
   return formatMetric(value, digits);
 }
 
+const EVENT_PANEL_WIDTH_KEY = 'wcs-monitoring-event-panel-width';
+
+function getInitialEventPanelWidth() {
+  const saved = Number(window.localStorage.getItem(EVENT_PANEL_WIDTH_KEY));
+  return Number.isFinite(saved) && saved >= 280 && saved <= 520 ? saved : 340;
+}
+
 export default function Monitoring() {
+  const navigate = useNavigate();
   const {
     isRunning,
     alerts,
@@ -40,7 +49,7 @@ export default function Monitoring() {
     realtimeEndpoint,
     buildRealtimeApiUrl,
   } = useWellControl();
-  const [eventPanelWidth, setEventPanelWidth] = useState(340);
+  const [eventPanelWidth, setEventPanelWidth] = useState(getInitialEventPanelWidth);
   const [thumbnailSections, setThumbnailSections] = useState<WellboreStructureSection[]>([]);
   const [thumbnailRegisteredDepth, setThumbnailRegisteredDepth] = useState(0);
   const activeWellIds = monitoredWellIds.length > 0
@@ -118,18 +127,21 @@ export default function Monitoring() {
     projectL1ObservationWindows(trackFlowData),
     projectAlarmEvents(currentWellAlerts),
   ), [currentWellAlerts, trackFlowData]);
+  // "Recovering" is about the transport, not the chart window: a connected
+  // stream whose samples fell outside the display window is not recovering.
   const isRecovering = !hasSamples && Boolean(
     !selectedWellManuallyStopped && (
     selectedRuntime?.status === 'connecting'
     || selectedRuntime?.status === 'reconnecting'
-    || selectedRuntime?.status === 'catchingUp'
-    || selectedRuntime?.isRunning
-    || selectedRuntime?.startedSampleTime
-    || selectedRuntime?.lastRecordAt)
+    || selectedRuntime?.status === 'catchingUp')
   );
 
   const resizeEventPanel = (delta: number) => {
-    setEventPanelWidth((width) => Math.max(280, Math.min(520, width + delta)));
+    setEventPanelWidth((width) => {
+      const next = Math.max(280, Math.min(520, width + delta));
+      try { window.localStorage.setItem(EVENT_PANEL_WIDTH_KEY, String(next)); } catch { /* session-only fallback */ }
+      return next;
+    });
   };
 
   const handleEventPanelResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -139,7 +151,9 @@ export default function Monitoring() {
     const handle = event.currentTarget;
     const move = (moveEvent: PointerEvent) => {
       const delta = startX - moveEvent.clientX;
-      setEventPanelWidth(Math.max(280, Math.min(520, startWidth + delta)));
+      const next = Math.max(280, Math.min(520, startWidth + delta));
+      setEventPanelWidth(next);
+      try { window.localStorage.setItem(EVENT_PANEL_WIDTH_KEY, String(next)); } catch { /* session-only fallback */ }
     };
     const stop = () => {
       handle.removeEventListener('pointermove', move);
@@ -174,6 +188,9 @@ export default function Monitoring() {
           <div>
             <Clock3 className="mx-auto mb-3 h-8 w-8 text-slate-400" />
             <div className="text-sm text-slate-700 dark:text-slate-200">从总览页选择井后开始监测</div>
+            <button type="button" className="ops-button-primary mt-3 px-3 py-1.5 text-xs" onClick={() => navigate('/')}>
+              去总览选择井
+            </button>
           </div>
         </div>
       ) : (
@@ -183,9 +200,10 @@ export default function Monitoring() {
         >
           <section className="ops-panel monitoring-primary-panel monitoring-lane-panel flex min-h-0 flex-col overflow-hidden">
             <div className="realtime-kpi-strip">
-              <div><span>当前井深</span><strong>{formatMetricOrPlaceholder(selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? activeWell.depth, 0, hasSamples)} m</strong></div>
+              <div><span>当前井深</span><strong>{formatMetricOrPlaceholder(selectedWellView.latestWellDepth ?? viewCurrentData.wellDepth ?? null, 0, hasSamples)} m</strong></div>
               <div><span>钻头深度</span><strong>{formatMetricOrPlaceholder(viewCurrentData.bitDepth, 0, hasSamples)} m</strong></div>
               <div><span>工况</span><strong>{viewCurrentData.condition || '--'}</strong></div>
+              <div><span>出口流量</span><strong>{formatMetricOrPlaceholder(viewCurrentData.flowOut, 1, hasSamples)}{viewCurrentData.outletUnit ? ` ${viewCurrentData.outletUnit}` : ''}</strong></div>
               <div><span>总池体积</span><strong>{formatMetricOrPlaceholder(viewCurrentData.pitVolume, 2, hasSamples)} m³</strong></div>
               <div><span>立压</span><strong>{formatMetricOrPlaceholder(viewCurrentData.spp, 2, hasSamples)} MPa</strong></div>
               <div><span>套压</span><strong>{formatMetricOrPlaceholder(viewCurrentData.casingPressure, 2, hasSamples)} MPa</strong></div>

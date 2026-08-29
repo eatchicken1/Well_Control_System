@@ -488,6 +488,20 @@
     color: #fde68a;
   }
 
+.dashboard-chip-orange,
+.dashboard-status-high {
+  border-color: rgba(249, 115, 22, 0.26);
+  background: rgba(255, 247, 237, 0.94);
+  color: #c2410c;
+}
+
+.dark .dashboard-chip-orange,
+.dark .dashboard-status-high {
+  border-color: rgba(249, 115, 22, 0.22);
+  background: rgba(124, 45, 18, 0.26);
+  color: #fed7aa;
+}
+
 .dashboard-chip-danger,
 .dashboard-status-critical {
   border-color: rgba(239, 68, 68, 0.24);
@@ -1489,7 +1503,7 @@
   }
 
   .control-tower-active {
-    box-shadow: inset 3px 0 0 rgba(185, 28, 28, 0.92);
+    box-shadow: inset 3px 0 0 rgba(8, 145, 178, 0.92);
   }
 
   .control-tower-code {
@@ -1497,9 +1511,9 @@
   }
 
   .control-tower-sidebar .control-tower-active {
-    background: rgba(254, 242, 242, 0.96) !important;
-    color: #991b1b !important;
-    outline: 1px solid rgba(239, 68, 68, 0.16);
+    background: rgba(236, 254, 255, 0.96) !important;
+    color: #155e75 !important;
+    outline: 1px solid rgba(14, 165, 233, 0.18);
   }
 
   .control-tower-sidebar .control-tower-nav-link:not(.control-tower-active) {
@@ -1518,14 +1532,14 @@
   }
 
   .control-tower-sidebar .control-tower-active span[class*='border-cyan-300'] {
-    border-color: rgba(239, 68, 68, 0.72) !important;
-    background: #ef4444 !important;
+    border-color: rgba(8, 145, 178, 0.85) !important;
+    background: #0891b2 !important;
     color: #fff !important;
   }
 
   .control-tower-sidebar .text-cyan-200\/70,
   .control-tower-sidebar .text-cyan-100\/90 {
-    color: rgba(185, 28, 28, 0.66) !important;
+    color: rgba(8, 145, 178, 0.72) !important;
   }
 
   .control-tower-sidebar .text-gray-200 {
@@ -3250,7 +3264,7 @@ body {
 
 .realtime-kpi-strip {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   border-bottom: 1px solid rgba(203, 213, 225, 0.85);
   background: #fff;
 }
@@ -4990,6 +5004,13 @@ body {
 .wellbore-schema-figure[data-animation='low'] .wellbore-flow-particle { opacity: 0.72; }
 .wellbore-schema-figure[data-animation='medium'] .wellbore-flow-particle { opacity: 0.86; }
 .wellbore-schema-figure[data-animation='high'] .wellbore-flow-particle { opacity: 1; }
+
+/* Condition-aware wellhead: pulsing pump LED while circulating, subtle
+   motion chevrons while tripping. Static (no animation) when 停泵/关井. */
+@keyframes wellborePumpPulse { 0%, 100% { opacity: 1; r: 2.6; } 50% { opacity: 0.45; r: 2.2; } }
+.wellbore-pump-dot { animation: wellborePumpPulse 1.6s ease-in-out infinite; }
+@keyframes wellboreTripPulse { 0%, 100% { transform: translateY(0); opacity: 0.9; } 50% { transform: translateY(-2px); opacity: 0.5; } }
+.wellbore-trip-chevron { animation: wellboreTripPulse 1.4s ease-in-out infinite; }
 
 
 .event-projection-lanes { flex: 0 0 auto; margin-top: 6px; overflow: hidden; border: 1px solid #cbd5e1; border-radius: 7px; background: #f8fafc; font-size: 10px; color: #334155; }

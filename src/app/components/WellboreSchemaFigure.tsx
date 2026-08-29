@@ -245,8 +245,42 @@ function OpenHole({ model, g }: { model: WellboreSimulationModel; g: Geometry })
   );
 }
 
-function Surface({ g }: { g: Geometry }) {
-  return <g aria-label="井口简化示意"><path d={`M ${g.centerX - 66} ${g.top} H ${g.centerX + 66}`} stroke="#94a3b8" strokeWidth="1.1" /><rect x={g.centerX - 18} y={g.top - 8} width="36" height="8" rx="1.5" fill="#e2e8f0" stroke="#64748b" /></g>;
+function SurfaceEquipment({ g, compact, pumpRunning, pumpStopped, shutIn, tripping, hasSamples }: { g: Geometry; compact: boolean; pumpRunning: boolean; pumpStopped: boolean; shutIn: boolean; tripping: boolean; hasSamples: boolean }) {
+  const fontSize = compact ? '12.5' : '8.6';
+  const pumpX = g.centerX - 122;
+  const pumpY = g.top - 21;
+  const showPump = hasSamples;
+  return (
+    <g aria-label="井口设备与工况">
+      <path d={`M ${g.centerX - 66} ${g.top} H ${g.centerX + 66}`} stroke="#94a3b8" strokeWidth="1.1" />
+      <rect x={g.centerX - 18} y={g.top - 8} width="36" height="8" rx="1.5" fill="#e2e8f0" stroke="#64748b" />
+      {/* Mud pump badge: colour follows the declared 工况, not the alarm level. */}
+      {showPump ? (
+        <g aria-label={pumpRunning ? '泵运行' : '停泵'}>
+          <path d={`M ${pumpX + 34} ${g.top - 5} H ${g.centerX - 20}`} stroke={pumpRunning ? '#059669' : '#94a3b8'} strokeWidth="1.2" strokeDasharray={pumpRunning ? undefined : '4 3'} />
+          <rect x={pumpX} y={pumpY} width="34" height="15" rx="2.5" fill={pumpRunning ? '#ecfdf5' : '#f1f5f9'} stroke={pumpRunning ? '#059669' : '#94a3b8'} strokeWidth="1.1" />
+          <circle cx={pumpX + 7} cy={pumpY + 7.5} r="2.6" fill={pumpRunning ? '#10b981' : '#cbd5e1'} className={pumpRunning ? 'wellbore-pump-dot' : undefined} />
+          <text x={pumpX + 14} y={pumpY + 11.5} fill={pumpRunning ? '#047857' : '#64748b'} fontSize={fontSize} fontWeight="800">{pumpStopped ? '停泵' : '泵'}</text>
+        </g>
+      ) : null}
+      {/* Shut-in: BOP rams closed around the pipe. */}
+      {shutIn ? (
+        <g aria-label="关井·防喷器关闭">
+          <rect x={g.centerX - 30} y={g.top + 3} width="22" height="6" rx="1.5" fill="#dc2626" opacity="0.9" />
+          <rect x={g.centerX + 8} y={g.top + 3} width="22" height="6" rx="1.5" fill="#dc2626" opacity="0.9" />
+          <text x={g.centerX + 36} y={g.top + 10} fill="#b91c1c" fontSize={fontSize} fontWeight="800">关井</text>
+        </g>
+      ) : null}
+      {/* Trip / connection: pipe is moving, marker above the wellhead. */}
+      {tripping ? (
+        <g aria-label="起下钻作业" fontFamily="Microsoft YaHei, PingFang SC, Arial">
+          <path d={`M ${g.centerX - 6} ${g.top - 26} L ${g.centerX} ${g.top - 33} L ${g.centerX + 6} ${g.top - 26}`} fill="none" stroke="#b45309" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="wellbore-trip-chevron" />
+          <path d={`M ${g.centerX - 6} ${g.top - 14} L ${g.centerX} ${g.top - 21} L ${g.centerX + 6} ${g.top - 14}`} fill="none" stroke="#b45309" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity="0.55" className="wellbore-trip-chevron" />
+          <text x={g.centerX + 36} y={g.top - 8} fill="#b45309" fontSize={fontSize} fontWeight="800">起下钻</text>
+        </g>
+      ) : null}
+    </g>
+  );
 }
 
 function DrillString({ model, g, id }: { model: WellboreSimulationModel; g: Geometry; id: string }) {
@@ -295,7 +329,7 @@ function BitHydraulics({ model, g, level }: { model: WellboreSimulationModel; g:
   );
 }
 
-function Flow({ model, g, level, id, visual }: { model: WellboreSimulationModel; g: Geometry; level: BackendLevel; id: string; visual: WellboreVisualState }) {
+function Flow({ model, g, level, id, visual, circulation, pumpStopped }: { model: WellboreSimulationModel; g: Geometry; level: BackendLevel; id: string; visual: WellboreVisualState; circulation: boolean; pumpStopped: boolean }) {
   const bitY = yOf(model.bitDepth, model, g);
   const localization = model.influxLocalization;
   const sourceDepth = (localization.fromDepth + localization.toDepth) / 2;
@@ -356,17 +390,30 @@ function Flow({ model, g, level, id, visual }: { model: WellboreSimulationModel;
   );
   return (
     <g aria-label="钻柱下行与双侧环空返出闭环">
-      <path className="wellbore-flow-path wellbore-flow-path-drill wellbore-flow-motion-guide" d={drillPath} />
-      <path className={`${returnClass} wellbore-flow-motion-guide`} d={leftPath} opacity={visual.returnFlowOpacity} />
-      <path className={`${returnClass} wellbore-flow-motion-guide`} d={rightPath} opacity={visual.returnFlowOpacity} />
-      <DownSegments />
-      <ReturnSegments side="left" />
-      <ReturnSegments side="right" />
-      <MovingParticle path={drillPath} color={visual.downflowColor} delay="0s" />
-      <MovingParticle path={leftPath} color={visual.returnFlowColor} delay="-0.45s" r={2.05} />
-      <MovingParticle path={leftPath} color={visual.returnFlowColor} delay="-2s" r={1.55} />
-      <MovingParticle path={rightPath} color={visual.returnFlowColor} delay="-1.05s" r={2.05} />
-      <MovingParticle path={rightPath} color={visual.returnFlowColor} delay="-2.6s" r={1.55} />
+      {circulation ? (
+        <g aria-label="循环回路（泵运行时才显示）">
+          <path className="wellbore-flow-path wellbore-flow-path-drill wellbore-flow-motion-guide" d={drillPath} />
+          <path className={`${returnClass} wellbore-flow-motion-guide`} d={leftPath} opacity={visual.returnFlowOpacity} />
+          <path className={`${returnClass} wellbore-flow-motion-guide`} d={rightPath} opacity={visual.returnFlowOpacity} />
+          <DownSegments />
+          <ReturnSegments side="left" />
+          <ReturnSegments side="right" />
+          <MovingParticle path={drillPath} color={visual.downflowColor} delay="0s" />
+          <MovingParticle path={leftPath} color={visual.returnFlowColor} delay="-0.45s" r={2.05} />
+          <MovingParticle path={leftPath} color={visual.returnFlowColor} delay="-2s" r={1.55} />
+          <MovingParticle path={rightPath} color={visual.returnFlowColor} delay="-1.05s" r={2.05} />
+          <MovingParticle path={rightPath} color={visual.returnFlowColor} delay="-2.6s" r={1.55} />
+        </g>
+      ) : (
+        pumpStopped ? (
+          <g aria-label="停泵静态井筒">
+            <path d={annulusPath(model, g, 'left')} fill="none" stroke="#94a3b8" strokeWidth="0.9" strokeDasharray="2 6" opacity="0.4" />
+            <path d={annulusPath(model, g, 'right')} fill="none" stroke="#94a3b8" strokeWidth="0.9" strokeDasharray="2 6" opacity="0.4" />
+          </g>
+        ) : null
+      )}
+      {/* Kick evidence is condition-independent: it must stay visible while the
+          pumps are stopped or shut in. */}
       {level === 1 ? (
         <g aria-label="异常观察带">
           <rect x={leftPhaseX - 5} y={yOf(model.observationDepth - 80, model, g)} width="10" height="28" rx="5" fill="#f97316" opacity="0.1" />
@@ -406,12 +453,17 @@ function EngineeringCallouts({ model, g, compact }: { model: WellboreSimulationM
   const bitY = yOf(model.bitDepth, model, g);
   const tdY = yOf(model.wellDepth, model, g);
   if (compact) {
+    const offBottomGap = model.wellDepth - model.bitDepth;
+    const bitOffBottom = offBottomGap > Math.max(10, model.wellDepth * 0.002);
     return (
       <g className="wellbore-engineering-callouts" fontFamily="Microsoft YaHei, PingFang SC, Arial">
         <path d={`M ${g.centerX + wOf(42, g)} ${shoeY} H ${g.centerX + 66}`} stroke="#334155" strokeWidth="1.2" />
         <text x={g.centerX + 70} y={shoeY + 5} fill="#334155" fontSize="13.5" fontWeight="800">套管鞋 {Math.round(model.casingShoeDepth)} m</text>
         <path d={`M ${g.centerX - wOf(18, g)} ${bitY} H ${g.centerX - 62}`} stroke="#2563eb" strokeWidth="1.2" />
         <text x={g.centerX - 66} y={bitY + 5} fill="#1d4ed8" fontSize="13.5" fontWeight="800" textAnchor="end">钻头 {Math.round(model.bitDepth)} m</text>
+        {bitOffBottom ? (
+          <text x={g.centerX - 66} y={bitY + 21} fill="#b45309" fontSize="11.5" fontWeight="700" textAnchor="end">离井底 {Math.round(offBottomGap)} m</text>
+        ) : null}
       </g>
     );
   }
@@ -453,9 +505,12 @@ export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, eventTi
   const g = compact ? THUMB : DETAIL;
   const id = compact ? 'thumb' : 'detail';
   const visual = VISUAL_STATES[backendLevel];
-  const showFlow = model.flowState.circulationActive || backendLevel > 0;
+  // Circulation animation follows the declared 工况 only: pump running means
+  // animated loop, 停泵/关井 means a static wellbore. Alarm level never turns
+  // the pumps back on — kick evidence renders on its own layer below.
+  const circulation = model.flowState.circulationActive;
   return (
-    <div className={`wellbore-schema-figure wellbore-schema-figure-${mode}`} data-animation={visual.animationIntensity}>
+    <div className={`wellbore-schema-figure wellbore-schema-figure-${mode}`} data-animation={circulation ? visual.animationIntensity : 'none'}>
       <svg className="wellbore-schema-overlay" viewBox={g.viewBox} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`${TEXT.aria} ${eventTitle || `L${backendLevel} ${model.statusLabel}`}${physicalDescription ? `：${physicalDescription}` : ''}`}>
         <Defs id={id} />
         <defs><marker id={`arrow-critical-${backendLevel}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill={visual.returnFlowColor} /></marker><marker id="arrow-influx" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill="#f97316" /></marker></defs>
@@ -467,10 +522,18 @@ export function WellboreSchemaFigure({ mode = 'thumbnail', backendLevel, eventTi
         <TubularJointMarks model={model} g={g} compact={compact} />
         <OpenHole model={model} g={g} />
         <FluidColumn model={model} g={g} id={id} level={backendLevel} />
-        <Surface g={g} />
+        <SurfaceEquipment
+          g={g}
+          compact={compact}
+          pumpRunning={circulation}
+          pumpStopped={model.flowState.pumpStopped}
+          shutIn={model.flowState.shutIn}
+          tripping={model.flowState.tripping}
+          hasSamples={hasSamples}
+        />
         <DrillString model={model} g={g} id={id} />
-        {showFlow ? <BitHydraulics model={model} g={g} level={backendLevel} /> : null}
-        {showFlow ? <Flow model={model} g={g} level={backendLevel} id={id} visual={visual} /> : null}
+        {circulation ? <BitHydraulics model={model} g={g} level={backendLevel} /> : null}
+        <Flow model={model} g={g} level={backendLevel} id={id} visual={visual} circulation={circulation} pumpStopped={model.flowState.pumpStopped} />
         <EngineeringCallouts model={model} g={g} compact={compact} />
       </svg>
     </div>

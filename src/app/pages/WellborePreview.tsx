@@ -17,15 +17,25 @@ function toLevel(value: string | null): BackendLevel {
   return ([0, 1, 2, 3, 4].includes(parsed) ? parsed : 3) as BackendLevel;
 }
 
-function previewData(level: BackendLevel) {
+type PreviewCondition = 'drilling' | 'stoppump' | 'shutin' | 'trip';
+
+const CONDITION_LABELS: Record<PreviewCondition, string> = {
+  drilling: '钻进循环',
+  stoppump: '停泵观察',
+  shutin: '关井持压',
+  trip: '起下钻循环',
+};
+
+function toCondition(value: string | null): PreviewCondition {
+  return value === 'stoppump' || value === 'shutin' || value === 'trip' ? value : 'drilling';
+}
+
+function previewData(level: BackendLevel, condition: PreviewCondition) {
   const activeSignals = level >= 2 ? ['OutletIncreaseResidual', 'pit_gain', 'pit_volume', 'total_gas', 'casing_pressure'] : level === 1 ? ['OutletIncreaseResidual'] : [];
   const presentation = operatorEventPresentation({ publicLevel: level, activeSignals }, level);
-  return {
+  const base = {
     wellDepth: 4200,
-    bitDepth: 4160,
-    flowIn: 32.4,
     flowOut: level >= 2 ? 38.8 : level === 1 ? 34.1 : 32.2,
-    spm: 62,
     casingPressure: level >= 2 ? 4.6 : 1.1,
     spp: level >= 2 ? 13.7 : 15.2,
     pitGain: level >= 2 ? 1.86 : level === 1 ? 0.42 : 0.04,
@@ -35,14 +45,26 @@ function previewData(level: BackendLevel) {
     activeSignals,
     eventTitle: presentation.title,
     physicalDescription: presentation.description,
-    condition: level >= 2 ? '循环异常' : level === 1 ? '循环观察' : '稳定监测',
   };
+  // Flow and hydraulics must agree with the declared 工况: 停泵/关井 carry no
+  // pump rate, a trip keeps the bit off bottom.
+  if (condition === 'stoppump') {
+    return { ...base, bitDepth: 4160, flowIn: 0, flowOut: 0.2, spm: 0, casingPressure: level >= 2 ? 3.2 : 0.6, spp: level >= 2 ? 6.1 : 4.8, pitGain: base.pitGain * 0.5, pumpState: 'stopped', condition: '停泵观察' };
+  }
+  if (condition === 'shutin') {
+    return { ...base, bitDepth: 4160, flowIn: 0, flowOut: 0, spm: 0, casingPressure: level >= 2 ? 7.4 : 4.2, spp: 0, pumpState: 'stopped', condition: '关井持压' };
+  }
+  if (condition === 'trip') {
+    return { ...base, bitDepth: 3120, flowIn: 18.5, flowOut: level >= 2 ? 21.4 : 18.8, spm: 32, casingPressure: level >= 2 ? 3.4 : 1.0, pumpState: 'running', condition: '起下钻循环' };
+  }
+  return { ...base, bitDepth: 4160, flowIn: 32.4, spm: 62, pumpState: 'running', condition: level >= 2 ? '循环异常' : level === 1 ? '循环观察' : '钻进循环' };
 }
 
 export default function WellborePreview() {
   const [searchParams, setSearchParams] = useSearchParams();
   const level = toLevel(searchParams.get('level'));
-  const data = previewData(level);
+  const condition = toCondition(searchParams.get('condition'));
+  const data = previewData(level, condition);
   const abnormal = level >= 2;
   const watch = level === 1;
   const deltaQ = data.flowOut - data.flowIn;
@@ -71,7 +93,8 @@ export default function WellborePreview() {
         { label: '记录', value: '保留当前正常循环基线', tone: 'normal' },
       ];
 
-  const setLevel = (next: BackendLevel) => setSearchParams({ level: String(next) });
+  const setLevel = (next: BackendLevel) => setSearchParams({ level: String(next), condition });
+  const setCondition = (next: PreviewCondition) => setSearchParams({ level: String(level), condition: next });
 
   return (
     <main className="wellbore-preview-page">
@@ -87,6 +110,13 @@ export default function WellborePreview() {
           {([0, 1, 2, 3, 4] as BackendLevel[]).map((item) => (
             <button key={item} type="button" className={item === level ? 'is-active' : ''} onClick={() => setLevel(item)}>
               L{item}
+            </button>
+          ))}
+        </div>
+        <div className="wellbore-preview-levels" aria-label="切换作业工况">
+          {(Object.keys(CONDITION_LABELS) as PreviewCondition[]).map((item) => (
+            <button key={item} type="button" className={item === condition ? 'is-active' : ''} onClick={() => setCondition(item)}>
+              {CONDITION_LABELS[item]}
             </button>
           ))}
         </div>
@@ -117,7 +147,7 @@ export default function WellborePreview() {
             gasColumnBottomDepth={abnormal ? 4080 : undefined}
             gasFraction={abnormal ? (level >= 4 ? 0.48 : level === 3 ? 0.34 : 0.2) : undefined}
             activeSignals={data.activeSignals}
-            pumpState="running"
+            pumpState={data.pumpState}
             condition={data.condition}
             hasSamples
           />
