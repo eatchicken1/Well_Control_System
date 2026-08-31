@@ -168,7 +168,7 @@ export const TREND_CHANNELS: TrendChannelMeta[] = [
   { key: 'inletFlow', label: '入口流量', unit: 'L/s', color: '#059669', precision: 2, family: 'fluid' },
 ];
 
-export type ChannelDeviation = 'none' | 'mild' | 'moderate' | 'strong';
+export type ChannelDeviation = 'not_evaluable' | 'none' | 'mild' | 'moderate' | 'strong';
 
 export interface ChannelStat {
   meta: TrendChannelMeta;
@@ -212,13 +212,14 @@ export function buildChannelStats(
     const deltaAbs = null;
     const deltaPct = null;
     const direction = 'flat' as const;
-    const deviation: ChannelDeviation = 'none';
+    const deviation: ChannelDeviation = 'not_evaluable';
     const strengthPct = 0;
     return { meta, series, baseline, current, deltaAbs, deltaPct, direction, deviation, strengthPct, min, max };
   });
 }
 
 export const DEVIATION_LABEL: Record<ChannelDeviation, string> = {
+  not_evaluable: '未评估',
   none: '未偏离',
   mild: '轻度偏离',
   moderate: '明显偏离',
@@ -231,6 +232,7 @@ export function formatChannelValue(stat: ChannelStat, value: number | null | und
 }
 
 export function formatDeltaPct(stat: ChannelStat) {
+  if (stat.deviation === 'not_evaluable') return '未评估';
   if (stat.deltaPct == null || stat.direction === 'flat') return '基本持平';
   const arrow = stat.direction === 'up' ? '↑' : '↓';
   return `${arrow} ${Math.abs(stat.deltaPct).toFixed(1)}%`;
@@ -274,6 +276,7 @@ export function buildEvidenceFamilies(stats: ChannelStat[], frame?: WarningEvent
 }
 
 export function familyBadge(deviation: ChannelDeviation) {
+  if (deviation === 'not_evaluable') return { text: '未评估', className: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400' };
   if (deviation === 'strong') return { text: '高度', className: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-200' };
   if (deviation === 'moderate') return { text: '支持', className: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-100' };
   if (deviation === 'mild') return { text: '轻度', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200' };

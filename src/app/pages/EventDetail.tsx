@@ -74,6 +74,9 @@ function statusBadgeInfo(event: WarningEventReviewItem) {
 }
 
 function DeltaBadge({ stat }: { stat: ChannelStat }) {
+  if (stat.deviation === 'not_evaluable') {
+    return <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">未评估</span>;
+  }
   if (stat.direction === 'flat' || stat.deltaPct == null) {
     return <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">持平</span>;
   }
@@ -260,7 +263,7 @@ function EvidenceCard({ stat }: { stat: ChannelStat }) {
           <span>{stat.series.length ? trendTimeLabel(stat.series[stat.series.length - 1].time) : ''}</span>
         </div>
       </div>
-      <div className="mt-1.5 text-[11px] ops-muted">证据强度: {DEVIATION_LABEL[stat.deviation]}</div>
+      <div className="mt-1.5 text-[11px] ops-muted">后端证据状态: {DEVIATION_LABEL[stat.deviation]}</div>
     </div>
   );
 }
