@@ -271,7 +271,7 @@ function EvidenceCard({ stat }: { stat: ChannelStat }) {
 
 function buildSuggestions(event: WarningEventReviewItem, stats: ChannelStat[], chain: ChainNode[]) {
   const abnormal = stats
-    .filter((stat) => stat.deviation !== 'none')
+    .filter((stat) => stat.deviation !== 'none' && stat.deviation !== 'not_evaluable')
     .sort((a, b) => Math.abs(b.deltaPct ?? 0) - Math.abs(a.deltaPct ?? 0));
   const suggestions: string[] = [];
   if (isEnded(event)) {
@@ -295,7 +295,7 @@ function buildSuggestions(event: WarningEventReviewItem, stats: ChannelStat[], c
 }
 
 function buildFieldChecks(stats: ChannelStat[]) {
-  const abnormal = stats.filter((stat) => stat.deviation !== 'none');
+  const abnormal = stats.filter((stat) => stat.deviation !== 'none' && stat.deviation !== 'not_evaluable');
   const checks = new Set<string>([
     '确认当前是否在开泵、停泵、接单根、起下钻或关井,排除正常作业引起的参数变化。',
     '核对传感器是否跳变、断线或量程异常,并与现场机械表/池液位记录交叉确认。',
@@ -389,7 +389,7 @@ export default function EventDetail() {
   const stats = useMemo(() => buildChannelStats(detail?.trend, detail?.latestFrame ?? null), [detail?.latestFrame, detail?.trend]);
   const families = useMemo(() => buildEvidenceFamilies(stats, detail?.latestFrame ?? null), [detail?.latestFrame, stats]);
   const abnormalStats = useMemo(
-    () => stats.filter((stat) => stat.deviation !== 'none').sort((a, b) => Math.abs(b.deltaPct ?? 0) - Math.abs(a.deltaPct ?? 0)),
+    () => stats.filter((stat) => stat.deviation !== 'none' && stat.deviation !== 'not_evaluable').sort((a, b) => Math.abs(b.deltaPct ?? 0) - Math.abs(a.deltaPct ?? 0)),
     [stats],
   );
   const chainNodes = useMemo(() => (detail ? buildEvolutionChain(detail) : []), [detail]);
@@ -875,6 +875,7 @@ function EvidenceFamilyBlock({ family }: { family: EvidenceFamily }) {
           </div>
         ))}
         {!family.channels.length && <div className="rounded-xl border border-dashed border-slate-300 p-3 text-sm ops-muted dark:border-slate-700">该证据族当前没有对应的事件趋势通道；证据状态来自后端检测结果。</div>}
+        <div className="lg:col-span-2 text-xs ops-muted">方向：{family.direction} · 持续：{family.persistenceSeconds.toFixed(0)} s · {family.reason}</div>
       </div>
     </Panel>
   );

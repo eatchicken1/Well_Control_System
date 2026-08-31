@@ -163,7 +163,7 @@ export interface TrendChannelMeta {
 export const TREND_CHANNELS: TrendChannelMeta[] = [
   { key: 'standpipePressure', label: '立管压力', unit: 'MPa', color: '#0891b2', precision: 2, family: 'pressure' },
   { key: 'casingPressure', label: '套管压力', unit: 'MPa', color: '#7c3aed', precision: 2, family: 'pressure' },
-  { key: 'outletFlow', label: '出口流量', unit: 'L/s', color: '#2563eb', precision: 2, family: 'fluid' },
+  { key: 'outletFlow', label: '出口流量', unit: '', color: '#2563eb', precision: 2, family: 'fluid' },
   { key: 'pitVolume', label: '总池体积', unit: 'm³', color: '#d97706', precision: 2, family: 'fluid' },
   { key: 'inletFlow', label: '入口流量', unit: 'L/s', color: '#059669', precision: 2, family: 'fluid' },
 ];
@@ -256,6 +256,10 @@ export interface EvidenceFamily {
   /** Strongest member deviation drives the family badge. */
   deviation: ChannelDeviation;
   strengthPct: number;
+  available: boolean;
+  direction: string;
+  persistenceSeconds: number;
+  reason: string;
 }
 
 const FAMILY_TITLES: Record<EvidenceFamilyId, string> = {
@@ -284,10 +288,10 @@ export function buildEvidenceFamilies(stats: ChannelStat[], frame?: WarningEvent
       const channelKeys = FAMILY_CHANNELS[id] || [];
       const channels = stats.filter((stat) => channelKeys.includes(stat.meta.key) && stat.series.length > 0);
       const backend = backendFamilies.find((item) => item.family.toLowerCase() === id);
-      const severity = String(frame?.evidence?.severity || '').toLowerCase();
-      const deviation: ChannelDeviation = severity.includes('multi') || severity.includes('strong') ? 'strong' : backend?.available ? 'moderate' : 'none';
-      const strengthPct = backend?.strength == null ? 0 : Math.round(Math.max(0, Math.min(100, backend.strength * 25)));
-      return { id, title: FAMILY_TITLES[id] || id, channels, deviation, strengthPct };
+      const deviation: ChannelDeviation = backend?.available ? 'moderate' : 'not_evaluable';
+      return { id, title: FAMILY_TITLES[id] || id, channels, deviation, strengthPct: 0,
+        available: backend?.available === true, direction: backend?.direction || 'Unavailable',
+        persistenceSeconds: backend?.persistenceSeconds || 0, reason: backend?.reason || '后端未提供证据评估' };
     })
     .filter((family) => family.channels.length > 0 || backendFamilies.some((item) => item.family.toLowerCase() === family.id));
 }
