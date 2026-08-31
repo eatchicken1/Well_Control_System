@@ -281,7 +281,7 @@ function buildSuggestions(event: WarningEventReviewItem, stats: ChannelStat[], c
     suggestions.push(`当前等级 L${event.currentLevel},现场应:${BACKEND_LEVEL_META[safeLevel(event.currentLevel)].action}。`);
   }
   const checks: string[] = [];
-  if (abnormal.some((stat) => stat.meta.key === 'outletFlow')) checks.push('对比入口排量与出口流量,确认差值是否持续扩大,并排除泵排量调整的影响。');
+  if (abnormal.some((stat) => stat.meta.key === 'outletFlow')) checks.push('复核后端出口流量证据及其质量状态，确认该证据在当前工况下可解释。');
   if (abnormal.some((stat) => stat.meta.key === 'pitVolume')) checks.push('核对活动池液位与补充量、转浆记录,确认池体积增量真实。');
   if (abnormal.some((stat) => stat.meta.family === 'pressure')) checks.push('核对泵冲、排量与立压/套压表读数,排除设备操作造成的压力变化。');
   if (chain.length >= 2 && chain[chain.length - 1].level > chain[0].level) checks.push('事件等级已升级,建议通知值班干部并做好关井准备。');
@@ -296,7 +296,7 @@ function buildFieldChecks(stats: ChannelStat[]) {
     '确认当前是否在开泵、停泵、接单根、起下钻或关井,排除正常作业引起的参数变化。',
     '核对传感器是否跳变、断线或量程异常,并与现场机械表/池液位记录交叉确认。',
   ]);
-  if (abnormal.some((stat) => stat.meta.key === 'outletFlow')) checks.add('对比入口排量与出口流量,确认差值是否连续扩大。');
+  if (abnormal.some((stat) => stat.meta.key === 'outletFlow')) checks.add('复核后端出口流量证据及其质量状态，确认该证据在当前工况下可解释。');
   if (abnormal.some((stat) => stat.meta.key === 'pitVolume')) checks.add('核对活动池液位、补充量和转浆记录,确认池增量是否真实。');
   if (abnormal.some((stat) => stat.meta.family === 'pressure')) checks.add('核对泵冲、排量、节流状态和立压/套压表,排除设备操作造成的压力变化。');
   return [...checks];
@@ -383,7 +383,7 @@ export default function EventDetail() {
   }, [eventId, ended, load]);
 
   const stats = useMemo(() => buildChannelStats(detail?.trend, detail?.latestFrame ?? null), [detail?.latestFrame, detail?.trend]);
-  const families = useMemo(() => buildEvidenceFamilies(stats), [stats]);
+  const families = useMemo(() => buildEvidenceFamilies(stats, detail?.latestFrame ?? null), [detail?.latestFrame, stats]);
   const abnormalStats = useMemo(
     () => stats.filter((stat) => stat.deviation !== 'none').sort((a, b) => Math.abs(b.deltaPct ?? 0) - Math.abs(a.deltaPct ?? 0)),
     [stats],

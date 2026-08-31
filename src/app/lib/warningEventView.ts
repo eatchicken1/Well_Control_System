@@ -124,7 +124,7 @@ function signalParameters(signal: string) {
   return [...new Set(parameters)];
 }
 
-export function abnormalParameters(signals: string[], frame?: WarningEventLatestFrame | null) {
+export function abnormalParameters(signals: string[], _frame?: WarningEventLatestFrame | null) {
   const byParameter = new Map<string, { parameter: string; direction: string; source: string }>();
   signals.forEach((signal) => {
     if (/unknownproxy|outlet_semantic/i.test(signal)) return;
@@ -134,16 +134,6 @@ export function abnormalParameters(signals: string[], frame?: WarningEventLatest
       if (!previous || previous.direction === 'watch') byParameter.set(parameter, { parameter, direction, source: signal });
     });
   });
-  if (frame?.inletFlow != null && frame?.outletFlow != null) {
-    const difference = frame.outletFlow - frame.inletFlow;
-    if (Math.abs(difference) >= 0.01 && !byParameter.has('出口流量')) {
-      byParameter.set('出口流量', {
-        parameter: '出口流量',
-        direction: difference > 0 ? 'up' : 'down',
-        source: 'inlet_outlet_difference',
-      });
-    }
-  }
   return [...byParameter.values()];
 }
 
@@ -196,15 +186,6 @@ export interface ChannelStat {
   max: number | null;
 }
 
-const BASELINE_WINDOW = 20;
-
-function median(values: number[]) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
 /**
  * The persisted trend covers the event window only, so the leading window is
  * the closest honest approximation of the onset reference ("事件起点参考");
@@ -219,7 +200,7 @@ export function buildChannelStats(
     const series = (trend || [])
       .map((point) => ({ time: point.sampleTime, value: point[meta.key] }))
       .filter((point): point is { time: string; value: number } => typeof point.value === 'number' && Number.isFinite(point.value));
-    const baseline = median(series.slice(0, Math.min(BASELINE_WINDOW, Math.max(3, Math.ceil(series.length * 0.2)))).map((point) => point.value));
+    const baseline = null;
     const frameValue = frame?.[meta.key];
     const current = typeof frameValue === 'number' && Number.isFinite(frameValue)
       ? frameValue
@@ -228,14 +209,11 @@ export function buildChannelStats(
         : null;
     const min = series.length ? Math.min(...series.map((point) => point.value)) : null;
     const max = series.length ? Math.max(...series.map((point) => point.value)) : null;
-    const deltaAbs = baseline != null && current != null ? current - baseline : null;
-    const deltaPct = deltaAbs != null && baseline != null && Math.abs(baseline) > 1e-9
-      ? (deltaAbs / Math.abs(baseline)) * 100
-      : null;
-    const direction = deltaPct == null || Math.abs(deltaPct) < 2 ? 'flat' : deltaPct > 0 ? 'up' : 'down';
-    const magnitude = deltaPct == null ? 0 : Math.abs(deltaPct);
-    const deviation: ChannelDeviation = magnitude >= 25 ? 'strong' : magnitude >= 10 ? 'moderate' : magnitude >= 3 ? 'mild' : 'none';
-    const strengthPct = Math.round(Math.min(96, Math.max(6, magnitude * 2.6)));
+    const deltaAbs = null;
+    const deltaPct = null;
+    const direction = 'flat' as const;
+    const deviation: ChannelDeviation = 'none';
+    const strengthPct = 0;
     return { meta, series, baseline, current, deltaAbs, deltaPct, direction, deviation, strengthPct, min, max };
   });
 }
@@ -278,17 +256,21 @@ const FAMILY_TITLES: Record<EvidenceFamilyId, string> = {
   fluid: '流体证据',
 };
 
-export function buildEvidenceFamilies(stats: ChannelStat[]): EvidenceFamily[] {
-  const ids: EvidenceFamilyId[] = ['pressure', 'fluid'];
-  const rank: Record<ChannelDeviation, number> = { none: 0, mild: 1, moderate: 2, strong: 3 };
+export function buildEvidenceFamilies(stats: ChannelStat[], frame?: WarningEventLatestFrame | null): EvidenceFamily[] {
+  const backendFamilies = frame?.evidence?.families || [];
+  const ids = backendFamilies.length
+    ? backendFamilies.map((item) => item.family.toLowerCase()).filter((id): id is EvidenceFamilyId => id === 'pressure' || id === 'fluid')
+    : [];
   return ids
     .map((id) => {
       const channels = stats.filter((stat) => stat.meta.family === id && stat.series.length > 0);
-      const deviation = channels.reduce<ChannelDeviation>((acc, stat) => (rank[stat.deviation] > rank[acc] ? stat.deviation : acc), 'none');
-      const strengthPct = channels.reduce((acc, stat) => Math.max(acc, stat.strengthPct), 0);
-      return { id, title: FAMILY_TITLES[id], channels, deviation, strengthPct };
+      const backend = backendFamilies.find((item) => item.family.toLowerCase() === id);
+      const severity = String(frame?.evidence?.severity || '').toLowerCase();
+      const deviation: ChannelDeviation = severity.includes('multi') || severity.includes('strong') ? 'strong' : backend?.available ? 'moderate' : 'none';
+      const strengthPct = backend?.strength == null ? 0 : Math.round(Math.max(0, Math.min(100, backend.strength * 25)));
+      return { id, title: FAMILY_TITLES[id] || id, channels, deviation, strengthPct };
     })
-    .filter((family) => family.channels.length > 0);
+    .filter((family) => family.channels.length > 0 || backendFamilies.some((item) => item.family.toLowerCase() === family.id));
 }
 
 export function familyBadge(deviation: ChannelDeviation) {

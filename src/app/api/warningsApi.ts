@@ -56,6 +56,11 @@ export interface WarningEventLatestFrame {
   casingPressure?: number | null;
   bitDepth?: number | null;
   wellDepth?: number | null;
+  absoluteFlowBalanceAllowed?: boolean;
+  flowBalance?: { evaluable: boolean; deltaFlowSi?: number | null; unit?: string; reason?: string };
+  evidence?: { severity?: string; primaryHypothesis?: string; families?: Array<{ family: string; strength?: number | null; direction?: string; available: boolean; independentObservationCount: number; persistenceSeconds: number; reason: string }>; supportingSignals?: string[]; missingObservations?: string[] };
+  hardEvidence?: { level: number; signatures?: string[]; reason?: string };
+  qualification?: { outletHealth?: string; continuity?: string; pumpRateRegime?: string; reason?: string };
 }
 
 export interface WarningEventLifecycleLog {
