@@ -194,9 +194,14 @@ export interface ChannelStat {
  */
 export function buildChannelStats(
   trend: WarningEventTrendPoint[] | undefined,
-  frame?: Partial<Record<TrendChannelKey, number | null>> | null,
+  frame?: (Partial<Record<TrendChannelKey, number | null>> & Pick<WarningEventLatestFrame, 'outletUnit' | 'inletUnit'>) | null,
 ): ChannelStat[] {
-  return TREND_CHANNELS.map((meta) => {
+  return TREND_CHANNELS.map((baseMeta) => {
+    const meta = baseMeta.key === 'outletFlow' && frame?.outletUnit
+      ? { ...baseMeta, unit: frame.outletUnit }
+      : baseMeta.key === 'inletFlow' && frame?.inletUnit
+        ? { ...baseMeta, unit: frame.inletUnit }
+        : baseMeta;
     const series = (trend || [])
       .map((point) => ({ time: point.sampleTime, value: point[meta.key] }))
       .filter((point): point is { time: string; value: number } => typeof point.value === 'number' && Number.isFinite(point.value));
@@ -242,7 +247,7 @@ export function formatDeltaPct(stat: ChannelStat) {
 /* Evidence families                                                   */
 /* ------------------------------------------------------------------ */
 
-export type EvidenceFamilyId = 'pressure' | 'fluid';
+export type EvidenceFamilyId = 'pressure' | 'pitinventory' | 'outletreturn' | 'fluidcomposition' | 'mechanical' | 'pumpboundary' | 'surfaceoperation' | 'sensorquality' | 'causalclosure';
 
 export interface EvidenceFamily {
   id: EvidenceFamilyId;
@@ -255,17 +260,29 @@ export interface EvidenceFamily {
 
 const FAMILY_TITLES: Record<EvidenceFamilyId, string> = {
   pressure: '压力证据',
-  fluid: '流体证据',
+  pitinventory: '池量库存证据',
+  outletreturn: '出口返流证据',
+  fluidcomposition: '流体组分证据',
+  mechanical: '机械响应证据',
+  pumpboundary: '泵边界证据',
+  surfaceoperation: '地面作业证据',
+  sensorquality: '传感器质量证据',
+  causalclosure: '因果闭合证据',
+};
+
+const FAMILY_CHANNELS: Partial<Record<EvidenceFamilyId, TrendChannelKey[]>> = {
+  pressure: ['standpipePressure', 'casingPressure'],
+  pitinventory: ['pitVolume'],
+  outletreturn: ['outletFlow'],
 };
 
 export function buildEvidenceFamilies(stats: ChannelStat[], frame?: WarningEventLatestFrame | null): EvidenceFamily[] {
   const backendFamilies = frame?.evidence?.families || [];
-  const ids = backendFamilies.length
-    ? backendFamilies.map((item) => item.family.toLowerCase()).filter((id): id is EvidenceFamilyId => id === 'pressure' || id === 'fluid')
-    : [];
+  const ids = backendFamilies.map((item) => item.family.toLowerCase()).filter((id): id is EvidenceFamilyId => id in FAMILY_TITLES);
   return ids
     .map((id) => {
-      const channels = stats.filter((stat) => stat.meta.family === id && stat.series.length > 0);
+      const channelKeys = FAMILY_CHANNELS[id] || [];
+      const channels = stats.filter((stat) => channelKeys.includes(stat.meta.key) && stat.series.length > 0);
       const backend = backendFamilies.find((item) => item.family.toLowerCase() === id);
       const severity = String(frame?.evidence?.severity || '').toLowerCase();
       const deviation: ChannelDeviation = severity.includes('multi') || severity.includes('strong') ? 'strong' : backend?.available ? 'moderate' : 'none';

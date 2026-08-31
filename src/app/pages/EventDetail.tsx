@@ -63,7 +63,8 @@ const TABS: Array<{ id: TabId; label: string }> = [
 
 const FAMILY_ICONS = {
   pressure: Gauge,
-  fluid: Waves,
+  pitinventory: Waves,
+  outletreturn: Waves,
 } as const;
 
 function statusBadgeInfo(event: WarningEventReviewItem) {
@@ -851,10 +852,10 @@ export default function EventDetail() {
 }
 
 function EvidenceFamilyBlock({ family }: { family: EvidenceFamily }) {
-  const Icon = FAMILY_ICONS[family.id];
+  const Icon = FAMILY_ICONS[family.id as keyof typeof FAMILY_ICONS] || Activity;
   const badge = familyBadge(family.deviation);
   return (
-    <Panel title={`${family.title}链路`} icon={Icon} subtitle="当前 vs 事件起点" actions={<span className={`rounded px-2 py-0.5 text-xs font-semibold ${badge.className}`}>{badge.text}</span>}>
+    <Panel title={`${family.title}链路`} icon={Icon} subtitle="后端权威证据投影" actions={<span className={`rounded px-2 py-0.5 text-xs font-semibold ${badge.className}`}>{badge.text}</span>}>
       <div className="grid gap-3 lg:grid-cols-2">
         {family.channels.map((stat) => (
           <div key={stat.meta.key} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
@@ -870,9 +871,10 @@ function EvidenceFamilyBlock({ family }: { family: EvidenceFamily }) {
               </div>
             </div>
             <div className="mt-2"><ChannelTrendChart stat={stat} height={170} /></div>
-            <div className="mt-1 text-[11px] ops-muted">证据强度:{DEVIATION_LABEL[stat.deviation]} · 事件起点 {formatChannelValue(stat, stat.baseline)}</div>
+            <div className="mt-1 text-[11px] ops-muted">原始事件窗口趋势；异常结论以本卡片的后端证据状态为准。</div>
           </div>
         ))}
+        {!family.channels.length && <div className="rounded-xl border border-dashed border-slate-300 p-3 text-sm ops-muted dark:border-slate-700">该证据族当前没有对应的事件趋势通道；证据状态来自后端检测结果。</div>}
       </div>
     </Panel>
   );
